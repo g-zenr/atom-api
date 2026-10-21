@@ -1,0 +1,34 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // ---------------------------------------------------------------------------
+  // Example of a personal, per-clone OpenCode override.
+  // ---------------------------------------------------------------------------
+  // Copy this file to `.opencode/opencode.jsonc` and edit it. The copy is
+  // git-ignored, so your model choice, your extra instructions and your own
+  // permission tweaks stay on your machine.
+  //
+  // `.opencode/opencode.jsonc` takes precedence over the committed
+  // `opencode.jsonc` in the repository root. This was verified against the
+  // installed OpenCode CLI with `opencode debug config`.
+  //
+  // The full override ladder - including the machine-wide
+  // `~/.config/opencode/opencode.jsonc` and the one-off
+  // `opencode run --model ...` - is in `docs/contributing-opencode.md`.
+  //
+  // Nothing secret belongs in this file. Provider credentials belong in the
+  // environment or in OpenCode's own credential store.
+
+  // Use a different model without touching the shared configuration.
+  "model": "opencode-go/minimax-m3.1-flash-free",
+
+  // Add extra ambient instructions for this clone only.
+  // "instructions": ["AGENTS.md", "docs/contributing-opencode.md"],
+
+  // Tighten a permission for this clone only. Rules are ordered and the last
+  // matching rule wins, so put the broad rule first.
+  // "permissions": [
+  //   { "action": "shell", "resource": "*", "effect": "allow" },
+  //   { "action": "shell", "resource": "cargo publish *", "effect": "deny" }
+  // ]
+}

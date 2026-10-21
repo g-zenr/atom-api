@@ -1,0 +1,104 @@
+name: CI
+
+# The base quality gate for every pull request. It mirrors `make check`
+# locally: formatting, linting with warnings denied, and the full test suite
+# against a real PostgreSQL instance.
+#
+# No hosted or paid service is required.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  check:
+    name: Format, lint and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: atom
+          POSTGRES_PASSWORD: atom
+          POSTGRES_DB: atom
+          POSTGRES_MULTIPLE_DATABASES: atom_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U atom -d atom"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://atom:atom@127.0.0.1:5432/atom
+      TEST_DATABASE_URL: postgres://atom:atom@127.0.0.1:5432/atom_test
+      APP_JWT_SECRET: ci-only-signing-secret-of-at-least-32-bytes
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install the Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache the Cargo registry and build directory
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Fetch the dependencies
+        run: cargo fetch --locked
+
+      - name: Check the formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --all-targets --locked
+
+      - name: Build the release profile
+        run: cargo build --release --locked
+
+      - name: Check the documentation tree
+        run: cargo run --quiet --bin atom-docs
+
+  opencode:
+    name: Validate the OpenCode configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install the OpenCode CLI
+        # The configuration targets the OpenCode v2 schema. Pin the major
+        # version so that a future release cannot silently change the meaning
+        # of a setting.
+        run: npm install -g "@opencode/cli@2"
+
+      - name: Validate the configuration
+        # The model check is skipped: CI has no provider credentials.
+        run: ./scripts/validate-opencode.sh --skip-model-check

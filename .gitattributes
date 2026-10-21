@@ -1,0 +1,41 @@
+# Normalise line endings so that a checkout is identical on every platform.
+#
+# The project is developed on Windows and deployed on Linux. Without this file
+# Git converts LF to CRLF in the working tree on Windows, which produces noisy
+# diffs and breaks the shell scripts.
+#
+# The default is LF for everything. The exceptions are the formats that are
+# conventionally CRLF.
+
+* text=auto eol=lf
+
+# Shell scripts must keep LF: a CRLF shebang does not run on Unix.
+*.sh text eol=lf
+
+# Windows-only tooling.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Everything else is normalised to LF.
+*.rs text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.sql text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.jsonc text eol=lf
+*.example text eol=lf
+Makefile text eol=lf
+Dockerfile text eol=lf
+
+# Binary files must never be converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary

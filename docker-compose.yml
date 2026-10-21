@@ -1,0 +1,45 @@
+# Local development services for ATOM.
+#
+# This file brings up PostgreSQL for local development and for the integration
+# test suite. It does NOT build an application image: the API runs from the
+# source tree with `cargo run`.
+#
+#   docker compose up -d postgres
+#   docker compose ps
+#   docker compose down            # stop, keep the data
+#   docker compose down -v         # stop and delete the data
+#
+# The credentials here match `.env.example` and are for local development only.
+
+name: atom
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: atom-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: atom
+      POSTGRES_PASSWORD: atom
+      POSTGRES_DB: atom
+      # The integration suite needs a second, disposable database.
+      POSTGRES_MULTIPLE_DATABASES: atom_test
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - atom-postgres-data:/var/lib/postgresql/data
+      - ./scripts/create-test-database.sh:/docker-entrypoint-initdb.d/10-create-test-database.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atom -d atom"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    command:
+      - postgres
+      - -c
+      - max_connections=100
+
+volumes:
+  atom-postgres-data:
+    name: atom-postgres-data

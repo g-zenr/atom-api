@@ -1,0 +1,152 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // ---------------------------------------------------------------------------
+  // Default model
+  // ---------------------------------------------------------------------------
+  // `opencode-go/minimax-m3.1-flash-free` is the verified free-tier model of
+  // the OpenCode Go provider. It was confirmed to answer, call tools and
+  // launch subagents with OpenCode v2.0.27.
+  //
+  // Do NOT edit this line to change the model for your own machine: put the
+  // override in `.opencode/opencode.jsonc` (git-ignored) instead. See
+  // `docs/contributing.md` for the full override ladder.
+  "model": "opencode-go/minimax-m3.1-flash-free",
+
+  // The orchestrator is the only primary agent of the project team. Everything
+  // else is a subagent that the orchestrator launches.
+  "default_agent": "orchestrator",
+
+  // ---------------------------------------------------------------------------
+  // Permissions
+  // ---------------------------------------------------------------------------
+  // Rules are evaluated in order and the LAST matching rule wins. Broad rules
+  // come first, narrow exceptions after.
+  //
+  // The goal: routine local development (reading, editing, formatting, linting,
+  // testing, building, inspecting Git) runs without a prompt. Anything with a
+  // material external consequence asks first. A small set of destructive
+  // operations is denied outright.
+  "permissions": [
+    // --- Baseline: ordinary local development is autonomous ---------------
+    { "action": "read", "resource": "*", "effect": "allow" },
+    { "action": "glob", "resource": "*", "effect": "allow" },
+    { "action": "grep", "resource": "*", "effect": "allow" },
+    { "action": "edit", "resource": "*", "effect": "allow" },
+    { "action": "shell", "resource": "*", "effect": "allow" },
+
+    // --- Secrets -----------------------------------------------------------
+    // Reading a real environment file needs a human decision; the committed
+    // template stays freely readable.
+    { "action": "read", "resource": "*.env", "effect": "ask" },
+    { "action": "read", "resource": "*.env.*", "effect": "ask" },
+    { "action": "read", "resource": "*.env.example", "effect": "allow" },
+    { "action": "read", "resource": "**/.ssh/**", "effect": "deny" },
+    { "action": "read", "resource": "**/*.pem", "effect": "deny" },
+    { "action": "read", "resource": "**/*.key", "effect": "deny" },
+    { "action": "read", "resource": "**/id_rsa*", "effect": "deny" },
+    { "action": "read", "resource": "**/credentials.json", "effect": "deny" },
+    { "action": "read", "resource": "**/secrets/**", "effect": "deny" },
+    { "action": "edit", "resource": "**/.ssh/**", "effect": "deny" },
+
+    // --- Outside the repository -------------------------------------------
+    // Reading or writing outside the project asks first.
+    { "action": "external_directory", "resource": "*", "effect": "ask" },
+
+    // --- Consequential Git operations -------------------------------------
+    // History rewriting and force pushes are hard-blocked; ordinary pushes,
+    // resets and branch deletion ask first because they can lose work.
+    { "action": "shell", "resource": "git push --force *", "effect": "deny" },
+    { "action": "shell", "resource": "git push * --force *", "effect": "deny" },
+    { "action": "shell", "resource": "git push * --delete *", "effect": "deny" },
+    { "action": "shell", "resource": "git remote remove *", "effect": "deny" },
+    { "action": "shell", "resource": "git clean -fdx*", "effect": "deny" },
+    { "action": "shell", "resource": "rm -rf ~*", "effect": "deny" },
+    { "action": "shell", "resource": "rm -rf /*", "effect": "deny" },
+    { "action": "shell", "resource": "git push *", "effect": "ask" },
+    { "action": "shell", "resource": "git reset --hard *", "effect": "ask" },
+    { "action": "shell", "resource": "git clean *", "effect": "ask" },
+    { "action": "shell", "resource": "git checkout -- *", "effect": "ask" },
+    { "action": "shell", "resource": "git rebase *", "effect": "ask" },
+    { "action": "shell", "resource": "git branch -D *", "effect": "ask" },
+
+    // --- Publication, deployment and databases ----------------------------
+    { "action": "shell", "resource": "cargo publish *", "effect": "ask" },
+    { "action": "shell", "resource": "npm publish *", "effect": "ask" },
+    { "action": "shell", "resource": "docker push *", "effect": "ask" },
+    { "action": "shell", "resource": "gh release create *", "effect": "ask" },
+    { "action": "shell", "resource": "gh repo delete *", "effect": "deny" },
+    { "action": "shell", "resource": "kubectl apply *", "effect": "ask" },
+    { "action": "shell", "resource": "kubectl delete *", "effect": "ask" },
+    { "action": "shell", "resource": "terraform apply *", "effect": "ask" },
+    { "action": "shell", "resource": "psql *", "effect": "ask" }
+  ],
+
+  // ---------------------------------------------------------------------------
+  // Additional ambient instructions
+  // ---------------------------------------------------------------------------
+  // `AGENTS.md` is discovered automatically; this list adds the contributor
+  // guide, which describes how to work in this repository.
+  "instructions": ["CONTRIBUTING.md"],
+
+  // ---------------------------------------------------------------------------
+  // Tool output limits
+  // ---------------------------------------------------------------------------
+  "tool_output": {
+    "max_lines": 2000,
+    "max_bytes": 51200
+  },
+
+  // ---------------------------------------------------------------------------
+  // Context management
+  // ---------------------------------------------------------------------------
+  "compaction": {
+    "auto": true,
+    "keep": { "tokens": 20000 },
+    "buffer": 10000
+  },
+
+  // ---------------------------------------------------------------------------
+  // Sessions
+  // ---------------------------------------------------------------------------
+  // Session sharing stays off for an open-source repository: a shared session
+  // publishes the conversation, which can contain local paths or credentials.
+  "share": "disabled",
+
+  // ---------------------------------------------------------------------------
+  // Filesystem watcher
+  // ---------------------------------------------------------------------------
+  // Build output and local databases change constantly; watching them wastes
+  // work and produces noisy reloads.
+  "watcher": {
+    "ignore": ["target/**", "**/target/**", ".git/**", "docs/**"]
+  },
+
+  // ---------------------------------------------------------------------------
+  // Experimental
+  // ---------------------------------------------------------------------------
+  // `todo` gives the agents a task tracker for multi-step work.
+  // `subagent_depth: 2` lets a specialist launch one nested helper. The
+  // platform default is 1, which forbids nesting. If a future release removes
+  // this flag the team still works, it simply cannot nest.
+  //
+  // `policies` lives here, not at the top level, because OpenCode v2.0.27
+  // enforces only the `experimental.policies` key. The top-level `policies`
+  // key documented by the current schema is silently ignored by that build.
+  // Both spellings were tested against the installed CLI; see
+  // `docs/contributing-opencode.md`.
+  "experimental": {
+    "todo": true,
+    "subagent_depth": 2,
+    "policies": [
+      { "action": "tool.use", "resource": "shell:git push --force *", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:git push * --force *", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:git push * --delete *", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:rm -rf ~*", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:rm -rf /*", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:gh repo delete *", "effect": "deny" },
+      { "action": "tool.use", "resource": "read:**/.ssh/**", "effect": "deny" },
+      { "action": "tool.use", "resource": "read:**/*.pem", "effect": "deny" }
+    ]
+  }
+}
