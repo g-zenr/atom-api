@@ -56,13 +56,13 @@ the real response. They are the only layer that can prove a SQL predicate, a
 database constraint or a `ON DELETE CASCADE` behaves as documented, and they
 are the layer that proves the HTTP contract.
 
-**Current size:** 30 integration tests in 3 files.
+**Current size:** 53 integration tests in 3 files.
 
 | File | Tests | Covers |
 | ---- | ----- | ------ |
-| [`../../tests/auth_api.rs`](../../tests/auth_api.rs) | 13 | Registration, normalization, duplicate registration, the password policy, login, the generic failure, refresh rotation, refresh reuse, logout, credential enforcement, `/auth/me`, cross-account session revocation. |
+| [`../../tests/auth_api.rs`](../../tests/auth_api.rs) | 26 | Registration, normalization, duplicate registration, the password policy, login, the generic failure, refresh rotation, refresh reuse, logout, credential enforcement, `/auth/me`, cross-account session revocation. |
 | [`../../tests/notes_api.rs`](../../tests/notes_api.rs) | 8 | Note CRUD, cross-account invisibility, the listing scope, search, archiving, an empty title, pagination, a malformed identifier. |
-| [`../../tests/projects_tasks_api.rs`](../../tests/projects_tasks_api.rs) | 9 | Project CRUD, cross-account invisibility, task creation and listing, the completion timestamp, filtering, task isolation through a foreign project, task creation in a foreign project, the project delete cascade, an unknown task status. |
+| [`../../tests/projects_tasks_api.rs`](../../tests/projects_tasks_api.rs) | 19 | Project CRUD, cross-account invisibility, task creation and listing, the completion timestamp, filtering, task isolation through a foreign project, task creation in a foreign project, the project delete cascade, an unknown task status. |
 
 ### 1.3 Contract
 
@@ -88,7 +88,7 @@ There is no separate security test file. The security cases live inside the
 integration files, next to the behaviour they protect, so that a reviewer
 sees them in context.
 
-Ten of the thirty integration tests are dedicated security cases:
+Twenty of the fifty-three integration tests are dedicated security cases:
 
 | Test | File |
 | ---- | ---- |
@@ -247,34 +247,26 @@ This list is a to-do list, not a criticism. Each item is a real gap between
 the requirements in [`../project-truth.md`](../project-truth.md) §13 and the
 suite as it stands.
 
-1. **No HTTP-level test of the rate limiter.** The algorithm is unit tested,
-   but no test drives a real request past the limit and asserts a `429` with a
-   `retry-after` header. Recorded in
-   [`../engineering/known-issues.md`](../engineering/known-issues.md).
-2. **No test of the CORS layer.** Neither the refusal of a `*` origin at
+1. **No test of the CORS layer.** Neither the refusal of a `*` origin at
    start-up nor the rejection of a disallowed origin.
-3. **No test of the request limits.** The 1 MiB body limit, the independent
-   the configured body limit, the configured request timeout and the panic handler are all
-   untested.
-4. **No contract test of the OpenAPI document.** Nothing asserts that the
+2. **No contract test of the OpenAPI document.** Nothing asserts that the
    generated document lists every route, that a documented status code is
    reachable, or that the document can be parsed as OpenAPI.
-5. **No test of the disabled-account path.** The `403` for a disabled account,
-   and the session revocation that follows it, are implemented but untested.
-6. **No test of the refresh-token expiry.** The expiry check exists; nothing
-   asserts that an expired token is rejected.
-7. **No test of the token-issuing configuration.** Nothing asserts that the
+3. **No test of the token-issuing configuration.** Nothing asserts that the
    process refuses to start with a short signing secret, or with the
    documented placeholder in production. Only the validation function is unit
    tested.
-8. **No test of the login timing equalisation.** The dummy verification exists;
-   nothing measures that the two paths take a comparable time.
-9. **No test at the database level of the email constraint.** The normalization
+4. **No test of the login timing equalisation.** The dummy verification exists
+   and uses the configured cost parameters; nothing measures that the two
+   paths take a comparable time.
+5. **No test at the database level of the email constraint.** The normalization
    is proven through the API; the `CHECK` constraint itself is not exercised
    with a direct statement.
-10. **No concurrency, load or soak test.** Nothing exercises two requests for
-    the same account at the same time, or a sustained request rate.
-11. **No fuzzing of the JSON, path and query extractors.**
-12. **No test of the `retry-after` header** on a `429`.
+6. **No concurrency, load or soak test.** The concurrent refresh of the same
+   token is covered, but nothing exercises two requests for the same account
+   at the same time, or a sustained request rate.
+7. **No fuzzing of the JSON, path and query extractors.**
+8. **No test that the health endpoints answer when the database is
+   unreachable.** The degraded branch of the readiness probe is untested.
 13. **No test that the health endpoints answer when the database is
     unreachable.** The degraded branch of the readiness probe is untested.

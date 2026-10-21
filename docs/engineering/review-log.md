@@ -157,7 +157,7 @@ before reading the code, and ran `cargo fmt --all -- --check`,
 | 1 | Medium | Argon2id hashing and verification ran on the Tokio worker thread inside the request path, stalling a worker for the whole hash. ADR-0002 calls this rule load-bearing. | **Fixed.** [`../../src/auth/service.rs`](../../src/auth/service.rs) moves both to `tokio::task::spawn_blocking`. |
 | 2 | Medium | Refresh-token reuse detection was race-prone: two concurrent refreshes of the same token both succeeded, because the read of `revoked_at` and the revoke were separate statements. | **Fixed.** [`../../src/auth/repository.rs`](../../src/auth/repository.rs) gains `claim`, an atomic `UPDATE ... WHERE revoked_at IS NULL`. The loser is treated as a reuse. Covered by `a_concurrent_refresh_of_the_same_token_succeeds_only_once`. |
 | 3 | Medium | The 30-second timeout answered `408` with an empty body, while the published error contract promised the standard envelope. The code and the contract contradicted each other. | **Fixed.** [`../../src/api/mod.rs`](../../src/api/mod.rs) reports the timeout through the envelope, and the timeout is configurable. Covered by `a_slow_request_is_abandoned_with_the_error_envelope`. |
-| 4 | Medium | The OpenAPI document omitted status codes the handlers return: no `400`, no `401` on most private endpoints, no `403` on logout or on a disabled account. | **Fixed.** Every `#[utoipa::path]` now declares the status codes it can produce. |
+| 4 | Medium | The OpenAPI document omitted status codes the handlers return: no `400`, no `401` on most private endpoints, no `403` on logout or on a disabled account. | **Fixed, in three passes.** Every `#[utoipa::path]` now declares the status codes it can produce. The first pass keyed the lists on the path alone; the re-review found the wrong success status and body on the create and delete endpoints; the quality gate found that `login` and `refresh` still omitted `401` and that no endpoint declared `408`. All three are corrected. |
 | 5 | Low | `RefreshSessionRepository::revoke` was not scoped by the owner, so it would revoke any session id it was given. | **Fixed.** The predicate carries `AND user_id = $2`, and ADR-0005 records the lookup exception explicitly. |
 | 6 | Low | The middleware-order comment in `src/api/mod.rs` listed the order backwards. | **Fixed.** The comment now states the effective order. |
 | 7 | Low | `hyper`, `http` and `subtle` were unused; `tower` and `http-body-util` were declared twice. | **Fixed.** [`../../Cargo.toml`](../../Cargo.toml) no longer declares them. |
@@ -239,7 +239,7 @@ The fixes were re-verified with the three quality gates and the full suite:
 | `cargo clippy --all-targets --all-features -- -D warnings` | Passed. |
 | `cargo test --all-targets` | Passed: 39 unit, 26 authentication, 8 notes, 19 projects and tasks. 92 in total. |
 | `cargo run --bin atom-docs` | Passed, no errors and no warnings. |
-| The generated OpenAPI document | 22 operations; every one declares the status codes it can return, with `201` on the creates, `204` and no body on the deletes, and the bearer security scheme registered. |
+| The generated OpenAPI document | 22 operations; every one declares the status codes it can return, with `201` on the creates, `204` and no body on the deletes, `401` on `login` and `refresh`, `408` everywhere, and the bearer security scheme registered. |
 
 #### Remaining risks
 

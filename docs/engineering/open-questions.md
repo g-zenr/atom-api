@@ -127,7 +127,7 @@ listing is ordered by `created_at DESC, id DESC` regardless of the search.
 **Who decides.** The product owner.
 
 **Related.** [`../project-truth.md`](../project-truth.md) §16 Q4;
-[`../features/notes/`](../../src/notes/).
+[`../../src/notes/`](../../src/notes/).
 
 ### Q-05 — Does the future web client need refresh tokens in cookies, and does ATOM need a CSRF strategy?
 

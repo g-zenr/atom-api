@@ -13,7 +13,8 @@ personal knowledge management. This repository is the **Phase 1 backend**.
 ## Status
 
 Phase 1 is **in progress**. The backend foundation is implemented and covered
-by automated tests; the CI pipeline and the container image are not built yet.
+by automated tests, and a CI pipeline runs the quality gates on every change.
+The container image is not built yet.
 The current, evidence-backed state of every feature is in
 [`docs/engineering/implementation-status.md`](docs/engineering/implementation-status.md).
 
@@ -23,7 +24,8 @@ The current, evidence-backed state of every feature is in
 | Notes, projects, tasks | Verified |
 | OpenAPI document and API explorer | Implemented |
 | Health endpoints, structured logging | Implemented |
-| CI pipeline, container image | Not started |
+| CI pipeline | Implemented |
+| Container image | Not started |
 | Everything on the roadmap | Not started, by design |
 
 ## Stack

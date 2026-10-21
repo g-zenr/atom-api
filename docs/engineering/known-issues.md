@@ -158,25 +158,27 @@ together with CI, which is `KI-005`.
 [`../security/threat-model.md`](../security/threat-model.md); requirement
 [`../project-truth.md`](../project-truth.md) §12.
 
-### KI-005 — There is no CI pipeline
+### KI-005 - There is no CI pipeline
 
-**Status:** Open · **Severity:** Medium
+**Status:** Closed (2026-10-22) — **Severity:** Medium
 
-**Description.** The repository contains no CI configuration. The three
-quality gates are run by hand, locally, and are recorded in
-[`change-log.md`](change-log.md). The `Makefile` has a `check` target that
-runs them, and the `Makefile` comment says "this is what CI runs", but nothing
-runs it.
+**Description.** The repository contained no CI configuration. The three
+quality gates were run by hand, locally, and were recorded in
+[`change-log.md`](change-log.md).
 
-**Impact.** Nothing enforces the quality gates on a change. A change can be
-merged with a failing test, a lint warning or an unresolved documentation
-link, and the evidence that it was reviewed does not exist automatically.
+**Impact.** Nothing enforced the quality gates on a change, so a change could
+be merged with a failing test, a lint warning or an unresolved documentation
+link.
 
 **Workaround.** The reviewer and the quality gate run the gates manually and
 record the output, as described in
 [`../testing/verification-policy.md`](../testing/verification-policy.md).
 
-**Remediation status.** Not started. The `devops` specialist owns this area.
+**Resolution.** [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
+runs the formatting check, the lint, the test suite, a release build, the
+documentation check and the OpenCode configuration check on every push and
+pull request. The workflow has not yet run on a GitHub runner, because the
+repository has not been published.
 
 **Related.** Requirement [`../project-truth.md`](../project-truth.md) §13.6;
 `KI-004`; `KI-006`.
@@ -197,7 +199,11 @@ pinned surface than an image.
 **Workaround.** Build the release binary with `cargo build --release` and run
 it with the environment configuration in place.
 
-**Remediation status.** Not started. The `devops` specialist owns this area.
+**Resolution.** [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
+runs the formatting check, the lint, the test suite, a release build, the
+documentation check and the OpenCode configuration check on every push and
+pull request. The workflow has not yet run on a GitHub runner, because the
+repository has not been published.
 
 **Related.** Requirement [`../project-truth.md`](../project-truth.md) §3.
 
@@ -356,13 +362,12 @@ one-line change with no behavioural effect.
 **Description.** The API has no mechanism that counts failed logins per
 account, that locks an account, that detects a credential that appeared in a
 public breach corpus, or that notifies the owner. The only brute-force
-control is the rate limiter, and it is per process, currently shared by every
-caller (`KI-010`).
+control is the rate limiter, and it is per process (`KI-001`).
 
 **Impact.** An offline attack on a leaked password hash is not detected at
 all, and an online attack is bounded only by the rate limit. Because the rate
-limit is currently a single global budget, a sustained attack also locks the
-legitimate owner out.
+limit is per process, a sustained attack also locks the legitimate owner out
+of the process it exhausts.
 
 **Workaround.** A strong, unique password per account, and edge rate limiting
 in front of the API. The password policy already requires 12 characters with
@@ -419,7 +424,7 @@ owner and the maintainer respectively.
 | `KI-002` | No HTTP-level test of the rate limiter | Closed | Medium |
 | `KI-003` | `X-Forwarded-For` is ignored, and nothing replaces it | Open | Medium |
 | `KI-004` | SQLx queries are checked at run time | Open | Low |
-| `KI-005` | There is no CI pipeline | Open | Medium |
+| `KI-005` | There is no CI pipeline | Closed | Medium |
 | `KI-006` | There is no container image for the API | Open | Low |
 | `KI-007` | The refresh token is returned in the response body | Open | Low |
 | `KI-008` | The rate limiter fails open on a poisoned lock | Open | Low |

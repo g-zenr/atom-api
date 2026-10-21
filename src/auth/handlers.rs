@@ -29,6 +29,8 @@ fn meta(headers: &HeaderMap, peer: ClientIp) -> ClientMeta {
     tag = "auth",
     request_body = RegisterRequest,
     responses(
+
+        (status = 408, description = "The request timed out.", body = crate::error::ErrorBody),
         (status = 201, description = "The account was created.", body = crate::auth::dto::AuthResponse),
         (status = 400, description = "The request is malformed."),
         (status = 409, description = "The resource conflicts with the current state.", body = crate::error::ErrorBody),
@@ -36,6 +38,7 @@ fn meta(headers: &HeaderMap, peer: ClientIp) -> ClientMeta {
         (status = 422, description = "The request failed validation.", body = crate::error::ErrorBody),
         (status = 429, description = "Too many attempts.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
+
     )
 )]
 pub async fn register(
@@ -61,12 +64,18 @@ pub async fn register(
     tag = "auth",
     request_body = LoginRequest,
     responses(
+
+        (status = 408, description = "The request timed out.", body = crate::error::ErrorBody),
+
+        (status = 401, description = "The credentials or the refresh token are not valid.", body = crate::error::ErrorBody),
         (status = 200, description = "Authentication succeeded.", body = crate::auth::dto::AuthResponse),
         (status = 400, description = "The request is malformed."),
         (status = 403, description = "The account is disabled, or the operation is not permitted.", body = crate::error::ErrorBody),
         (status = 413, description = "The request body is too large.", body = crate::error::ErrorBody),
         (status = 429, description = "Too many attempts.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
+
+
     )
 )]
 pub async fn login(
@@ -92,12 +101,18 @@ pub async fn login(
     tag = "auth",
     request_body = RefreshRequest,
     responses(
+
+        (status = 408, description = "The request timed out.", body = crate::error::ErrorBody),
+
+        (status = 401, description = "The credentials or the refresh token are not valid.", body = crate::error::ErrorBody),
         (status = 200, description = "The token pair was rotated.", body = crate::auth::dto::AuthResponse),
         (status = 400, description = "The request is malformed."),
         (status = 403, description = "The account is disabled, or the operation is not permitted.", body = crate::error::ErrorBody),
         (status = 413, description = "The request body is too large.", body = crate::error::ErrorBody),
         (status = 429, description = "Too many attempts.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
+
+
     )
 )]
 pub async fn refresh(
@@ -124,12 +139,15 @@ pub async fn refresh(
     security(("bearer" = [])),
     request_body = LogoutRequest,
     responses(
+
+        (status = 408, description = "The request timed out.", body = crate::error::ErrorBody),
         (status = 204, description = "The session was revoked."),
         (status = 400, description = "The request is malformed."),
         (status = 401, description = "Authentication is required.", body = crate::error::ErrorBody),
         (status = 403, description = "The account is disabled, or the operation is not permitted.", body = crate::error::ErrorBody),
         (status = 413, description = "The request body is too large.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
+
     )
 )]
 pub async fn logout(
@@ -152,11 +170,14 @@ pub async fn logout(
     tag = "auth",
     security(("bearer" = [])),
     responses(
+
+        (status = 408, description = "The request timed out.", body = crate::error::ErrorBody),
         (status = 200, description = "The authenticated user.", body = crate::users::dto::UserResponse),
         (status = 400, description = "The request is malformed."),
         (status = 401, description = "Authentication is required.", body = crate::error::ErrorBody),
         (status = 403, description = "The account is disabled, or the operation is not permitted.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
+
     )
 )]
 pub async fn me(State(state): State<AppState>, user: AuthUser) -> AppResult<Json<UserResponse>> {

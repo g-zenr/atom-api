@@ -380,7 +380,7 @@ blocks Phase 1 work that does not depend on the answer.
 | Structured logging and request correlation | Implemented | `src/telemetry.rs`, `src/api/mod.rs` |
 | Request timeout and body limit | Verified | `src/api/mod.rs`, `src/api/extract.rs`, `tests/auth_api.rs` |
 | Documentation tree | Verified | `docs/` - `cargo run --bin atom-docs` reports no error and no warning |
-| CI pipeline | Not started | — |
+| CI pipeline | Implemented | `.github/workflows/ci.yml` - the three quality gates, a release build, the documentation check and the OpenCode configuration check |
 | Container image | Not started | `docker-compose.yml` is provided for local PostgreSQL only |
 | Everything in the roadmap | Not started | by design |
 

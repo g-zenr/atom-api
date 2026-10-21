@@ -61,7 +61,7 @@ test that proves the behaviour; where no test exists, that is stated.
 | A fixed error envelope that never carries internal detail | [`../../src/error.rs`](../../src/error.rs) | Unit tests in the same file (4) |
 | Per-process rate limiting on registration, login and refresh | [`../../src/ratelimit.rs`](../../src/ratelimit.rs), [`../../src/api/middleware.rs`](../../src/api/middleware.rs) | Unit tests in [`../../src/ratelimit.rs`](../../src/ratelimit.rs) only — **no HTTP-level test exists** |
 | An explicit CORS allowlist, with `*` refused at start-up and credentials disabled | [`../../src/api/mod.rs`](../../src/api/mod.rs) | No automated test |
-| Request body, request duration and panic containment limits | [`../../src/api/mod.rs`](../../src/api/mod.rs), [`../../src/api/extract.rs`](../../src/api/extract.rs) | No automated test |
+| Request body, request duration and panic containment limits | [`../../src/api/mod.rs`](../../src/api/mod.rs), [`../../src/api/extract.rs`](../../src/api/extract.rs) | `an_oversized_body_is_refused` and `a_slow_request_is_abandoned_with_the_error_envelope` in `tests/` |
 | Parameterised SQL only | every repository under [`../../src/`](../../src/) | No dedicated test; enforced by the code reviewer |
 | Secrets kept out of the repository | [`.gitignore`](../../.gitignore), [`.env.example`](../../.env.example) | `auth_config_debug_redacts_the_secret` in [`../../src/config.rs`](../../src/config.rs) |
 

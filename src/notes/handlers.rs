@@ -30,10 +30,13 @@ fn service(state: &AppState) -> NoteService {
         PaginationQuery
     ),
     responses(
+
+        (status = 408, description = "The request timed out.", body = crate::error::ErrorBody),
         (status = 200, description = "The caller's notes.", body = crate::notes::dto::NotePage),
         (status = 400, description = "The request is malformed."),
         (status = 401, description = "Authentication is required.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
+
     )
 )]
 pub async fn list_notes(
@@ -56,12 +59,15 @@ pub async fn list_notes(
     security(("bearer" = [])),
     request_body = CreateNoteRequest,
     responses(
+
+        (status = 408, description = "The request timed out.", body = crate::error::ErrorBody),
         (status = 201, description = "The note was created.", body = crate::notes::dto::NoteResponse),
         (status = 400, description = "The request is malformed."),
         (status = 401, description = "Authentication is required.", body = crate::error::ErrorBody),
         (status = 413, description = "The request body is too large.", body = crate::error::ErrorBody),
         (status = 422, description = "The request failed validation.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
+
     )
 )]
 pub async fn create_note(
@@ -81,11 +87,14 @@ pub async fn create_note(
     security(("bearer" = [])),
     params(("note_id" = Uuid, Path, description = "Note identifier")),
     responses(
+
+        (status = 408, description = "The request timed out.", body = crate::error::ErrorBody),
         (status = 200, description = "The note.", body = crate::notes::dto::NoteResponse),
         (status = 400, description = "The request is malformed."),
         (status = 401, description = "Authentication is required.", body = crate::error::ErrorBody),
         (status = 404, description = "The resource does not exist or is not owned by the caller.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
+
     )
 )]
 pub async fn get_note(
@@ -106,6 +115,8 @@ pub async fn get_note(
     params(("note_id" = Uuid, Path, description = "Note identifier")),
     request_body = UpdateNoteRequest,
     responses(
+
+        (status = 408, description = "The request timed out.", body = crate::error::ErrorBody),
         (status = 200, description = "The updated note.", body = crate::notes::dto::NoteResponse),
         (status = 400, description = "The request is malformed."),
         (status = 401, description = "Authentication is required.", body = crate::error::ErrorBody),
@@ -113,6 +124,7 @@ pub async fn get_note(
         (status = 413, description = "The request body is too large.", body = crate::error::ErrorBody),
         (status = 422, description = "The request failed validation.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
+
     )
 )]
 pub async fn update_note(
@@ -135,11 +147,14 @@ pub async fn update_note(
     security(("bearer" = [])),
     params(("note_id" = Uuid, Path, description = "Note identifier")),
     responses(
+
+        (status = 408, description = "The request timed out.", body = crate::error::ErrorBody),
         (status = 204, description = "The note was deleted."),
         (status = 400, description = "The request is malformed."),
         (status = 401, description = "Authentication is required.", body = crate::error::ErrorBody),
         (status = 404, description = "The resource does not exist or is not owned by the caller.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
+
     )
 )]
 pub async fn delete_note(

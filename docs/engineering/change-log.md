@@ -42,6 +42,89 @@ define the target state. The requirements live in
 
 ## Entries
 
+### ATOM-CHANGE-20261022-005 - The quality-gate findings, resolved
+
+**Date:** 2026-10-22 (UTC)
+**Type:** Defect fixes
+**Author:** The ATOM engineering team - the orchestrator with the `quality-gate`
+subagent
+**Status:** Complete
+
+#### Summary
+
+The read-only `quality-gate` agent judged the delivery and returned **FAIL**,
+with one blocking finding, seven required findings and four advisories. All of
+them are addressed. The blocking finding was a false claim in the engineering
+record: the OpenAPI document did not declare `401` on the two endpoints that
+return it, while four documents asserted that it did.
+
+#### Reason
+
+[`../testing/verification-policy.md`](../testing/verification-policy.md)
+requires a quality gate that judges the evidence rather than the summary of the
+agent that produced it. The gate found exactly the class of defect the role
+exists to catch: a record that claimed a verification that had not held.
+
+#### Affected features and files
+
+| Finding | Severity | Resolution |
+| ------- | -------- | ---------- |
+| The OpenAPI document omitted `401` on `POST /auth/login` and `POST /auth/refresh`, and no endpoint declared `408` | Blocking | Both endpoints answer `401` when the credentials or the refresh token are wrong, and the request timeout can produce a `408` on any endpoint. The annotations now declare both. |
+| The CI pipeline was recorded as non-existent in four documents | Required | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) exists; the status is now `Implemented` in the README, in [`../project-truth.md`](../project-truth.md) §17 and in [`implementation-status.md`](implementation-status.md). `KI-005` is Closed. |
+| `implementation-status.md` said the change set had never been reviewed | Required | It now points at `ATOM-REVIEW-20261021-001`. |
+| `testing/strategy.md` misstated the size of the suite and listed closed gaps | Required | 53 integration tests, not 30; the five closed gaps are removed and the remaining list is renumbered. |
+| Two feature status files understated their own evidence | Required | The `PROJ-R02`, `TASK-R01` and `TASK-R04` rows now name the covering tests. |
+| `security/README.md` claimed two controls had no test | Required | Both rows name the covering tests. |
+| **The CI workflow would not have created the test database it points at** | Required | The official `postgres` image ignores `POSTGRES_MULTIPLE_DATABASES`. The workflow now creates `atom_test` with `psql` before the test step, and the compose file no longer relies on the non-existent variable. |
+| Two records still described the rate limiter as sharing one bucket | Required | `Q-07` and `KI-012` now describe the post-`KI-010` behaviour. |
+| Four advisory items | Advisory | A wrong document path, a mislabelled link, a stale sentence about the session revocation and a stale description of the rate-limiter row. |
+
+#### Requirements and decisions referenced
+
+| Reference | Subject |
+| --------- | ------- |
+| [`../project-truth.md`](../project-truth.md) §11.3 | `401` for invalid credentials. |
+| [`../project-truth.md`](../project-truth.md) §7.8 | The OpenAPI document describes the API that actually exists. |
+| [`../api/error-contract.md`](../api/error-contract.md) | The stable error codes and their status codes. |
+
+#### Architectural impact
+
+None. The route table, the public contracts and the schema are unchanged; the
+OpenAPI document now describes them accurately.
+
+#### Compatibility impact
+
+The generated OpenAPI document now declares `401` on the login and refresh
+operations, and `408` on every operation. A client generated from the
+document will handle the `401` of a failed login and the `408` of a slow
+request.
+
+#### Security implications
+
+None of the findings was a security defect. The rate limiter, the ownership
+predicates and the secret handling were confirmed by the gate to be as
+documented.
+
+#### Tests and checks actually executed
+
+| Check | Result |
+| ----- | ------ |
+| `cargo fmt --all -- --check` | Passed. |
+| `cargo clippy --all-targets --all-features -- -D warnings` | Passed. |
+| `cargo test --all-targets` | Passed: 39 unit, 26 authentication, 8 notes, 19 projects and tasks. 92 in total. |
+| `cargo run --bin atom-docs` | Passed, no error and no warning. |
+| `scripts/validate-opencode.ps1` | Passed, no warnings. |
+| The generated OpenAPI document | 22 operations; `201` on the creates, `204` with no body on the deletes, `401` on `login` and `refresh`, `408` on every operation, and the bearer security scheme registered. |
+
+#### Reviewer findings
+
+Recorded in [`review-log.md`](review-log.md). The quality gate's own
+limitations - it could not run `cargo run --bin atom-docs` or the OpenCode
+validation script, because the read-only shell allow-list refuses them - are
+recorded with its verdict.
+
+---
+
 ### ATOM-CHANGE-20261021-004 - The independent review findings, resolved
 
 **Date:** 2026-10-21 (UTC)
@@ -74,7 +157,7 @@ empty body while the published error contract promised the standard envelope.
 | Argon2id hashing ran on the Tokio worker thread | Medium | [`../../src/auth/service.rs`](../../src/auth/service.rs) moves hashing and verification to `tokio::task::spawn_blocking`. ADR-0002 calls the "no blocking work in a request path" rule load-bearing; it is now true. |
 | Two concurrent refreshes of the same token both succeeded | Medium | [`../../src/auth/repository.rs`](../../src/auth/repository.rs) gains `claim`, an `UPDATE ... WHERE revoked_at IS NULL` that only one caller can win. The loser is treated as a reuse and every session of that user is revoked. |
 | The 30-second timeout answered with an empty body | Medium | [`../../src/api/mod.rs`](../../src/api/mod.rs) replaces the `tower-http` timeout layer with a middleware that reports the timeout through the standard envelope. The timeout is now `APP_REQUEST_TIMEOUT_SECONDS`. |
-| The OpenAPI document omitted the status codes the handlers return | Medium | Every `#[utoipa::path]` now declares `400`, `401`, `403`, `404`, `409`, `413`, `422`, `429` and `500` where they can occur. The re-review found that the first pass keyed the response lists on the path alone, so the three `create` endpoints still declared `200` with a page body and the three `delete` endpoints declared `200` with a resource body. The lists are now keyed on the method and the path together, and the document declares `201` with the resource and `204` with no body. |
+| The OpenAPI document omitted the status codes the handlers return | Medium | Every `#[utoipa::path]` now declares `400`, `401`, `403`, `404`, `408`, `409`, `413`, `422`, `429` and `500` where they can occur. Two further passes were needed. The re-review found that the first pass keyed the response lists on the path alone, so the three `create` endpoints still declared `200` with a page body and the three `delete` endpoints declared `200` with a resource body; the lists are now keyed on the method and the path together. The quality gate then found that `login` and `refresh` still omitted `401`, which they do return when the credentials or the refresh token are wrong, and that no endpoint declared `408`, which the request timeout can produce anywhere. Both are now declared. |
 | `revoke` was not scoped by the owner | Low | [`../../src/auth/repository.rs`](../../src/auth/repository.rs) adds `AND user_id = $2` to the predicate, and ADR-0005 now records the lookup exception explicitly. |
 | The middleware-order comment was reversed | Low | [`../../src/api/mod.rs`](../../src/api/mod.rs) now states the effective order and points at the request-lifecycle document. |
 | `hyper`, `http` and `subtle` were unused; `tower` and `http-body-util` were duplicated | Low | [`../../Cargo.toml`](../../Cargo.toml) no longer declares them. `tower` and `http-body-util` remain as dev-dependencies, which is where the test suite uses them. |

@@ -10,7 +10,7 @@
   //
   // Do NOT edit this line to change the model for your own machine: put the
   // override in `.opencode/opencode.jsonc` (git-ignored) instead. See
-  // `docs/contributing.md` for the full override ladder.
+  // `docs/contributing-opencode.md` for the full override ladder.
   "model": "opencode-go/minimax-m3.1-flash-free",
 
   // The orchestrator is the only primary agent of the project team. Everything

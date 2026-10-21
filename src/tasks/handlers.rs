@@ -26,11 +26,14 @@ fn service(state: &AppState) -> TaskService {
     security(("bearer" = [])),
     params(("project_id" = Uuid, Path, description = "Project identifier"), TaskQuery, PaginationQuery),
     responses(
+
+        (status = 408, description = "The request timed out.", body = crate::error::ErrorBody),
         (status = 200, description = "The project's tasks.", body = crate::tasks::dto::TaskPage),
         (status = 400, description = "The request is malformed."),
         (status = 401, description = "Authentication is required.", body = crate::error::ErrorBody),
         (status = 404, description = "The resource does not exist or is not owned by the caller.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
+
     )
 )]
 pub async fn list_tasks(
@@ -55,6 +58,8 @@ pub async fn list_tasks(
     params(("project_id" = Uuid, Path, description = "Project identifier")),
     request_body = CreateTaskRequest,
     responses(
+
+        (status = 408, description = "The request timed out.", body = crate::error::ErrorBody),
         (status = 201, description = "The task was created.", body = crate::tasks::dto::TaskResponse),
         (status = 400, description = "The request is malformed."),
         (status = 401, description = "Authentication is required.", body = crate::error::ErrorBody),
@@ -62,6 +67,7 @@ pub async fn list_tasks(
         (status = 413, description = "The request body is too large.", body = crate::error::ErrorBody),
         (status = 422, description = "The request failed validation.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
+
     )
 )]
 pub async fn create_task(
@@ -84,11 +90,14 @@ pub async fn create_task(
     security(("bearer" = [])),
     params(("task_id" = Uuid, Path, description = "Task identifier")),
     responses(
+
+        (status = 408, description = "The request timed out.", body = crate::error::ErrorBody),
         (status = 200, description = "The task.", body = crate::tasks::dto::TaskResponse),
         (status = 400, description = "The request is malformed."),
         (status = 401, description = "Authentication is required.", body = crate::error::ErrorBody),
         (status = 404, description = "The resource does not exist or is not owned by the caller.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
+
     )
 )]
 pub async fn get_task(
@@ -109,6 +118,8 @@ pub async fn get_task(
     params(("task_id" = Uuid, Path, description = "Task identifier")),
     request_body = UpdateTaskRequest,
     responses(
+
+        (status = 408, description = "The request timed out.", body = crate::error::ErrorBody),
         (status = 200, description = "The updated task.", body = crate::tasks::dto::TaskResponse),
         (status = 400, description = "The request is malformed."),
         (status = 401, description = "Authentication is required.", body = crate::error::ErrorBody),
@@ -116,6 +127,7 @@ pub async fn get_task(
         (status = 413, description = "The request body is too large.", body = crate::error::ErrorBody),
         (status = 422, description = "The request failed validation.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
+
     )
 )]
 pub async fn update_task(
@@ -138,11 +150,14 @@ pub async fn update_task(
     security(("bearer" = [])),
     params(("task_id" = Uuid, Path, description = "Task identifier")),
     responses(
+
+        (status = 408, description = "The request timed out.", body = crate::error::ErrorBody),
         (status = 204, description = "The task was deleted."),
         (status = 400, description = "The request is malformed."),
         (status = 401, description = "Authentication is required.", body = crate::error::ErrorBody),
         (status = 404, description = "The resource does not exist or is not owned by the caller.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
+
     )
 )]
 pub async fn delete_task(

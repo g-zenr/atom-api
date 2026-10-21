@@ -28,10 +28,13 @@ fn service(state: &AppState) -> ProjectService {
     security(("bearer" = [])),
     params(ProjectQuery, PaginationQuery),
     responses(
+
+        (status = 408, description = "The request timed out.", body = crate::error::ErrorBody),
         (status = 200, description = "The caller's projects.", body = crate::projects::dto::ProjectPage),
         (status = 400, description = "The request is malformed."),
         (status = 401, description = "Authentication is required.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
+
     )
 )]
 pub async fn list_projects(
@@ -54,12 +57,15 @@ pub async fn list_projects(
     security(("bearer" = [])),
     request_body = CreateProjectRequest,
     responses(
+
+        (status = 408, description = "The request timed out.", body = crate::error::ErrorBody),
         (status = 201, description = "The project was created.", body = crate::projects::dto::ProjectResponse),
         (status = 400, description = "The request is malformed."),
         (status = 401, description = "Authentication is required.", body = crate::error::ErrorBody),
         (status = 413, description = "The request body is too large.", body = crate::error::ErrorBody),
         (status = 422, description = "The request failed validation.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
+
     )
 )]
 pub async fn create_project(
@@ -79,11 +85,14 @@ pub async fn create_project(
     security(("bearer" = [])),
     params(("project_id" = Uuid, Path, description = "Project identifier")),
     responses(
+
+        (status = 408, description = "The request timed out.", body = crate::error::ErrorBody),
         (status = 200, description = "The project.", body = crate::projects::dto::ProjectResponse),
         (status = 400, description = "The request is malformed."),
         (status = 401, description = "Authentication is required.", body = crate::error::ErrorBody),
         (status = 404, description = "The resource does not exist or is not owned by the caller.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
+
     )
 )]
 pub async fn get_project(
@@ -104,6 +113,8 @@ pub async fn get_project(
     params(("project_id" = Uuid, Path, description = "Project identifier")),
     request_body = UpdateProjectRequest,
     responses(
+
+        (status = 408, description = "The request timed out.", body = crate::error::ErrorBody),
         (status = 200, description = "The updated project.", body = crate::projects::dto::ProjectResponse),
         (status = 400, description = "The request is malformed."),
         (status = 401, description = "Authentication is required.", body = crate::error::ErrorBody),
@@ -111,6 +122,7 @@ pub async fn get_project(
         (status = 413, description = "The request body is too large.", body = crate::error::ErrorBody),
         (status = 422, description = "The request failed validation.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
+
     )
 )]
 pub async fn update_project(
@@ -133,11 +145,14 @@ pub async fn update_project(
     security(("bearer" = [])),
     params(("project_id" = Uuid, Path, description = "Project identifier")),
     responses(
+
+        (status = 408, description = "The request timed out.", body = crate::error::ErrorBody),
         (status = 204, description = "The project and its tasks were deleted."),
         (status = 400, description = "The request is malformed."),
         (status = 401, description = "Authentication is required.", body = crate::error::ErrorBody),
         (status = 404, description = "The resource does not exist or is not owned by the caller.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
+
     )
 )]
 pub async fn delete_project(
