@@ -9,8 +9,18 @@ use crate::pagination::{Page, Pagination};
 use crate::tasks::models::{Task, TaskPriority, TaskStatus};
 
 /// Maximum accepted task title length.
+///
+/// Mirrors the database constraint `tasks_title_length_chk`
+/// (`CHECK (CHAR_LENGTH(title) BETWEEN 1 AND 200)`) in
+/// `migrations/0003_projects_and_tasks.sql`. The migration is the enforced
+/// copy; this constant is the application-side mirror of it.
 pub const MAX_TITLE_LENGTH: usize = 200;
 /// Maximum accepted task description length.
+///
+/// Mirrors the database constraint `tasks_description_length_chk`
+/// (`CHECK (CHAR_LENGTH(description) <= 10000)`) in
+/// `migrations/0003_projects_and_tasks.sql`. The migration is the enforced
+/// copy; this constant is the application-side mirror of it.
 pub const MAX_DESCRIPTION_LENGTH: usize = 10_000;
 
 /// The public representation of a task.
@@ -89,6 +99,11 @@ pub struct UpdateTaskRequest {
 }
 
 /// Query parameters accepted by `GET /api/v1/projects/{project_id}/tasks`.
+///
+/// Only the feature filters live here. The pagination parameters live in
+/// [`crate::pagination::PaginationQuery`], which the handler extracts
+/// separately: declaring `limit` and `offset` in both places would publish
+/// them twice in the generated OpenAPI document.
 #[derive(Debug, Clone, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct TaskQuery {
@@ -96,10 +111,6 @@ pub struct TaskQuery {
     pub status: Option<TaskStatus>,
     /// Filter by priority.
     pub priority: Option<TaskPriority>,
-    /// Maximum number of items to return.
-    pub limit: Option<i64>,
-    /// Number of items to skip.
-    pub offset: Option<i64>,
 }
 
 /// The response body of `GET /api/v1/projects/{project_id}/tasks`.

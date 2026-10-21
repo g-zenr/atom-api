@@ -1,7 +1,7 @@
 # ATOM features
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 
 This directory holds the per-feature documentation. A *feature* is a coherent
@@ -17,10 +17,10 @@ each of them is in [§2](#2-the-per-feature-document-contract).
 
 | Feature | Identifier | Status | Documents |
 | ------- | ---------- | ------ | --------- |
-| Authentication | `ATOM-FEAT-AUTH-001` | Implemented | [specification](authentication/specification.md) · [architecture](authentication/architecture.md) · [api](authentication/api.md) · [testing](authentication/testing.md) · [status](authentication/status.md) |
+| Authentication | `ATOM-FEAT-AUTH-001` | Verified | [specification](authentication/specification.md) · [architecture](authentication/architecture.md) · [api](authentication/api.md) · [testing](authentication/testing.md) · [status](authentication/status.md) |
 | Notes | `ATOM-FEAT-NOTE-001` | Verified | [specification](notes/specification.md) · [architecture](notes/architecture.md) · [api](notes/api.md) · [testing](notes/testing.md) · [status](notes/status.md) |
-| Projects | `ATOM-FEAT-PROJ-001` | Implemented | [specification](projects/specification.md) · [architecture](projects/architecture.md) · [api](projects/api.md) · [testing](projects/testing.md) · [status](projects/status.md) |
-| Tasks | `ATOM-FEAT-TASK-001` | Implemented | [specification](tasks/specification.md) · [architecture](tasks/architecture.md) · [api](tasks/api.md) · [testing](tasks/testing.md) · [status](tasks/status.md) |
+| Projects | `ATOM-FEAT-PROJ-001` | Verified | [specification](projects/specification.md) · [architecture](projects/architecture.md) · [api](projects/api.md) · [testing](projects/testing.md) · [status](projects/status.md) |
+| Tasks | `ATOM-FEAT-TASK-001` | Verified | [specification](tasks/specification.md) · [architecture](tasks/architecture.md) · [api](tasks/api.md) · [testing](tasks/testing.md) · [status](tasks/status.md) |
 
 The status column summarises the feature as a whole. The per-requirement
 evidence behind it is in each feature's `status.md`; a feature can contain both

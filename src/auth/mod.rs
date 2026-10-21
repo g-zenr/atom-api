@@ -14,4 +14,4 @@ pub use models::RefreshSession;
 pub use password::PasswordHasher;
 pub use repository::RefreshSessionRepository;
 pub use service::{AuthService, ClientMeta};
-pub use token::{TokenService, generate_refresh_token, hash_refresh_token};
+pub use token::{TokenError, TokenService, generate_refresh_token, hash_refresh_token};

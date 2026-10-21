@@ -30,12 +30,12 @@ Source: `src/api/mod.rs`, `src/api/routes.rs`, `src/api/middleware.rs`,
 | Aspect | Description |
 | ------ | ----------- |
 | Responsibility | Builds the router, installs the middleware stack, defines the route table and the OpenAPI document, and provides the shared extractors. It owns the *shape* of the HTTP surface, never the business rules. |
-| Public interface | `api::router(state) -> Router`, `api::routes::api_routes() -> Router<AppState>`, `api::routes::swagger_ui() -> Router<AppState>`, `api::routes::ApiDoc`, `api::routes::not_found`, `api::routes::handle_panic`, `api::timeout_middleware`, `api::middleware::AuthUser`, `api::middleware::ClientIp`, `api::middleware::enforce_rate_limit`, `api::extract::Json`, `api::extract::Path`, `api::extract::Query`. |
+| Public interface | `api::router(state) -> Router`, `api::routes::api_routes() -> Router<AppState>`, `api::routes::swagger_ui() -> Router<AppState>`, `api::routes::ApiDoc`, `api::routes::not_found`, `api::routes::handle_panic`, `api::timeout_middleware`, `api::RequestContext`, `api::RequestSettings`, `api::middleware::AuthUser`, `api::middleware::ClientIp`, `api::middleware::enforce_rate_limit`, `api::extract::Json`, `api::extract::Path`, `api::extract::Query`. |
 | May depend on | `config`, `error`, `state`, `health`, and the *handlers* of every feature module. It must not depend on a feature module's repository or service directly. |
 | Data ownership | None. The module reads and writes no table. |
-| Invariants | The middleware stack is installed exactly once, in `router`. Health routes stay outside `/api/v1` and outside the authentication boundary. Every extractor rejection is an `AppError`, so every rejection uses the documented error envelope. |
-| Error handling | `extract::Json`, `extract::Path` and `extract::Query` map every rejection onto `AppError`. `routes::not_found` answers an unmatched route with the same envelope and the code `not_found`. `routes::handle_panic` turns a panic into a `500` in the same envelope and deliberately does not log the payload. |
-| Security boundary | The authentication boundary. `AuthUser` is the only way a handler learns who the caller is, and it derives the identity from the credential alone. `ClientIp` reads the connection information and never trusts `X-Forwarded-For`. The CORS allowlist is built here and rejects `*` with a start-up assertion. |
+| Invariants | The middleware stack is installed exactly once, in `router`. The router installs a `RequestContext` extension on every request; it carries the client-facing message catalogue and the request limits, so that no layer or extractor has to read the configuration or the environment itself. Health routes stay outside `/api/v1` and outside the authentication boundary. Every extractor rejection is an `AppError`, so every rejection uses the documented error envelope. |
+| Error handling | `extract::Json`, `extract::Path` and `extract::Query` map every rejection onto `AppError`, and take their message text from the catalogue the `RequestContext` carries. `routes::not_found` answers an unmatched route with the same envelope and the code `not_found`. `routes::handle_panic` turns a panic into a `500` in the same envelope and deliberately does not log the payload. The timeout middleware answers with the standard envelope and the catalogue message. |
+| Security boundary | The authentication boundary. `AuthUser` is the only way a handler learns who the caller is, and it derives the identity from the credential alone. `ClientIp` reads the connection information and never trusts `X-Forwarded-For`. The CORS allowlist is built here from a list that the configuration validation has already refused a wildcard from. |
 | Testing approach | Exercised end to end by `tests/auth_api.rs`, `tests/notes_api.rs` and `tests/projects_tasks_api.rs`, which build the router through `api::router` in `tests/common/mod.rs`. There is no dedicated unit test file for the module. |
 | Known limitations | The module dependency on the feature modules is **bidirectional**: `api::routes` names the feature handlers, and the feature handlers use `api::extract` and `api::middleware`. The contract between them is the extractor types and the handler signatures, not the module boundary. The correlation id is carried by the `x-request-id` header and the tracing layer; the application never reads it back out of the headers. |
 
@@ -71,13 +71,13 @@ rules through functions that `auth` calls.
 | Aspect | Description |
 | ------ | ----------- |
 | Responsibility | The user record, email normalization, the password policy, the display-name policy and the safe public representation of an account. |
-| Public interface | `UserService` with `create_user`, `get_user`, `get_user_response`; the free functions `normalize_email`, `validate_email`, `validate_password`, `validate_display_name`; the DTOs `RegisterRequest`, `UserResponse`; the model `User`. |
-| May depend on | `error`. It must not depend on `auth`, `notes`, `projects` or `tasks`: `auth` depends on `users`, not the other way round. |
+| Public interface | `UserService` with `create_user`, `get_user`, `get_user_response`; the free functions `normalize_email`, `validate_email`, `validate_password`, `validate_display_name`; the DTOs `RegisterRequest`, `UserResponse`; the model `User`. The validation functions take the message catalogue, `validate_password` also takes the configured `PasswordPolicy`, and the email maximum is the named constant `MAX_EMAIL_LENGTH` (254). |
+| May depend on | `error`, `config` (for the message catalogue and the password policy) and `utils::text` (for the character count). It must not depend on `auth`, `notes`, `projects` or `tasks`: `auth` depends on `users`, not the other way round. |
 | Data ownership | The `users` table. |
-| Invariants | The stored email is trimmed and lower-cased, and a `CHECK` constraint in the database enforces the same rule, so the two cannot drift. Uniqueness is enforced by the database, never by a check-then-insert in the application. The password is already hashed when it reaches the repository. `UserResponse` contains no password hash and no session material. |
+| Invariants | The stored email is trimmed and lower-cased, and a `CHECK` constraint in the database enforces the same rule, so the two cannot drift. Uniqueness is enforced by the database, never by a check-then-insert in the application. The password is already hashed when it reaches the repository. The password lengths are the configured `auth.password.min_length` and `auth.password.max_length`, not constants in the code, so a deployment may tighten or relax the policy. `UserResponse` contains no password hash and no session material. |
 | Error handling | `AppError::validation` with a named field for every policy violation; `AppError::Conflict` when the email is already registered; `AppError::NotFound` when the user does not exist; `AppError::validation_with` when a `CHECK` constraint is violated (SQLSTATE `23514`), so that the database message never reaches the log. |
 | Security boundary | Owns the account record and therefore the credential material. `UserRepository::find_by_email` is the one query that reads a private table without an owner predicate, because it looks the account up *by* its identity rather than by its owner. |
-| Testing approach | `tests/auth_api.rs` covers registration, normalization and the duplicate-registration conflict. Unit tests in `src/users/service.rs` cover normalization, the email rules, the password policy and the display-name rule. `src/config.rs` tests the secret validation that protects the signing material. |
+| Testing approach | `tests/auth_api.rs` covers registration, normalization and the duplicate-registration conflict. Unit tests in `src/users/service.rs` cover normalization, the email rules, the password policy and the display-name rule. The secret validation that protects the signing material lives in `src/config/validation.rs`. |
 | Known limitations | `UserRepository::is_active` is public but unused; the active check is made on the loaded record instead. There is no password-change, email-change or account-deletion surface, and `is_active` cannot be changed through the API. |
 
 ---
@@ -90,8 +90,8 @@ Source: `src/notes/handlers.rs`, `src/notes/service.rs`,
 | Aspect | Description |
 | ------ | ----------- |
 | Responsibility | Notes: create, list, read, partially update, delete, archive and search. |
-| Public interface | `NoteService` with `create`, `list`, `get`, `update`, `delete`; the free functions `validate_title`, `validate_content`; `NoteRepository` with `insert`, `find_owned`, `list_owned`, `update_owned`, `delete_owned`; `NoteFilters`; the DTOs `CreateNoteRequest`, `UpdateNoteRequest`, `NoteQuery`, `NoteResponse`, `NotePage`; the model `Note`. |
-| May depend on | `error`, `pagination`, `api::extract`, `api::middleware`. It must not depend on `projects` or `tasks`, so that a future "note attached to a task" does not require a schema change to the `notes` table. |
+| Public interface | `NoteService` with `create`, `list`, `get`, `update`, `delete`; the free functions `validate_title`, `validate_content`, which delegate to the shared `required_text` and `bounded_text` in `src/helpers/validation.rs`; `NoteRepository` with `insert`, `find_owned`, `list_owned`, `update_owned`, `delete_owned`; `NoteFilters`; the DTOs `CreateNoteRequest`, `UpdateNoteRequest`, `NoteQuery`, `NoteResponse`, `NotePage`; the model `Note`. |
+| May depend on | `error`, `pagination`, `helpers`, `config` (for the message catalogue), `api::extract`, `api::middleware`. It must not depend on `projects` or `tasks`, so that a future "note attached to a task" does not require a schema change to the `notes` table. |
 | Data ownership | The `notes` table. |
 | Invariants | Every statement carries the caller's `user_id`. A note that the caller does not own is invisible to the repository and is answered with `404`. The listing is ordered by `created_at DESC, id DESC`. The archive filter is tri-state: omitted and `false` both return active notes only, `true` returns archived notes only. A partial update never writes `null` over an existing value: the update uses `COALESCE($n, column)`. |
 | Error handling | `AppError::validation` for an empty or oversized title and for oversized content; `AppError::NotFound` when the note does not exist or is not owned by the caller. |
@@ -110,8 +110,8 @@ Source: `src/projects/handlers.rs`, `src/projects/service.rs`,
 | Aspect | Description |
 | ------ | ----------- |
 | Responsibility | Projects: create, list, read, partially update, delete. A project is the container that owns tasks. |
-| Public interface | `ProjectService` with `create`, `list`, `get`, `update`, `delete`; the free functions `validate_name`, `validate_description`; `ProjectRepository` with `insert`, `find_owned`, `list_owned`, `update_owned`, `delete_owned`; the DTOs `CreateProjectRequest`, `UpdateProjectRequest`, `ProjectQuery`, `ProjectResponse`, `ProjectPage`; the model `Project`. |
-| May depend on | `error`, `pagination`, `api::extract`, `api::middleware`. It must not depend on `tasks`: `tasks` depends on `projects`, not the other way round. |
+| Public interface | `ProjectService` with `create`, `list`, `get`, `update`, `delete`; the free functions `validate_name`, `validate_description`, which delegate to the shared `required_text` and `bounded_text` in `src/helpers/validation.rs`; `ProjectRepository` with `insert`, `find_owned`, `list_owned`, `update_owned`, `delete_owned`; the DTOs `CreateProjectRequest`, `UpdateProjectRequest`, `ProjectQuery`, `ProjectResponse`, `ProjectPage`; the model `Project`. |
+| May depend on | `error`, `pagination`, `helpers`, `config` (for the message catalogue), `api::extract`, `api::middleware`. It must not depend on `tasks`: `tasks` depends on `projects`, not the other way round. |
 | Data ownership | The `projects` table. It is the parent of `tasks`; deleting a project cascades to its tasks through `ON DELETE CASCADE` in the database. |
 | Invariants | Every statement carries the caller's `user_id`. A project that the caller does not own is answered with `404`. The listing is ordered by `created_at DESC, id DESC`. A partial update uses `COALESCE($n, column)` and never nulls an omitted field. The optional search is a case-insensitive substring match over the name and the description. |
 | Error handling | `AppError::validation` for an empty or oversized name and for an oversized description; `AppError::NotFound` when the project does not exist or is not owned by the caller. |
@@ -129,8 +129,8 @@ Source: `src/tasks/handlers.rs`, `src/tasks/service.rs`,
 | Aspect | Description |
 | ------ | ----------- |
 | Responsibility | Tasks: create, list, read, partially update, delete, with a status, a priority and a manual ordering key. |
-| Public interface | `TaskService` with `create`, `list_for_project`, `get`, `update`, `delete`; the free functions `validate_title`, `validate_description`; `TaskRepository` with `insert`, `find_owned`, `list_for_project`, `update_owned`, `delete_owned`; `NewTask`, `TaskPatch`, `TaskFilters`; the DTOs `CreateTaskRequest`, `UpdateTaskRequest`, `TaskQuery`, `TaskResponse`, `TaskPage`; the models `Task`, `TaskStatus`, `TaskPriority`. |
-| May depend on | `error`, `pagination`, `api::extract`, `api::middleware`. It must not depend on `notes`. |
+| Public interface | `TaskService` with `create`, `list_for_project`, `get`, `update`, `delete`; the free functions `validate_title`, `validate_description`, which delegate to the shared `required_text` and `bounded_text` in `src/helpers/validation.rs`; `TaskRepository` with `insert`, `find_owned`, `list_for_project`, `update_owned`, `delete_owned`; `NewTask`, `TaskPatch`, `TaskFilters`; the DTOs `CreateTaskRequest`, `UpdateTaskRequest`, `TaskQuery`, `TaskResponse`, `TaskPage`; the models `Task`, `TaskStatus`, `TaskPriority`. |
+| May depend on | `error`, `pagination`, `helpers`, `config` (for the message catalogue), `api::extract`, `api::middleware`. It must not depend on `notes`. |
 | Data ownership | The `tasks` table. It has no `user_id` column: ownership is inherited from the parent project. |
 | Invariants | A task is always reached through its project, and the project is always reached through its owner, so every statement joins to `projects` and carries the caller's `user_id`. The insert is a single `INSERT … SELECT … FROM projects p WHERE p.id = $2 AND p.user_id = $3`, so a task can never be attached to a project the caller does not own. `status` and `priority` are database enum types, so an out-of-contract value cannot be persisted. `completed_at` is maintained by the database: it is stamped when the status becomes `done` and cleared when it leaves `done`, and a `CHECK` constraint ties the two together. A partial update uses `COALESCE($n, column)`. The listing is ordered by `position ASC, created_at ASC, id ASC`. |
 | Error handling | `AppError::validation` for an empty or oversized title and for an oversized description; `AppError::NotFound` when the task, or the project the task would live in, does not exist or is not owned by the caller. An unknown `status` or `priority` in the request body is rejected by the deserializer as a validation failure. |
@@ -142,21 +142,40 @@ Source: `src/tasks/handlers.rs`, `src/tasks/service.rs`,
 
 ## 7. Cross-cutting modules
 
-### 7.1 `config` — typed configuration
+### 7.1 `config` — typed configuration and the message catalogue
 
-Source: `src/config.rs`.
+Source: `src/config/mod.rs`, `src/config/settings.rs`,
+`src/config/loader.rs`, `src/config/validation.rs`, `src/config/messages.rs`,
+`src/config/tests.rs`, and the committed files in `config/`.
 
 | Aspect | Description |
 | ------ | ----------- |
-| Responsibility | Reads every environment variable exactly once, parses it, validates it and produces a typed `Config`. |
-| Public interface | `Config::from_env() -> Result<Config, ConfigError>`, `Config`, `DatabaseConfig`, `AuthConfig`, `Argon2Params`, `RateLimitConfig`, `Environment`, `ConfigError`. |
-| May depend on | Nothing inside the crate. |
-| Data ownership | No data. It owns the *shape* of the runtime configuration. |
-| Invariants | `DATABASE_URL` and `APP_JWT_SECRET` are required and must not be empty. The signing secret must be at least 32 bytes, and in `Production` the documented placeholder is refused. The refresh-token lifetime must be longer than the access-token lifetime. The Argon2 memory must be at least 8 MiB. `APP_MAX_BODY_BYTES` must be positive. `APP_ENV` accepts only `development`/`dev`/`local` or `production`/`prod`. |
-| Error handling | `ConfigError::Missing` and `ConfigError::Invalid`, both raised **before** the socket is bound. |
-| Security boundary | `DatabaseConfig` and `AuthConfig` implement `Debug` manually and print `[REDACTED]` for the connection URL and the signing secret, so a configuration dump cannot leak them. |
-| Testing approach | Unit tests in `src/config.rs` cover the CSV parsing, the environment aliases, the short-secret rejection, the placeholder rejection in production only, and the redaction of the secret in the `Debug` output. |
-| Known limitations | The configuration is read from the process environment only; there is no file, command-line or remote configuration source. The CORS allowlist is parsed but never validated against a real origin. |
+| Responsibility | Resolves the configuration once, at start-up, from three layers — the base files in `config/`, the environment overlay and the environment variables — validates it, and produces a typed `Config`. It also owns the client-facing message catalogue. |
+| Public interface | `Config::load() -> Result<Config, ConfigError>`, `Config::defaults() -> Result<Config, ConfigError>`, `ConfigLoader` with `new` and `with_variables`, `Config`, the settings types `AppSettings`, `ApiSettings`, `AuthSettings`, `DatabaseSettings`, `Argon2Params`, `PasswordPolicy`, `PaginationSettings`, `RateLimitSettings`, `Environment`, the catalogue `Messages` and `ConfigError`. |
+| May depend on | `serde` and `toml`, and `axum::http::HeaderValue` for the CORS check. It must not depend on any other module of the crate. |
+| Data ownership | No data. It owns the *shape* of the runtime configuration and the text of the client-facing messages. |
+| Invariants | The settings are resolved once and never change while the process runs. A later layer wins over an earlier one, key by key, and a value that a layer does not set keeps the value from the layer below. `DATABASE_URL` and `APP_JWT_SECRET` are required and have no file layer. The signing secret must be at least 32 bytes, and in `Production` the documented placeholder is refused. Every settings structure uses `deny_unknown_fields`, so a typo in a file is a start-up error rather than a silently ignored setting. |
+| Error handling | `ConfigError::Missing` for an absent or empty required variable, `ConfigError::Invalid` for a value that is not acceptable, `ConfigError::Io` for a file that cannot be read and `ConfigError::Parse` for a file that cannot be parsed. All four are raised **before** the socket is bound. |
+| Security boundary | `AuthSettings` and `DatabaseSettings` implement `Debug` manually and print `[REDACTED]` for the signing secret and the connection URL, so a configuration dump cannot leak them. No file in `config/` may contain a secret: the directory is committed and embedded in the binary. |
+| Testing approach | The module has its own unit tests in `src/config/tests.rs`. They cover the documented defaults, the precedence between the three layers, the two required secrets, the validation rules, the message catalogue and the redaction of the secret. The loader takes its environment from an injected source, so the tests never mutate the process environment. The integration harness in `tests/common/mod.rs` builds its configuration with `Config::defaults()`, so the committed files and the real parser are exercised by the whole suite as well. |
+| Known limitations | There is **no command-line source**, **no remote source** and **no runtime reload**: a changed file or variable needs a restart. The rules that used to live where the value was used now live in `src/config/validation.rs`: the CORS allowlist is validated against a real origin and a wildcard is refused there, rather than by an assertion in the router; the rate limit, the pool size, the acquire and connect timeouts, the Argon2 iteration count and degree of parallelism, the issuer and the audience, the pagination limits and the log filter are checked in the same place. |
+
+The rules the module enforces, in one place:
+
+| Rule | Where |
+| ---- | ----- |
+| The two secrets are present, and the signing secret is at least 32 bytes. | `validate` and `validate_secret` in `src/config/validation.rs`. |
+| In `Production`, the documented placeholder secret is refused. | `validate_secret` in `src/config/validation.rs`. |
+| The body limit, the request timeout, the readiness timeout, the prune interval and the prune grace are positive. | `validate_settings` in `src/config/validation.rs`. |
+| The pagination default is positive and the maximum is at least the default. | `validate_settings` in `src/config/validation.rs`. |
+| The rate limit is positive and its window is not zero. | `validate_settings` in `src/config/validation.rs`. |
+| The CORS allowlist contains no wildcard and every origin is a valid header value. | `validate_cors` in `src/config/validation.rs`. |
+| The pool size is positive, and neither the acquire nor the connect timeout is zero. | `validate_settings` in `src/config/validation.rs`. |
+| The access-token lifetime is positive and the refresh-token lifetime is strictly longer. | `validate_settings` in `src/config/validation.rs`. |
+| The issuer and the audience are not empty. | `validate_settings` in `src/config/validation.rs`. |
+| The Argon2 memory is at least 8 MiB, and the iteration count and the degree of parallelism are at least one. | `validate_settings` in `src/config/validation.rs`. |
+| The password policy has a positive minimum and a maximum that is at least the minimum. | `validate_settings` in `src/config/validation.rs`. |
+| `APP_ENV` accepts only `development`/`dev`/`local` or `production`/`prod`. | `Environment::parse` in `src/config/settings.rs`. |
 
 ### 7.2 `error` — the single error contract
 
@@ -168,7 +187,7 @@ Source: `src/error.rs`.
 | Public interface | `AppError`, `AppResult<T>`, `ErrorBody`, `ErrorDetail`, `FieldViolation`, and the constructors `AppError::validation` and `AppError::validation_with`. |
 | May depend on | Nothing inside the crate. |
 | Data ownership | No data. |
-| Invariants | Every variant has exactly one stable code and one status. A database or internal failure never reaches the client with its detail: the body is the fixed message "The request could not be completed." A validation failure carries the offending field names. A rate-limited response carries a `retry-after` header. |
+| Invariants | Every variant has exactly one stable code and one status. The codes are defined once each, in the `code` module of this file, and the message text is client-facing wording that comes from the catalogue in `config/messages.toml`; a client switches on the code, never on the text. A database or internal failure never reaches the client with its detail: the body is the fixed message "The request could not be completed." A validation failure carries the offending field names. A rate-limited response carries a `retry-after` header. |
 | Error handling | `impl IntoResponse for AppError` renders the envelope, logs a server error at `error` level and a rejection at `debug` level. A database failure is logged with its SQLSTATE and the error kind only, never with the driver message. |
 | Security boundary | This module is the main defence against information disclosure. The full contract is in [`../api/error-contract.md`](../api/error-contract.md). |
 | Testing approach | Unit tests in `src/error.rs` cover the validation status and field details, the redaction of internal details and of the SQLx driver message, and the distinct codes for `not_found` and `forbidden`. The HTTP-level shape is exercised by the integration suite. |
@@ -181,11 +200,11 @@ Source: `src/state.rs`.
 | Aspect | Description |
 | ------ | ----------- |
 | Responsibility | Holds the shared dependencies and passes them to the handlers explicitly. There is no global mutable state. |
-| Public interface | `AppState` with the public fields `config`, `db`, `rate_limiter`, `tokens`, `passwords`, `auth`, the accessor `auth_service()` and the method `prune_expired_sessions(grace)`. |
-| May depend on | `config`, `auth`, `users`, `ratelimit`. |
+| Public interface | `AppState` with the public fields `config`, `db`, `rate_limiter`, `tokens`, `passwords`, `auth`, `notes`, `projects` and `tasks`, the accessor `auth_service()` and the method `prune_expired_sessions(grace)`. |
+| May depend on | `config`, `auth`, `users`, `notes`, `projects`, `tasks`, `ratelimit`. |
 | Data ownership | The `PgPool`. It shares the pool with every repository, but each repository holds its own clone of the handle. |
-| Invariants | `AppState` is cheap to clone: every field is `Arc`-backed or a `PgPool` handle. The services are constructed once, at start-up, and never rebuilt per request. |
-| Error handling | None of its own. Construction cannot fail; it takes an already validated `Config` and an already connected pool. |
+| Invariants | `AppState` is cheap to clone: every field is `Arc`-backed or a `PgPool` handle. The authentication service and the three feature services are constructed **once**, at start-up, and are never rebuilt per request: a handler reaches the use cases through `state.notes`, `state.projects` and `state.tasks`. There is no per-request service constructor. |
+| Error handling | None of its own. `AppState::new` takes an already validated `Config` and an already connected pool, and fails only when the password hasher cannot be built from the configured Argon2 parameters. |
 | Security boundary | Holds the signing secret inside `TokenService` and the Argon2 parameters inside `PasswordHasher`. Neither is exposed in a `Debug` rendering. |
 | Testing approach | No dedicated test file. `tests/common/mod.rs` builds the state through `AppState::new` with a test configuration. |
 | Known limitations | The services are built once, so the configuration cannot change at run time. There is no way to rotate the signing secret without restarting the process. |
@@ -232,7 +251,7 @@ Source: `src/telemetry.rs`.
 | Public interface | `telemetry::init(filter: &str)`. |
 | May depend on | Nothing inside the crate. |
 | Data ownership | The global subscriber. |
-| Invariants | The filter comes from `APP_LOG_FILTER` and falls back to `info`. An invalid filter falls back to `info` rather than failing the start-up. A debug build uses the human-readable formatter; a release build uses the JSON formatter with a flattened event. |
+| Invariants | The filter comes from the configuration: `app.log_filter`, which the environment variable `APP_LOG_FILTER` overrides and the environment overlay can replace. A debug build uses the human-readable formatter; a release build uses the JSON formatter with a flattened event. |
 | Error handling | None of its own. It panics if a subscriber is already installed, which can only be a programming error. |
 | Security boundary | The log sink is a secret-bearing boundary: the formatter never adds request bodies, and the error renderer redacts internal detail before it can reach a log line. |
 | Testing approach | No dedicated test. The format is exercised by running the service. |
@@ -264,3 +283,5 @@ Source: `src/health.rs`.
   — the modular monolith.
 - [`../decisions/ADR-0005-ownership-enforced-in-sql.md`](../decisions/ADR-0005-ownership-enforced-in-sql.md)
   — ownership in SQL.
+- [`../decisions/ADR-0006-configuration-source-of-truth.md`](../decisions/ADR-0006-configuration-source-of-truth.md)
+  — the configuration layers and the secrets.

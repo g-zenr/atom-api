@@ -51,8 +51,18 @@ createdb atom_test
 cp .env.example .env
 ```
 
-Then set at least `DATABASE_URL`, `TEST_DATABASE_URL` and `APP_JWT_SECRET`
-(at least 32 random bytes). `.env` is git-ignored. Never commit it.
+Then set at least `APP_ENV`, `DATABASE_URL`, `TEST_DATABASE_URL` and
+`APP_JWT_SECRET` (at least 32 random bytes). `APP_ENV` selects the
+environment overlay — `development` or `production` — and in production the
+documented placeholder secret is refused.
+
+Everything else lives in the committed files in [`config/`](config/), which
+are layered under the environment variables. The full reference is in
+[`config/README.md`](config/README.md) and the operator-facing table is in
+[`docs/architecture/deployment.md`](docs/architecture/deployment.md).
+
+`.env` is git-ignored. Never commit it. **No file in `config/` may contain a
+secret**: the two secrets are environment variables.
 
 ### Build and test
 
@@ -79,9 +89,12 @@ cargo test --all-targets
    - no `unwrap`/`expect` in a request path,
    - all SQL parameterised,
    - every user-data query scoped by `user_id`,
-   - no secret in a log, an error or a response,
+   - no secret in a log, an error or a response, and none in `config/`,
    - migrations append-only,
-   - PATCH is partial.
+   - PATCH is partial,
+   - a new setting is added to the file, the typed structure, the loader, the
+     validation, `.env.example`, the reference table and the tests, in the
+     same change.
 4. **Add tests.** A new endpoint needs a success case, an unauthenticated case
    and a cross-account isolation case. A bug fix needs a regression test.
 5. **Run the gates.** All three commands above must pass.

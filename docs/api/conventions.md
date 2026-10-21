@@ -84,9 +84,12 @@ The mapping from the API's error variants to these statuses is in
 ## 5. The pagination convention
 
 Every list endpoint takes the same two query parameters and returns the same
-envelope.
+envelope. The two parameters are declared **once**, in the shared
+`PaginationQuery`; a list endpoint declares only its own filters on top of
+them. Declaring them twice would publish them twice in the generated OpenAPI
+document.
 
-### Query parameters
+### The shared query parameters
 
 | Parameter | Type | Default | Rules |
 | --------- | ---- | ------- | ----- |
@@ -128,7 +131,8 @@ differs, which is why each feature declares its own named OpenAPI schema
 
 ### Filters
 
-A list endpoint may add filters of its own, as query parameters:
+A list endpoint may add filters of its own, as query parameters. A filter is
+declared by the feature that owns it and is listed here once:
 
 | Endpoint | Filter | Effect |
 | -------- | ------ | ------ |
@@ -137,6 +141,17 @@ A list endpoint may add filters of its own, as query parameters:
 | `GET /projects` | `search` | Case-insensitive substring match over the name and the description. |
 | `GET /projects/{project_id}/tasks` | `status` | Only tasks with that status. |
 | `GET /projects/{project_id}/tasks` | `priority` | Only tasks with that priority. |
+
+### The full parameter set
+
+The two shared parameters plus the filters of the endpoint. A parameter is
+never listed twice for the same endpoint:
+
+| Endpoint | Query parameters |
+| -------- | ---------------- |
+| `GET /notes` | `limit`, `offset`, `search`, `archived` |
+| `GET /projects` | `limit`, `offset`, `search` |
+| `GET /projects/{project_id}/tasks` | `limit`, `offset`, `status`, `priority` |
 
 ## 6. Timestamps
 

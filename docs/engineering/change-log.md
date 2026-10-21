@@ -1,7 +1,7 @@
 # ATOM change log
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 
 The chronological record of substantial changes to the ATOM backend, newest
@@ -41,6 +41,233 @@ define the target state. The requirements live in
 5. Run the three quality gates and record their real output.
 
 ## Entries
+
+### ATOM-CHANGE-20261022-001 - The configuration centralisation
+
+**Date:** 2026-10-22 (UTC)
+**Type:** Refactor
+**Author:** The ATOM engineering team - the orchestrator with the `rust-backend`
+and `docs` subagents
+**Status:** Complete
+
+#### Summary
+
+The application configuration was replaced. It used to be a single structure
+read from the process environment by one `Config::from_env` in `src/config.rs`.
+It is now three layers, resolved once at start-up by the module
+`src/config/`: the committed files in `config/`, the environment overlay
+`config/environments/<APP_ENV>.toml`, and the environment variables. Later
+layers win, key by key. The two secrets have no file layer at all: they are
+the `DATABASE_URL` and `APP_JWT_SECRET` environment variables, and no file in
+`config/` may hold a secret. The strings that reach a client through the error
+envelope moved into `config/messages.toml` — except the two that must never be
+replaced, which stay in the error type — the stable error codes into a `code`
+module in `src/error.rs`, three feature modules now share two text validators,
+and the dead `limit` and `offset` fields were removed from the three
+list-query DTOs.
+
+#### Reason
+
+A configuration that lives only in environment variables has no source of truth
+in the repository: the operator-facing reference is prose, the values cannot be
+reviewed, and a typo in a variable name is discovered when the affected
+request runs rather than when the process starts. The client-facing messages
+had the same problem in a smaller form — they were scattered over the source,
+so a wording change meant a search across the feature modules.
+
+Centralising the configuration makes it reviewable and makes a
+misconfiguration a start-up error instead of a runtime surprise. It also gives
+one place to enforce the rules that were previously spread across the code:
+the rate limit may not be zero, the pool size may not be zero, the timeouts
+may not be zero, the Argon2 cost may not be zero, the issuer and the audience
+may not be empty, the CORS allowlist may not contain a wildcard, the
+pagination bounds must be consistent, and the log filter must parse.
+
+#### Affected features and files
+
+| Feature | Area | Files |
+| ------- | ---- | ----- |
+| Foundation | The configuration module and the committed files | [`../../src/config/`](../../src/config/) — `mod.rs`, `settings.rs`, `loader.rs`, `validation.rs`, `messages.rs` — and [`../../config/`](../../config/) |
+| Foundation | The environment-variable template | [`../../.env.example`](../../.env.example) |
+| Foundation | The error contract and the message catalogue | [`../../src/error.rs`](../../src/error.rs), [`../../config/messages.toml`](../../config/messages.toml), [`../../src/config/messages.rs`](../../src/config/messages.rs) |
+| Notes, projects and tasks | The shared validators and the list-query DTOs | [`../../src/helpers/validation.rs`](../../src/helpers/validation.rs), [`../../src/notes/dto.rs`](../../src/notes/dto.rs), [`../../src/projects/dto.rs`](../../src/projects/dto.rs), [`../../src/tasks/dto.rs`](../../src/tasks/dto.rs) |
+| Authentication | The timing-equalisation hash | [`../../src/auth/password.rs`](../../src/auth/password.rs) |
+| Tooling | The harness starts from the real configuration | [`../../tests/common/mod.rs`](../../tests/common/mod.rs) |
+| Documentation | The security, testing and engineering record | The documents listed under *Documentation* below |
+
+#### Requirements and decisions referenced
+
+| Reference | Subject |
+| --------- | ------- |
+| [`../project-truth.md`](../project-truth.md) §4.1 | Typed, validated configuration read once at start-up. |
+| [`../project-truth.md`](../project-truth.md) §4.1 | Centralized error contract with a stable error code. |
+| [`../project-truth.md`](../project-truth.md) §9 | The security expectations the new start-up validation enforces. |
+| [`../project-truth.md`](../project-truth.md) §13 | The testing requirements and the quality gates. |
+| [`../decisions/ADR-0002-rust-axum-postgresql.md`](../decisions/ADR-0002-rust-axum-postgresql.md) | The technology stack. |
+| [`../decisions/ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md) | The token lifetimes and the session-pruning grace, which is a security window and not a tuning knob. |
+| [`../decisions/ADR-0004-documentation-as-project-truth.md`](../decisions/ADR-0004-documentation-as-project-truth.md) | The documentation tree is part of the product. |
+
+#### Architectural impact
+
+The configuration module became a directory with a fixed internal layout: the
+typed structures, the loader, the validation rules and the message catalogue.
+The settings structures use `deny_unknown_fields`, so a typo in a
+configuration file is a start-up error rather than a silently ignored setting.
+The `Config` value is still resolved once and passed down explicitly through
+`AppState`; there is still no global mutable state and no `env::var` call
+outside the loader.
+
+The feature modules keep their layering. The shared validators in
+`src/helpers/validation.rs` are a new shared module, and the trimming
+behaviour is deliberately not uniform: a title, a name and a display name are
+trimmed, while a body and a description are kept verbatim, because the
+database `CHECK` constraints measure the stored value.
+
+#### Compatibility impact
+
+- **The OpenAPI document no longer publishes the pagination parameters
+  twice.** The three list-query DTOs declared `limit` and `offset` next to
+  the shared `PaginationQuery`, which duplicated them in the generated
+  document. The feature-specific query parameters are now the filters only:
+  `search` and `archived` for notes, `search` for projects, `status` and
+  `priority` for tasks.
+- **The `limit` and `offset` query parameters are unchanged.** They are still
+  accepted on every list endpoint, with the same defaults and the same
+  clamping, and they now come from the shared pagination parameters.
+- **The error envelope is unchanged.** The shape is still
+  `{ "error": { "code", "message", "details" } }`, and the status codes are
+  the same.
+- **The error `code` values are unchanged.** They were moved into a `code`
+  module in `src/error.rs` so that each code has exactly one definition; the
+  strings themselves did not change.
+- **The environment variables are preserved, and new ones were added.** Every
+  variable the previous configuration read is still read, with the same name
+  and the same meaning. `APP_ENV`, which the process already read and which
+  enables the production placeholder-secret check, is now documented in
+  `.env.example`. The variables the loader reads today are
+  `APP_ACCESS_TOKEN_CLOCK_SKEW_SECONDS`, `APP_ACCESS_TOKEN_TTL_SECONDS`,
+  `APP_API_DOCS_ENABLED`, `APP_ARGON2_ITERATIONS`, `APP_ARGON2_MEMORY_KIB`,
+  `APP_ARGON2_PARALLELISM`, `APP_AUTH_RATE_LIMIT_MAX_REQUESTS`,
+  `APP_AUTH_RATE_LIMIT_WINDOW_SECONDS`, `APP_BIND_ADDR`,
+  `APP_CORS_ALLOWED_ORIGINS`, `APP_ENV`, `APP_JWT_AUDIENCE`, `APP_JWT_ISSUER`,
+  `APP_JWT_SECRET`, `APP_LOG_FILTER`, `APP_MAX_BODY_BYTES`,
+  `APP_READINESS_PROBE_TIMEOUT_SECONDS`, `APP_REFRESH_TOKEN_TTL_SECONDS`,
+  `APP_REQUEST_TIMEOUT_SECONDS`, `APP_SESSION_PRUNE_GRACE_SECONDS`,
+  `APP_SESSION_PRUNE_INTERVAL_SECONDS`, `DATABASE_ACQUIRE_TIMEOUT_SECS`,
+  `DATABASE_CONNECT_TIMEOUT_SECS`, `DATABASE_MAX_CONNECTIONS` and
+  `DATABASE_URL`.
+- **The message text is not part of the contract.** The client-facing strings
+  now come from `config/messages.toml`; a client must switch on the `code`.
+
+#### Security implications
+
+- The signing secret and the database URL have **no file layer**. The
+  configuration directory is committed and embedded in the binary, so a secret
+  in a file there would be a secret in the published source. The rule and the
+  check that enforces it are in
+  [`../security/secure-development.md`](../security/secure-development.md)
+  SD-4.
+- A misconfiguration now stops the process before the socket is bound. A
+  wildcard or an invalid origin in the CORS allowlist is a start-up error
+  rather than a panic in the router; the rate limit, the pool size, the
+  timeouts, the Argon2 cost, the issuer, the audience, the pagination bounds
+  and the log filter are all checked at start-up.
+- The timing-equalisation hash is computed from the configured Argon2 cost
+  parameters, so verifying against it costs exactly what verifying against a
+  stored password costs. The `DUMMY_HASH` constant is removed.
+- The types that carry a secret are `AuthSettings` and `DatabaseSettings`;
+  they still print `[REDACTED]` in their `Debug` output.
+- The two messages that must never be replaced — the one for a database failure
+  and the one for an unexpected failure — stay in the error type. The code
+  does not read them from the catalogue, so a change to
+  `config/messages.toml` cannot make them reveal an internal detail.
+
+#### Checks and results
+
+The commands were run on 2026-10-22 against the tree that contains this
+entry, at 02:45 UTC.
+
+| Command | Result |
+| ------- | ------ |
+| `cargo fmt --all -- --check` | **Passed.** No formatting differences. |
+| `cargo clippy --all-targets --all-features -- -D warnings` | **Passed.** No lint finding and no suppressed lint. |
+| `cargo test --all-targets` | **Passed.** 133 tests: 80 unit, 26 authentication, 8 notes, 19 projects and tasks. No failure. |
+| `cargo build --release` | **Passed.** |
+| `cargo run --bin atom-docs` | **Passed.** `atom-docs: OK (0 warning(s))`. |
+| `scripts/validate-opencode.ps1` | **Passed.** No warning. |
+
+**The configuration module has 27 unit tests of its own**, in
+[`../../src/config/tests.rs`](../../src/config/tests.rs). They cover the
+documented defaults, the precedence between the three layers - a file on disk
+over the embedded copy, the environment overlay over the base, and an
+environment variable over the overlay - the two required secrets, every
+validation rule and the message catalogue. The environment is injected into the
+loader rather than read from the process, so the tests neither mutate the
+environment of the test process nor depend on each other.
+
+**A running server was exercised.** The API was started against the local
+development database and answered `/health/live`, `/health/ready`, a
+registration, a note creation, a note listing, the OpenAPI document and the
+API explorer.
+
+#### Manual verification
+
+The configuration reference was read out of the source before it was written:
+every setting in [`../../config/README.md`](../../config/README.md) was checked
+against the key in the file and against the environment-variable override in
+[`../../src/config/loader.rs`](../../src/config/loader.rs), and every
+validation rule was checked against
+[`../../src/config/validation.rs`](../../src/config/validation.rs).
+
+The command that proves that no committed configuration file holds a
+secret-shaped value was run against the tree:
+
+```text
+Get-ChildItem -Recurse -File -Path config -Filter *.toml |
+  Select-String -Pattern '(jwt_secret|database_url|password|secret|token|api_key)\s*=\s*"[^"]{8,}"' -CaseSensitive:$false
+```
+
+It reported no match.
+
+The documentation checker was run as well and reported no error and no
+warning, which means that every relative link in the documents this entry
+wrote resolves and that `.env.example` and the loader agree about the
+environment variables.
+
+#### Reviewer findings
+
+**No independent review has been performed on this change set.** The
+`code-reviewer` and the `quality-gate` agents are read-only and had not been
+run against this change when the entry was written, so this section is empty
+by fact and not by omission. See [`review-log.md`](review-log.md).
+
+#### Documentation
+
+| Document | Change |
+| -------- | ------ |
+| [`../../config/README.md`](../../config/README.md) | The configuration reference: the layers, the precedence, the settings, the secrets, the message catalogue and the validation rules. |
+| [`../../.env.example`](../../.env.example) | Every environment variable, including `APP_ENV`. |
+| [`../architecture/deployment.md`](../architecture/deployment.md) | The operator-facing configuration reference. |
+| [`../security/threat-model.md`](../security/threat-model.md) | The assets, the trust boundary and the threats that the configuration touches. |
+| [`../security/secure-development.md`](../security/secure-development.md) | SD-4, SD-5, SD-12 and SD-14, and the check that no committed configuration file holds a secret. |
+| [`../security/README.md`](../security/README.md) | The control table: the paths, and the tests that were missing from it. |
+| [`../testing/strategy.md`](../testing/strategy.md) | The unit-test inventory, the harness configuration, the configuration-loader coverage and the list of what is not covered. |
+| [`../testing/verification-policy.md`](../testing/verification-policy.md) | The configuration gate. |
+| [`../engineering/known-issues.md`](../engineering/known-issues.md) | `KI-014`, the remaining configuration limitations. |
+| [`../engineering/open-questions.md`](../engineering/open-questions.md) | `Q-12`, the reload question. |
+| [`../engineering/implementation-status.md`](../engineering/implementation-status.md) | The configuration, the message catalogue and the shared validators. |
+| [`../../AGENTS.md`](../../AGENTS.md) | The layout, the configuration rule, the documentation intake and the secrets list. |
+| [`../../README.md`](../../README.md), [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) | The setup, the stack and the repository layout. |
+
+#### Links
+
+- The configuration reference: [`../../config/README.md`](../../config/README.md).
+- The operator-facing reference:
+  [`../architecture/deployment.md`](../architecture/deployment.md).
+- `KI-014` in [`known-issues.md`](known-issues.md).
+- `Q-12` in [`open-questions.md`](open-questions.md).
+
+---
 
 ### ATOM-CHANGE-20261022-005 - The quality-gate findings, resolved
 
@@ -459,7 +686,7 @@ recorded in
 
 | Feature | Area | Files |
 | ------- | ---- | ----- |
-| Foundation | Configuration, error contract, pagination, state, telemetry, health | [`../../src/config.rs`](../../src/config.rs), [`../../src/error.rs`](../../src/error.rs), [`../../src/pagination.rs`](../../src/pagination.rs), [`../../src/state.rs`](../../src/state.rs), [`../../src/telemetry.rs`](../../src/telemetry.rs), [`../../src/health.rs`](../../src/health.rs), [`../../src/main.rs`](../../src/main.rs), [`../../src/lib.rs`](../../src/lib.rs) |
+| Foundation | Configuration, error contract, pagination, state, telemetry, health | [`../../src/config/`](../../src/config/), [`../../src/error.rs`](../../src/error.rs), [`../../src/pagination.rs`](../../src/pagination.rs), [`../../src/state.rs`](../../src/state.rs), [`../../src/telemetry.rs`](../../src/telemetry.rs), [`../../src/health.rs`](../../src/health.rs), [`../../src/main.rs`](../../src/main.rs), [`../../src/lib.rs`](../../src/lib.rs) |
 | Foundation | HTTP layer | [`../../src/api/mod.rs`](../../src/api/mod.rs), [`../../src/api/routes.rs`](../../src/api/routes.rs), [`../../src/api/extract.rs`](../../src/api/extract.rs), [`../../src/api/middleware.rs`](../../src/api/middleware.rs) |
 | Authentication | Registration, login, refresh, logout, `/auth/me` | [`../../src/auth/`](../../src/auth/), [`../../src/users/`](../../src/users/) |
 | Notes | CRUD, archive, search, pagination | [`../../src/notes/`](../../src/notes/) |
@@ -580,4 +807,9 @@ documents under [`../architecture/`](../architecture/) and
 the schema under [`../database/`](../database/), the security model under
 [`../security/`](../security/), the test approach under
 [`../testing/`](../testing/), and this engineering record.
+
+**Correction (2026-10-22).** The file `src/config.rs` was replaced by the
+module `src/config/` in `ATOM-CHANGE-20261022-001`. The link in the table
+above now points at the directory, so that it resolves; the file list it
+describes is otherwise unchanged.
 

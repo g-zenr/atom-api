@@ -1,9 +1,19 @@
 //! Note use cases: validation, ownership and listing rules.
+//!
+//! Every client-facing string comes from the message catalogue, so the wording
+//! of an error is defined once for the whole API.
+
+use std::sync::Arc;
 
 use uuid::Uuid;
 
-use crate::error::{AppError, AppResult, FieldViolation};
-use crate::notes::dto::{CreateNoteRequest, NoteQuery, NoteResponse, UpdateNoteRequest};
+use crate::config::messages::Messages;
+use crate::error::{AppError, AppResult};
+use crate::helpers::{bounded_text, required_text};
+use crate::notes::dto::{
+    CreateNoteRequest, MAX_CONTENT_LENGTH, MAX_TITLE_LENGTH, NoteQuery, NoteResponse,
+    UpdateNoteRequest,
+};
 use crate::notes::repository::{NoteFilters, NoteRepository};
 use crate::pagination::{Page, PaginationQuery};
 
@@ -11,18 +21,22 @@ use crate::pagination::{Page, PaginationQuery};
 #[derive(Debug, Clone)]
 pub struct NoteService {
     repository: NoteRepository,
+    messages: Arc<Messages>,
 }
 
 impl NoteService {
     /// Builds the service.
-    pub fn new(repository: NoteRepository) -> Self {
-        Self { repository }
+    pub fn new(repository: NoteRepository, messages: Arc<Messages>) -> Self {
+        Self {
+            repository,
+            messages,
+        }
     }
 
     /// Creates a note for the given owner.
     pub async fn create(&self, owner: Uuid, request: CreateNoteRequest) -> AppResult<NoteResponse> {
-        let title = validate_title(&request.title)?;
-        let content = validate_content(&request.content)?;
+        let title = validate_title(&request.title, &self.messages)?;
+        let content = validate_content(&request.content, &self.messages)?;
 
         let note = self
             .repository
@@ -40,7 +54,7 @@ impl NoteService {
         pagination: PaginationQuery,
     ) -> AppResult<Page<NoteResponse>> {
         let filters = NoteFilters {
-            search: query.search.clone(),
+            search: query.search,
             archived: query.archived,
         };
 
@@ -63,7 +77,7 @@ impl NoteService {
             .repository
             .find_owned(id, owner)
             .await?
-            .ok_or(AppError::NotFound("The requested note does not exist."))?;
+            .ok_or_else(|| AppError::NotFound(self.messages.resources.note_not_found.clone()))?;
 
         Ok(NoteResponse::from(&note))
     }
@@ -75,11 +89,15 @@ impl NoteService {
         id: Uuid,
         request: UpdateNoteRequest,
     ) -> AppResult<NoteResponse> {
-        let title = request.title.as_deref().map(validate_title).transpose()?;
+        let title = request
+            .title
+            .as_deref()
+            .map(|title| validate_title(title, &self.messages))
+            .transpose()?;
         let content = request
             .content
             .as_deref()
-            .map(validate_content)
+            .map(|content| validate_content(content, &self.messages))
             .transpose()?;
 
         let note = self
@@ -92,7 +110,7 @@ impl NoteService {
                 request.is_archived,
             )
             .await?
-            .ok_or(AppError::NotFound("The requested note does not exist."))?;
+            .ok_or_else(|| AppError::NotFound(self.messages.resources.note_not_found.clone()))?;
 
         Ok(NoteResponse::from(&note))
     }
@@ -102,7 +120,9 @@ impl NoteService {
         let deleted = self.repository.delete_owned(id, owner).await?;
 
         if !deleted {
-            return Err(AppError::NotFound("The requested note does not exist."));
+            return Err(AppError::NotFound(
+                self.messages.resources.note_not_found.clone(),
+            ));
         }
 
         Ok(())
@@ -110,64 +130,87 @@ impl NoteService {
 }
 
 /// Validates a note title.
-pub fn validate_title(title: &str) -> AppResult<String> {
-    let trimmed = title.trim();
-    let length = trimmed.chars().count();
-
-    if length == 0 {
-        return Err(AppError::validation(vec![FieldViolation::new(
-            "title",
-            "must not be empty",
-        )]));
-    }
-
-    if length > crate::notes::dto::MAX_TITLE_LENGTH {
-        return Err(AppError::validation(vec![FieldViolation::new(
-            "title",
-            format!(
-                "must be at most {} characters long",
-                crate::notes::dto::MAX_TITLE_LENGTH
-            ),
-        )]));
-    }
-
-    Ok(trimmed.to_string())
+///
+/// The title is trimmed, and a title that is empty after trimming is rejected.
+/// The stored value is therefore the trimmed one, which is what the database
+/// constraint `notes_title_length_chk` measures.
+pub fn validate_title(title: &str, messages: &Messages) -> AppResult<String> {
+    required_text(
+        "title",
+        title,
+        MAX_TITLE_LENGTH,
+        &messages.validation.title_too_long,
+        messages,
+    )
 }
 
 /// Validates note content.
-pub fn validate_content(content: &str) -> AppResult<String> {
-    if content.chars().count() > crate::notes::dto::MAX_CONTENT_LENGTH {
-        return Err(AppError::validation(vec![FieldViolation::new(
-            "content",
-            format!(
-                "must be at most {} characters long",
-                crate::notes::dto::MAX_CONTENT_LENGTH
-            ),
-        )]));
-    }
-
-    Ok(content.to_string())
+///
+/// The body is kept verbatim: a body of spaces is stored as it was sent. The
+/// stored value is what the database constraint `notes_content_length_chk`
+/// measures.
+pub fn validate_content(content: &str, messages: &Messages) -> AppResult<String> {
+    bounded_text(
+        "content",
+        content,
+        MAX_CONTENT_LENGTH,
+        &messages.validation.content_too_long,
+        messages,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::code;
+
+    fn messages() -> Messages {
+        // The shipped catalogue, so that the tests exercise the same templates
+        // the application serves.
+        Messages::from_toml(include_str!("../../config/messages.toml"))
+            .expect("the message catalogue parses")
+    }
 
     #[test]
     fn titles_are_trimmed_and_must_not_be_empty() {
-        assert_eq!(validate_title("  hello  ").unwrap(), "hello");
-        assert!(validate_title("   ").is_err());
+        let messages = messages();
+        assert_eq!(validate_title("  hello  ", &messages).unwrap(), "hello");
+        assert!(validate_title("   ", &messages).is_err());
     }
 
     #[test]
     fn oversized_titles_are_rejected() {
-        let long = "x".repeat(crate::notes::dto::MAX_TITLE_LENGTH + 1);
-        assert!(validate_title(&long).is_err());
+        let messages = messages();
+        let long = "x".repeat(MAX_TITLE_LENGTH + 1);
+        assert!(validate_title(&long, &messages).is_err());
+    }
+
+    #[test]
+    fn the_title_limit_in_the_message_comes_from_the_constant() {
+        let messages = messages();
+        let long = "x".repeat(MAX_TITLE_LENGTH + 1);
+
+        let error = validate_title(&long, &messages).unwrap_err();
+        let body = error.body();
+
+        assert_eq!(body.error.code, code::VALIDATION_FAILED);
+        assert_eq!(body.error.details[0].field, "title");
+        assert_eq!(
+            body.error.details[0].message,
+            format!("must be at most {MAX_TITLE_LENGTH} characters long")
+        );
     }
 
     #[test]
     fn oversized_content_is_rejected() {
-        let long = "x".repeat(crate::notes::dto::MAX_CONTENT_LENGTH + 1);
-        assert!(validate_content(&long).is_err());
+        let messages = messages();
+        let long = "x".repeat(MAX_CONTENT_LENGTH + 1);
+        assert!(validate_content(&long, &messages).is_err());
+    }
+
+    #[test]
+    fn content_is_kept_verbatim() {
+        let messages = messages();
+        assert_eq!(validate_content("   ", &messages).unwrap(), "   ");
     }
 }

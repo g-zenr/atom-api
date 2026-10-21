@@ -9,8 +9,19 @@ use crate::notes::models::Note;
 use crate::pagination::{Page, Pagination};
 
 /// Maximum accepted note title length.
+///
+/// Mirrors the database constraint `notes_title_length_chk`
+/// (`CHECK (CHAR_LENGTH(title) BETWEEN 1 AND 200)`) in
+/// `migrations/0002_notes.sql`. The migration is the enforced copy; this
+/// constant is the application-side mirror of it.
 pub const MAX_TITLE_LENGTH: usize = 200;
+
 /// Maximum accepted note content length.
+///
+/// Mirrors the database constraint `notes_content_length_chk`
+/// (`CHECK (CHAR_LENGTH(content) <= 100000)`) in `migrations/0002_notes.sql`.
+/// The migration is the enforced copy; this constant is the application-side
+/// mirror of it.
 pub const MAX_CONTENT_LENGTH: usize = 100_000;
 
 /// The public representation of a note.
@@ -71,6 +82,11 @@ pub struct UpdateNoteRequest {
 }
 
 /// Query parameters accepted by `GET /api/v1/notes`.
+///
+/// Only the feature filters live here. The pagination parameters live in
+/// [`crate::pagination::PaginationQuery`], which the handler extracts
+/// separately: declaring `limit` and `offset` in both places would publish
+/// them twice in the generated OpenAPI document.
 #[derive(Debug, Clone, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct NoteQuery {
@@ -80,10 +96,6 @@ pub struct NoteQuery {
     /// Filter by archive state. When omitted, only active notes are returned.
     /// `true` returns archived notes, `false` returns active notes.
     pub archived: Option<bool>,
-    /// Maximum number of items to return.
-    pub limit: Option<i64>,
-    /// Number of items to skip.
-    pub offset: Option<i64>,
 }
 
 /// The response body of `GET /api/v1/notes`.

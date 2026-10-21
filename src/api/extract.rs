@@ -12,6 +12,9 @@
 //!   an unparsable query parameter — is `400 Bad Request`.
 //! * A well-formed request that fails a business rule — an unknown enum
 //!   variant, a too-long title — is `422 Unprocessable Entity`.
+//!
+//! The message text comes from the catalogue in `config/messages.toml`; the
+//! stable error code comes from [`crate::error::code`].
 
 use axum::RequestExt;
 use axum::extract::{FromRequest, FromRequestParts, Request};
@@ -20,15 +23,8 @@ use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+use crate::api::RequestContext;
 use crate::error::{AppError, FieldViolation};
-
-/// The outer bound on the body the extractor will read.
-///
-/// The effective limit is the one the router installs with
-/// `DefaultBodyLimit`, which is `APP_MAX_BODY_BYTES`. That limit is applied
-/// by wrapping the body in `http_body_util::Limited`; this constant is the
-/// backstop for a request that reaches the extractor without the layer.
-const MAX_JSON_BODY_BYTES: usize = 4 * 1024 * 1024;
 
 /// A JSON request body.
 #[derive(Debug, Clone, Copy, Default)]
@@ -56,27 +52,32 @@ where
     type Rejection = AppError;
 
     async fn from_request(req: Request, _state: &S) -> Result<Self, Self::Rejection> {
+        let messages = request_context(&req)?.messages.clone();
+
         // `into_limited_body` applies the limit the router installed with
-        // `DefaultBodyLimit`, which is `APP_MAX_BODY_BYTES`. Reading it here
-        // is what makes that setting the effective ceiling.
+        // `DefaultBodyLimit`, which is the configured `max_body_bytes`. The
+        // outer limit below is only a backstop: the wrapper has already
+        // enforced the real one.
         let body = req.into_limited_body();
 
-        let bytes = axum::body::to_bytes(body, MAX_JSON_BODY_BYTES)
+        let bytes = axum::body::to_bytes(body, usize::MAX)
             .await
-            .map_err(|_| AppError::PayloadTooLarge)?;
+            .map_err(|_| AppError::PayloadTooLarge(messages.general.payload_too_large.clone()))?;
 
         match serde_json::from_slice::<T>(&bytes) {
             Ok(value) => Ok(Json(value)),
             // A body that is not JSON at all is a malformed request.
-            Err(error) if error.is_syntax() || error.is_eof() => Err(AppError::BadRequest(
-                "The request body is not valid JSON.".to_string(),
-            )),
+            Err(error) if error.is_syntax() || error.is_eof() => {
+                Err(AppError::BadRequest(messages.general.bad_request.clone()))
+            }
             // A well-formed body that does not match the contract fails a
-            // business rule.
+            // business rule. The specific reason stays in the field detail,
+            // where a client wants it.
             Err(error) => Err(AppError::validation(vec![FieldViolation::new(
                 "body",
                 error.to_string(),
-            )])),
+            )])
+            .with_message(messages.general.validation_failed.clone())),
         }
     }
 }
@@ -93,9 +94,20 @@ where
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let messages = parts
+            .extensions
+            .get::<RequestContext>()
+            .map(|context| context.messages.clone())
+            .ok_or_else(|| AppError::Internal("the request context is missing".to_string()))?;
+
         match axum::extract::Path::<T>::from_request_parts(parts, state).await {
             Ok(value) => Ok(Path(value.0)),
-            Err(rejection) => Err(AppError::BadRequest(rejection.body_text())),
+            Err(rejection) => {
+                tracing::debug!(detail = %rejection.body_text(), "path parameter rejected");
+                Err(AppError::BadRequest(
+                    messages.general.malformed_parameter.clone(),
+                ))
+            }
         }
     }
 }
@@ -112,9 +124,29 @@ where
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let messages = parts
+            .extensions
+            .get::<RequestContext>()
+            .map(|context| context.messages.clone())
+            .ok_or_else(|| AppError::Internal("the request context is missing".to_string()))?;
+
         match axum::extract::Query::<T>::from_request_parts(parts, state).await {
             Ok(value) => Ok(Query(value.0)),
-            Err(rejection) => Err(AppError::BadRequest(rejection.body_text())),
+            Err(rejection) => {
+                tracing::debug!(detail = %rejection.body_text(), "query parameter rejected");
+                Err(AppError::BadRequest(
+                    messages.general.malformed_parameter.clone(),
+                ))
+            }
         }
     }
+}
+
+/// Reads the request context from the request extensions.
+fn request_context<B>(request: &Request<B>) -> Result<RequestContext, AppError> {
+    request
+        .extensions()
+        .get::<RequestContext>()
+        .cloned()
+        .ok_or_else(|| AppError::Internal("the request context is missing".to_string()))
 }

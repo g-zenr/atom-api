@@ -1,0 +1,37 @@
+# ATOM — production environment overrides
+#
+# Applied on top of the base configuration when `APP_ENV` is `production`
+# (or `prod`).
+#
+# Secrets are not here. The signing secret and the database password come from
+# the environment, and the start-up refuses a known placeholder in this
+# environment.
+
+[app]
+# Structured, machine-readable logs.
+log_filter = "info,atom_api=info"
+
+[app.limits]
+# The request timeout is a hard bound on how long a client can hold a
+# connection open.
+request_timeout_seconds = 30
+
+[app.sessions]
+# Prune more often: a production database accumulates a session row on every
+# login and on every rotation.
+prune_interval_seconds = 900
+
+[api]
+# The OpenAPI document and the API explorer are not served in production by
+# default. Set this to `true` if the deployment wants them.
+docs_enabled = false
+
+[api.pagination]
+# A smaller maximum page, so that one request cannot pull a large slice of
+# the table.
+max_limit = 100
+
+[database]
+# A larger pool, because the production deployment serves more traffic than
+# the developer's machine.
+max_connections = 20

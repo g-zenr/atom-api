@@ -1,0 +1,15 @@
+# ATOM — development environment overrides
+#
+# Applied on top of the base configuration when `APP_ENV` is `development`
+# (or `dev`, or `local`).
+#
+# The development defaults are deliberately chatty and cheap. They are not
+# suitable for a shared or production deployment.
+
+[app]
+# Debug logging, including the SQLx query log.
+log_filter = "atom_api=debug,tower_http=debug,sqlx=warn"
+
+[app.limits]
+# A longer timeout, because a cold database on a laptop is slow.
+request_timeout_seconds = 60

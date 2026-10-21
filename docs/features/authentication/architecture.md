@@ -15,13 +15,13 @@ How the authentication feature is built. The public contract is in
 | ------ | -------------- |
 | `src/api/middleware.rs` | Extracts the caller from the `Authorization` header (`AuthUser`), determines the client address (`ClientIp`), and enforces the rate limit (`enforce_rate_limit`). |
 | `src/auth/handlers.rs` | HTTP only: extraction, rate limiting, status codes, response serialization. |
-| `src/auth/service.rs` | The authentication use cases: registration, login, refresh rotation, logout, session revocation, bearer verification. Owns the rules, not the transport. |
+| `src/auth/service.rs` | The authentication use cases: registration, login, refresh rotation, logout, session revocation, bearer verification. Owns the rules, not the transport. The client-facing wording comes from the message catalogue, which the service holds. |
 | `src/auth/password.rs` | Argon2id hashing and verification with configurable cost parameters. |
 | `src/auth/token.rs` | Access-token issuing and verification (HS256 JWT), opaque refresh-token generation and hashing. |
 | `src/auth/repository.rs` | Persistence for refresh sessions. |
 | `src/auth/models.rs` | The `RefreshSession` persistence shape. |
 | `src/auth/dto.rs` | The public request and response contracts of the feature. |
-| `src/users/service.rs` | User use cases and the validation rules that are not tied to one request: `normalize_email`, `validate_email`, `validate_password`, `validate_display_name`, and the safe public representation. |
+| `src/users/service.rs` | User use cases and the validation rules that are not tied to one request: `normalize_email`, `validate_email`, `validate_password`, `validate_display_name`, and the safe public representation. The rules take the message catalogue, and the password lengths come from the configured policy (`auth.password.min_length` and `auth.password.max_length`). |
 | `src/users/repository.rs` | User persistence. Maps the unique-violation SQLSTATE to a conflict and the check-violation SQLSTATE to a validation failure. |
 | `src/users/models.rs` | The `User` persistence shape. |
 | `src/users/dto.rs` | `UserResponse` and `RegisterRequest`. |
@@ -70,11 +70,11 @@ Nothing in the request body, query string or path can override it.
 
 `AuthService` is built once in `AppState::new` and shared behind an `Arc`.
 It holds the `UserService`, the `UserRepository`, the
-`RefreshSessionRepository`, the `TokenService`, the `PasswordHasher` and the
-refresh-token lifetime. The timing-equalisation hash belongs to the
-`PasswordHasher`: it is a hash of an unguessable value, computed with the
-configured Argon2 parameters, used to equalise the time a login takes when
-the address does not exist.
+`RefreshSessionRepository`, the `TokenService`, the `PasswordHasher`, the
+message catalogue and the refresh-token lifetime. The timing-equalisation hash
+belongs to the `PasswordHasher`: it is a hash of an unguessable value, computed
+with the configured Argon2 parameters, used to equalise the time a login takes
+when the address does not exist.
 
 ## 3. Data ownership
 
@@ -106,7 +106,7 @@ code and, where it matters, by a database constraint.
 | 8 | The `Authorization` header is the only source of identity. | The `AuthUser` extractor; no other extractor reads an identity from the request. |
 | 9 | A failed login is indistinguishable from an unknown account. | One constant message (`GENERIC_LOGIN_FAILURE`) for both cases, plus a dummy Argon2 verification when the address is unknown. |
 | 10 | An access token is only accepted with the right issuer, audience, signature and expiry. | `TokenService::decode_access_token` validates the algorithm, the issuer, the audience and the required claims `exp`, `sub`, `iss`, `aud`, with 30 seconds of clock-skew leeway. |
-| 11 | The signing secret and the database URL never appear in a log. | `AuthConfig` and `DatabaseConfig` implement `Debug` with the secret fields replaced by `[REDACTED]`. |
+| 11 | The signing secret and the database URL never appear in a log. | `AuthSettings` and `DatabaseSettings` implement `Debug` with the secret fields replaced by `[REDACTED]`. |
 | 12 | An inactive account cannot authenticate or refresh. | `authenticate_bearer` and `refresh` both check `user.is_active` and return `403`. |
 
 ## 5. Error handling
@@ -241,7 +241,7 @@ GET /api/v1/notes  (or any private route)
 | `src/api/middleware.rs` | `AuthUser`, `ClientIp`, `enforce_rate_limit`. |
 | `src/api/extract.rs` | The JSON, path and query extractors that report rejections through the error contract. |
 | `src/state.rs` | Builds `AuthService`, `TokenService`, `PasswordHasher` and the rate limiter once, at start-up. |
-| `src/config.rs` | Reads and validates the signing secret, the token lifetimes, the Argon2 parameters and the rate-limit settings. |
+| `src/config/` | Reads and validates the signing secret, the token lifetimes, the Argon2 parameters and the rate-limit settings. The module is a directory: `loader.rs` resolves the layers, `settings.rs` holds the typed structures, `validation.rs` holds the rules and `messages.rs` holds the client-facing message catalogue. |
 | `src/error.rs` | The single error type and the envelope. |
 | `src/ratelimit.rs` | The in-process fixed-window limiter. |
 | `src/telemetry.rs` | Structured logging; the JSON formatter in release builds. |

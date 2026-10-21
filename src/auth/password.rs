@@ -13,16 +13,17 @@ use crate::error::{AppError, AppResult};
 /// Length in bytes of the random salt.
 const SALT_BYTES: usize = 16;
 
-/// A valid Argon2id hash, used only if the dummy hash cannot be computed.
+/// The value that is hashed to produce the timing-equalisation target.
 ///
-/// The parameters are deliberately cheap: the fallback must not be more
-/// expensive than a real verification.
-pub const DUMMY_HASH: &str = "$argon2id$v=19$m=8192,t=1,p=1$/GHfNTpCo9BIiigqJbCL7g$g1o54Bv1IGr1rIM64BskDw0on/Gst4RO+FyLW5meQ1c";
+/// It is not a secret and it is never a password: it exists so that the
+/// verifier has something to chew on when the account does not exist.
+const TIMING_EQUALISATION_VALUE: &str = "atom-timing-equalisation";
 
 /// Hashes and verifies passwords with Argon2id.
 #[derive(Debug, Clone)]
 pub struct PasswordHasher {
-    params: Argon2Params,
+    /// The Argon2id instance built from the configured cost parameters.
+    argon2: Argon2<'static>,
     /// A hash of an unguessable value, used as the timing-equalisation
     /// target when the supplied email address does not exist.
     dummy_hash: String,
@@ -34,12 +35,19 @@ impl PasswordHasher {
     /// The dummy hash is computed with the *same* parameters, so that
     /// verifying against it costs exactly what verifying against a stored
     /// password costs. A dummy hash with cheaper parameters would leave the
-    /// account-enumeration timing channel open.
-    pub fn new(params: Argon2Params) -> Self {
-        let dummy_hash = hash_password_with(&params, "atom-timing-equalisation")
-            .unwrap_or_else(|_| DUMMY_HASH.to_string());
+    /// account-enumeration timing channel open, which is why there is no
+    /// pre-computed fallback.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::Internal`] when the configured parameters are
+    /// rejected by the Argon2 implementation, or when the dummy hash cannot
+    /// be computed.
+    pub fn new(params: Argon2Params) -> AppResult<Self> {
+        let argon2 = build_argon2(&params)?;
+        let dummy_hash = hash_password_with(&argon2, TIMING_EQUALISATION_VALUE)?;
 
-        Self { params, dummy_hash }
+        Ok(Self { argon2, dummy_hash })
     }
 
     /// The hash used to equalise the time taken for an unknown email address.
@@ -47,27 +55,13 @@ impl PasswordHasher {
         &self.dummy_hash
     }
 
-    /// Builds the Argon2id instance for the configured cost parameters.
-    fn argon2(&self) -> Result<Argon2<'static>, AppError> {
-        let params = Params::new(
-            self.params.memory_kib,
-            self.params.iterations,
-            self.params.parallelism,
-            None,
-        )
-        .map_err(|error| AppError::Internal(format!("invalid argon2 parameters: {error}")))?;
-
-        Ok(Argon2::new(Algorithm::Argon2id, Version::V0x13, params))
-    }
-
     /// Hashes a password, producing a PHC-formatted Argon2id string.
     ///
     /// # Errors
     ///
-    /// Returns [`AppError::Internal`] when the configured parameters are
-    /// rejected by the Argon2 implementation or when hashing fails.
+    /// Returns [`AppError::Internal`] when the password cannot be hashed.
     pub fn hash(&self, password: &str) -> AppResult<String> {
-        hash_password_with(&self.params, password)
+        hash_password_with(&self.argon2, password)
     }
 
     /// Verifies a password against a stored hash.
@@ -79,16 +73,14 @@ impl PasswordHasher {
             return false;
         };
 
-        let Ok(hasher) = self.argon2() else {
-            return false;
-        };
-
-        hasher.verify_password(password.as_bytes(), &parsed).is_ok()
+        self.argon2
+            .verify_password(password.as_bytes(), &parsed)
+            .is_ok()
     }
 }
 
-/// Hashes a password with the given cost parameters.
-fn hash_password_with(params: &Argon2Params, password: &str) -> AppResult<String> {
+/// Builds the Argon2id instance for the given cost parameters.
+fn build_argon2(params: &Argon2Params) -> AppResult<Argon2<'static>> {
     let argon2_params = Params::new(
         params.memory_kib,
         params.iterations,
@@ -97,8 +89,15 @@ fn hash_password_with(params: &Argon2Params, password: &str) -> AppResult<String
     )
     .map_err(|error| AppError::Internal(format!("invalid argon2 parameters: {error}")))?;
 
-    let hasher = Argon2::new(Algorithm::Argon2id, Version::V0x13, argon2_params);
+    Ok(Argon2::new(
+        Algorithm::Argon2id,
+        Version::V0x13,
+        argon2_params,
+    ))
+}
 
+/// Hashes a password with the given Argon2id instance.
+fn hash_password_with(argon2: &Argon2<'_>, password: &str) -> AppResult<String> {
     let mut salt_bytes = [0u8; SALT_BYTES];
     rand::rng().fill_bytes(&mut salt_bytes);
     let salt = SaltString::encode_b64(&salt_bytes)
@@ -106,7 +105,7 @@ fn hash_password_with(params: &Argon2Params, password: &str) -> AppResult<String
 
     use argon2::PasswordHasher as _;
 
-    hasher
+    argon2
         .hash_password(password.as_bytes(), &salt)
         .map(|hash| hash.to_string())
         .map_err(|error| AppError::Internal(format!("could not hash password: {error}")))
@@ -123,6 +122,7 @@ mod tests {
             iterations: 1,
             parallelism: 1,
         })
+        .expect("the parameters are valid")
     }
 
     #[test]
@@ -153,5 +153,28 @@ mod tests {
         let hasher = hasher();
         assert!(!hasher.verify("anything", "not-a-phc-string"));
         assert!(!hasher.verify("anything", ""));
+    }
+
+    #[test]
+    fn the_dummy_hash_costs_the_same_as_a_real_one() {
+        let hasher = hasher();
+
+        // The dummy hash is a real Argon2id hash of the configured cost, so
+        // it verifies against the configured parameters and not against a
+        // cheaper fallback.
+        assert!(hasher.verify(TIMING_EQUALISATION_VALUE, hasher.dummy_hash()));
+        assert!(!hasher.verify("anything else", hasher.dummy_hash()));
+    }
+
+    #[test]
+    fn invalid_parameters_are_refused() {
+        let error = PasswordHasher::new(Argon2Params {
+            memory_kib: 0,
+            iterations: 0,
+            parallelism: 0,
+        })
+        .expect_err("the parameters must be refused");
+
+        assert_eq!(error.code(), crate::error::code::INTERNAL_ERROR);
     }
 }

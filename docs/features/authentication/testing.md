@@ -1,7 +1,7 @@
 # Authentication — testing
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-AUTH-001`](specification.md)
 
@@ -61,12 +61,16 @@ router directly.
 | `src/auth/password.rs` | `hash_is_salted_so_equal_passwords_differ` | Two hashes of the same password differ. |
 | `src/auth/password.rs` | `hash_never_contains_the_plaintext` | The plain password does not appear in the hash. |
 | `src/auth/password.rs` | `malformed_hash_fails_closed` | A malformed or empty stored hash fails verification instead of erroring. |
+| `src/auth/password.rs` | `the_dummy_hash_costs_the_same_as_a_real_one` | The dummy hash used for an unknown address is built with the configured Argon2 parameters, so the two login paths cost the same. |
 | `src/users/service.rs` | `emails_are_normalized` | `"  Ada@Example.COM "` normalizes to `ada@example.com`. |
 | `src/users/service.rs` | `valid_emails_are_accepted` | `"Ada@Example.com"` is accepted and normalized. |
 | `src/users/service.rs` | `invalid_emails_are_rejected` | `""`, `no-at-sign`, `@example.com`, `ada@` and `ada@nodot` are rejected. |
+| `src/users/service.rs` | `an_over_long_email_is_rejected` | An address longer than `MAX_EMAIL_LENGTH` is rejected, and the message names the limit. |
 | `src/users/service.rs` | `weak_passwords_are_rejected_with_field_details` | The rejection carries a violation for the `password` field. |
+| `src/users/service.rs` | `every_unmet_password_rule_is_reported_at_once` | Every unmet rule of the configured policy is reported in one response. |
 | `src/users/service.rs` | `strong_passwords_are_accepted` | `"Correct-Horse-42"` is accepted. |
 | `src/users/service.rs` | `display_names_are_trimmed_and_length_checked` | Names are trimmed, a blank name and a 121-character name are rejected. |
+| `src/users/service.rs` | `the_display_name_keeps_its_own_message` | The display name reports its own length range, not the generic message. |
 | `src/error.rs` | `validation_errors_use_422_and_expose_field_details` | A validation error maps to `422` and exposes the field. |
 | `src/error.rs` | `internal_errors_do_not_leak_details` | The rendered body of an internal error does not contain the internal detail. |
 | `src/error.rs` | `database_errors_do_not_leak_driver_messages` | The rendered body of a database error does not contain the driver message. |
@@ -74,6 +78,16 @@ router directly.
 | `src/ratelimit.rs` | `allows_up_to_the_limit_then_rejects` | The limiter allows exactly `max_requests` and then rejects. |
 | `src/ratelimit.rs` | `clients_are_tracked_independently` | Two clients have independent counters. |
 | `src/ratelimit.rs` | `window_resets_after_the_configured_duration` | The counter resets when the window elapses. |
+| `src/config/tests.rs` | `the_base_configuration_carries_the_documented_defaults` | The defaults the configuration reference promises are the defaults the loader produces. |
+| `src/config/tests.rs` | `the_catalogue_is_loaded_and_complete` | Every catalogue key the code reads is present and non-empty. |
+| `src/config/tests.rs` | `an_environment_variable_overrides_the_file` | An environment variable wins over the file layer, and the keys it does not mention keep the file value. |
+| `src/config/tests.rs` | `the_environment_overlay_overrides_the_base_file` | The environment overlay wins over the base file. |
+| `src/config/tests.rs` | `an_environment_variable_wins_over_the_environment_overlay` | An environment variable wins over the environment overlay. |
+| `src/config/tests.rs` | `a_short_secret_is_refused` | A signing secret under 32 bytes is refused. |
+| `src/config/tests.rs` | `the_placeholder_secret_is_refused_in_production_only` | The documented placeholder is accepted in development and refused in production. |
+| `src/config/tests.rs` | `the_secret_is_never_rendered` | The `Debug` output of the settings redacts the signing secret and the connection URL. |
+| `src/config/tests.rs` | `a_wildcard_cors_origin_is_refused` | A wildcard origin is refused at start-up. |
+| `src/config/tests.rs` | `the_environment_names_are_parsed` | `APP_ENV` accepts only the known environment names. |
 
 ## 3. Deliberately not covered
 

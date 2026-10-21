@@ -1,10 +1,24 @@
 //! Task use cases.
+//!
+//! The service owns the business rules of a task: the length rules of a title
+//! and a description, the ownership rules that are inherited through the
+//! project, and the completion timestamp.
+//!
+//! Every client-facing string comes from the message catalogue, so the wording
+//! of an error is defined once for the whole API.
+
+use std::sync::Arc;
 
 use uuid::Uuid;
 
-use crate::error::{AppError, AppResult, FieldViolation};
+use crate::config::messages::Messages;
+use crate::error::{AppError, AppResult};
+use crate::helpers::{bounded_text, required_text};
 use crate::pagination::{Page, PaginationQuery};
-use crate::tasks::dto::{CreateTaskRequest, TaskQuery, TaskResponse, UpdateTaskRequest};
+use crate::tasks::dto::{
+    CreateTaskRequest, MAX_DESCRIPTION_LENGTH, MAX_TITLE_LENGTH, TaskQuery, TaskResponse,
+    UpdateTaskRequest,
+};
 use crate::tasks::models::{TaskPriority, TaskStatus};
 use crate::tasks::repository::{NewTask, TaskFilters, TaskPatch, TaskRepository};
 
@@ -12,23 +26,31 @@ use crate::tasks::repository::{NewTask, TaskFilters, TaskPatch, TaskRepository};
 #[derive(Debug, Clone)]
 pub struct TaskService {
     repository: TaskRepository,
+    messages: Arc<Messages>,
 }
 
 impl TaskService {
     /// Builds the service.
-    pub fn new(repository: TaskRepository) -> Self {
-        Self { repository }
+    pub fn new(repository: TaskRepository, messages: Arc<Messages>) -> Self {
+        Self {
+            repository,
+            messages,
+        }
     }
 
     /// Creates a task inside a project owned by `owner`.
+    ///
+    /// A project that does not exist, or that belongs to another account, is
+    /// a `404`: the insert and the ownership check are one statement, so a
+    /// task can never be attached to a project the caller does not own.
     pub async fn create(
         &self,
         owner: Uuid,
         project_id: Uuid,
         request: CreateTaskRequest,
     ) -> AppResult<TaskResponse> {
-        let title = validate_title(&request.title)?;
-        let description = validate_description(&request.description)?;
+        let title = validate_title(&request.title, &self.messages)?;
+        let description = validate_description(&request.description, &self.messages)?;
 
         let status = request.status.unwrap_or(TaskStatus::Open);
         let priority = request.priority.unwrap_or(TaskPriority::Medium);
@@ -46,12 +68,15 @@ impl TaskService {
                 position: request.position,
             })
             .await?
-            .ok_or(AppError::NotFound("The requested project does not exist."))?;
+            .ok_or_else(|| AppError::NotFound(self.messages.resources.project_not_found.clone()))?;
 
         Ok(TaskResponse::from(&task))
     }
 
     /// Lists the tasks of a project owned by `owner`.
+    ///
+    /// A project that exists but has no matching task is an empty page, not a
+    /// `404`. The repository tells the two cases apart.
     pub async fn list_for_project(
         &self,
         owner: Uuid,
@@ -71,7 +96,7 @@ impl TaskService {
             .repository
             .list_for_project(owner, project_id, &filters, limit, offset)
             .await?
-            .ok_or(AppError::NotFound("The requested project does not exist."))?;
+            .ok_or_else(|| AppError::NotFound(self.messages.resources.project_not_found.clone()))?;
 
         let items = tasks.iter().map(TaskResponse::from).collect();
 
@@ -84,23 +109,30 @@ impl TaskService {
             .repository
             .find_owned(id, owner)
             .await?
-            .ok_or(AppError::NotFound("The requested task does not exist."))?;
+            .ok_or_else(|| AppError::NotFound(self.messages.resources.task_not_found.clone()))?;
 
         Ok(TaskResponse::from(&task))
     }
 
     /// Applies a partial update to one task owned by `owner`.
+    ///
+    /// An omitted field is left untouched. An explicit empty description is
+    /// kept: it clears the description.
     pub async fn update(
         &self,
         owner: Uuid,
         id: Uuid,
         request: UpdateTaskRequest,
     ) -> AppResult<TaskResponse> {
-        let title = request.title.as_deref().map(validate_title).transpose()?;
+        let title = request
+            .title
+            .as_deref()
+            .map(|title| validate_title(title, &self.messages))
+            .transpose()?;
         let description = request
             .description
             .as_deref()
-            .map(validate_description)
+            .map(|description| validate_description(description, &self.messages))
             .transpose()?;
 
         let task = self
@@ -117,7 +149,7 @@ impl TaskService {
                 },
             )
             .await?
-            .ok_or(AppError::NotFound("The requested task does not exist."))?;
+            .ok_or_else(|| AppError::NotFound(self.messages.resources.task_not_found.clone()))?;
 
         Ok(TaskResponse::from(&task))
     }
@@ -127,7 +159,9 @@ impl TaskService {
         let deleted = self.repository.delete_owned(id, owner).await?;
 
         if !deleted {
-            return Err(AppError::NotFound("The requested task does not exist."));
+            return Err(AppError::NotFound(
+                self.messages.resources.task_not_found.clone(),
+            ));
         }
 
         Ok(())
@@ -135,53 +169,102 @@ impl TaskService {
 }
 
 /// Validates a task title.
-pub fn validate_title(title: &str) -> AppResult<String> {
-    let trimmed = title.trim();
-    let length = trimmed.chars().count();
-
-    if length == 0 {
-        return Err(AppError::validation(vec![FieldViolation::new(
-            "title",
-            "must not be empty",
-        )]));
-    }
-
-    if length > crate::tasks::dto::MAX_TITLE_LENGTH {
-        return Err(AppError::validation(vec![FieldViolation::new(
-            "title",
-            format!(
-                "must be at most {} characters long",
-                crate::tasks::dto::MAX_TITLE_LENGTH
-            ),
-        )]));
-    }
-
-    Ok(trimmed.to_string())
+///
+/// The title is trimmed, and a title that is empty after trimming is
+/// rejected. The stored value is therefore the trimmed one, which is what the
+/// database constraint `tasks_title_length_chk` measures.
+pub fn validate_title(title: &str, messages: &Messages) -> AppResult<String> {
+    required_text(
+        "title",
+        title,
+        MAX_TITLE_LENGTH,
+        &messages.validation.title_too_long,
+        messages,
+    )
 }
 
 /// Validates a task description.
-pub fn validate_description(description: &str) -> AppResult<String> {
-    if description.chars().count() > crate::tasks::dto::MAX_DESCRIPTION_LENGTH {
-        return Err(AppError::validation(vec![FieldViolation::new(
-            "description",
-            format!(
-                "must be at most {} characters long",
-                crate::tasks::dto::MAX_DESCRIPTION_LENGTH
-            ),
-        )]));
-    }
-
-    Ok(description.to_string())
+///
+/// The description is kept verbatim: a description of spaces is stored as it
+/// was sent. The stored value is what the database constraint
+/// `tasks_description_length_chk` measures.
+pub fn validate_description(description: &str, messages: &Messages) -> AppResult<String> {
+    bounded_text(
+        "description",
+        description,
+        MAX_DESCRIPTION_LENGTH,
+        &messages.validation.description_too_long,
+        messages,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::code;
+
+    /// The shipped catalogue, so that the tests exercise the same templates
+    /// the application serves.
+    fn messages() -> Messages {
+        Messages::from_toml(include_str!("../../config/messages.toml"))
+            .expect("the message catalogue parses")
+    }
 
     #[test]
     fn titles_are_trimmed_and_required() {
-        assert_eq!(validate_title("  Ship it  ").unwrap(), "Ship it");
-        assert!(validate_title("  ").is_err());
+        let messages = messages();
+
+        assert_eq!(validate_title("  Ship it  ", &messages).unwrap(), "Ship it");
+        assert!(validate_title("  ", &messages).is_err());
+    }
+
+    #[test]
+    fn descriptions_are_kept_verbatim() {
+        let messages = messages();
+
+        assert_eq!(
+            validate_description("  spaced  ", &messages).unwrap(),
+            "  spaced  "
+        );
+    }
+
+    #[test]
+    fn oversized_titles_and_descriptions_are_rejected() {
+        let messages = messages();
+
+        let long_title = "x".repeat(MAX_TITLE_LENGTH + 1);
+        assert!(validate_title(&long_title, &messages).is_err());
+
+        let long_description = "x".repeat(MAX_DESCRIPTION_LENGTH + 1);
+        assert!(validate_description(&long_description, &messages).is_err());
+    }
+
+    #[test]
+    fn a_validation_failure_carries_the_catalogue_wording() {
+        let messages = messages();
+
+        let error = validate_title("  ", &messages).unwrap_err();
+        let body = error.body();
+
+        assert_eq!(body.error.code, code::VALIDATION_FAILED);
+        assert_eq!(body.error.message, messages.general.validation_failed);
+        assert_eq!(body.error.details[0].field, "title");
+        assert_eq!(body.error.details[0].message, messages.validation.not_empty);
+    }
+
+    #[test]
+    fn a_too_long_title_names_the_limit() {
+        let messages = messages();
+
+        let long_title = "x".repeat(MAX_TITLE_LENGTH + 1);
+        let error = validate_title(&long_title, &messages).unwrap_err();
+        let body = error.body();
+
+        assert_eq!(body.error.details[0].field, "title");
+        assert_eq!(
+            body.error.details[0].message,
+            "must be at most 200 characters long"
+        );
     }
 
     #[test]

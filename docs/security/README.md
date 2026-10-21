@@ -1,7 +1,7 @@
 # ATOM security
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 
 This directory describes the security posture of the ATOM Phase 1 backend:
@@ -28,10 +28,14 @@ failures return one generic message, and the response time of an unknown email
 address is equalised with a dummy Argon2 verification. Registration, login and
 refresh are rate limited per client address. The API never returns database
 internals or secret material: the error envelope is fixed and `AppError`
-redacts everything internal. What the posture does **not** include yet: edge
-rate limiting for a multi-instance deployment, a proxy-aware client address, an
-account-lockout or breach-detection mechanism, compile-time SQL verification, a
-CI pipeline, and a container image. Those limits are recorded in
+redacts everything internal. The configuration is resolved once at start-up
+from three layers — the committed files in `config/`, the environment overlay
+and the environment variables — and a configuration that violates a rule stops
+the process before the socket is bound. The two secrets have no file layer at
+all: they are environment variables. What the posture does **not** include
+yet: edge rate limiting for a multi-instance deployment, a proxy-aware client
+address, an account-lockout or breach-detection mechanism, compile-time SQL
+verification, and a container image. Those limits are recorded in
 [`../engineering/known-issues.md`](../engineering/known-issues.md), not hidden.
 
 ## 2. Documents in this directory
@@ -48,22 +52,22 @@ test that proves the behaviour; where no test exists, that is stated.
 
 | Control | Implemented in | Evidence |
 | ------- | -------------- | -------- |
-| Argon2id password hashing with a 16-byte random salt | [`../../src/auth/password.rs`](../../src/auth/password.rs) | Unit tests in the same file (4) |
+| Argon2id password hashing with a 16-byte random salt | [`../../src/auth/password.rs`](../../src/auth/password.rs) | Unit tests in the same file (6) |
 | Password policy: 12–256 characters, one uppercase, one lowercase, one digit | [`../../src/users/service.rs`](../../src/users/service.rs) | Unit tests in the same file, and `a_weak_password_is_rejected_with_field_details` in [`../../tests/auth_api.rs`](../../tests/auth_api.rs) |
 | Email normalization plus a matching database `CHECK` constraint and unique index | [`../../src/users/service.rs`](../../src/users/service.rs), [`../../migrations/0001_users_and_sessions.sql`](../../migrations/0001_users_and_sessions.sql) | `registration_normalises_the_email_address` in [`../../tests/auth_api.rs`](../../tests/auth_api.rs) |
-| Short-lived HS256 access tokens with issuer and audience validation | [`../../src/auth/token.rs`](../../src/auth/token.rs) | Unit tests in the same file (5), and the authentication cases in [`../../tests/auth_api.rs`](../../tests/auth_api.rs) |
-| A signing secret of at least 32 bytes, with the documented placeholder refused in production | [`../../src/config.rs`](../../src/config.rs) | `short_secrets_are_rejected` and `placeholder_secret_is_rejected_in_production_only` |
+| Short-lived HS256 access tokens with issuer and audience validation | [`../../src/auth/token.rs`](../../src/auth/token.rs) | Unit tests in the same file (6), and the authentication cases in [`../../tests/auth_api.rs`](../../tests/auth_api.rs) |
+| A signing secret of at least 32 bytes, with the documented placeholder refused in production | [`../../src/config/validation.rs`](../../src/config/validation.rs), [`../../src/config/settings.rs`](../../src/config/settings.rs) | `validate_secret` in the configuration layer. `a_short_secret_is_refused` and `the_placeholder_secret_is_refused_in_production_only` in [`../../src/config/tests.rs`](../../src/config/tests.rs). |
 | Refresh tokens stored hashed, rotated on use, reuse detected | [`../../src/auth/token.rs`](../../src/auth/token.rs), [`../../src/auth/service.rs`](../../src/auth/service.rs) | `refresh_rotates_the_token_pair` and `reusing_a_rotated_refresh_token_revokes_every_session` |
 | Logout and per-user session revocation | [`../../src/auth/service.rs`](../../src/auth/service.rs) | `logout_revokes_the_session` and `an_account_cannot_log_out_another_accounts_session` |
 | Authenticated identity derived only from the credential | [`../../src/api/middleware.rs`](../../src/api/middleware.rs) | `protected_routes_reject_missing_and_invalid_credentials` |
 | Ownership enforced in SQL, with `404` for an inaccessible resource | [`../../src/notes/repository.rs`](../../src/notes/repository.rs), [`../../src/projects/repository.rs`](../../src/projects/repository.rs), [`../../src/tasks/repository.rs`](../../src/tasks/repository.rs) | The isolation cases in [`../../tests/notes_api.rs`](../../tests/notes_api.rs) and [`../../tests/projects_tasks_api.rs`](../../tests/projects_tasks_api.rs) |
 | Generic authentication failure with timing equalisation | [`../../src/auth/service.rs`](../../src/auth/service.rs) | `login_fails_with_a_generic_message` and `an_unknown_email_produces_the_same_failure_as_a_wrong_password` |
-| A fixed error envelope that never carries internal detail | [`../../src/error.rs`](../../src/error.rs) | Unit tests in the same file (4) |
-| Per-process rate limiting on registration, login and refresh | [`../../src/ratelimit.rs`](../../src/ratelimit.rs), [`../../src/api/middleware.rs`](../../src/api/middleware.rs) | Unit tests in [`../../src/ratelimit.rs`](../../src/ratelimit.rs) only — **no HTTP-level test exists** |
-| An explicit CORS allowlist, with `*` refused at start-up and credentials disabled | [`../../src/api/mod.rs`](../../src/api/mod.rs) | No automated test |
-| Request body, request duration and panic containment limits | [`../../src/api/mod.rs`](../../src/api/mod.rs), [`../../src/api/extract.rs`](../../src/api/extract.rs) | `an_oversized_body_is_refused` and `a_slow_request_is_abandoned_with_the_error_envelope` in `tests/` |
+| A fixed error envelope that never carries internal detail | [`../../src/error.rs`](../../src/error.rs) | Unit tests in the same file (5) |
+| Per-process rate limiting on registration, login and refresh | [`../../src/ratelimit.rs`](../../src/ratelimit.rs), [`../../src/api/middleware.rs`](../../src/api/middleware.rs) | Unit tests in [`../../src/ratelimit.rs`](../../src/ratelimit.rs) (3), and `the_authentication_endpoints_are_rate_limited` in [`../../tests/auth_api.rs`](../../tests/auth_api.rs) |
+| An explicit CORS allowlist, with `*` and an invalid origin refused at start-up, and credentials disabled | [`../../src/config/validation.rs`](../../src/config/validation.rs), [`../../src/api/mod.rs`](../../src/api/mod.rs) | No automated test |
+| Request body, request duration and panic containment limits | [`../../src/api/mod.rs`](../../src/api/mod.rs), [`../../src/api/extract.rs`](../../src/api/extract.rs) | `an_oversized_body_is_refused` in [`../../tests/auth_api.rs`](../../tests/auth_api.rs) and `a_slow_request_is_abandoned_with_the_error_envelope` in [`../../tests/projects_tasks_api.rs`](../../tests/projects_tasks_api.rs) |
 | Parameterised SQL only | every repository under [`../../src/`](../../src/) | No dedicated test; enforced by the code reviewer |
-| Secrets kept out of the repository | [`.gitignore`](../../.gitignore), [`.env.example`](../../.env.example) | `auth_config_debug_redacts_the_secret` in [`../../src/config.rs`](../../src/config.rs) |
+| Secrets kept out of the repository | [`.gitignore`](../../.gitignore), [`.env.example`](../../.env.example), [`../../config/`](../../config/) | The redaction is implemented by the manual `Debug` implementations in [`../../src/config/settings.rs`](../../src/config/settings.rs), and `the_secret_is_never_rendered` in [`../../src/config/tests.rs`](../../src/config/tests.rs) covers it. |
 
 ## 4. Known limitations
 

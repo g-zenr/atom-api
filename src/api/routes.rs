@@ -3,33 +3,17 @@
 use axum::Router;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme};
-use utoipa::{Modify, OpenApi};
+use utoipa::OpenApi;
+use utoipa::openapi::OpenApi as OpenApiDocument;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::auth::handlers;
+use crate::config::Config;
 use crate::error::AppError;
 use crate::notes::handlers as note_handlers;
 use crate::projects::handlers as project_handlers;
+use crate::state::AppState;
 use crate::tasks::handlers as task_handlers;
-
-pub use super::middleware::not_found;
-
-/// Registers the bearer security scheme in the generated OpenAPI document.
-///
-/// `utoipa` 5 expects security schemes to be added to the component registry
-/// through a modifier rather than through the `components` attribute.
-struct SecurityAddon;
-
-impl Modify for SecurityAddon {
-    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
-        let components = openapi.components.get_or_insert_with(Default::default);
-        components.add_security_scheme(
-            "bearer",
-            SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer)),
-        );
-    }
-}
 
 /// The OpenAPI document for the ATOM API.
 #[derive(OpenApi)]
@@ -93,7 +77,7 @@ impl Modify for SecurityAddon {
             crate::tasks::models::TaskStatus,
             crate::tasks::models::TaskPriority,
             crate::pagination::Pagination,
-        ),
+        )
     ),
     modifiers(&SecurityAddon),
     tags(
@@ -106,8 +90,37 @@ impl Modify for SecurityAddon {
 )]
 pub struct ApiDoc;
 
+/// Registers the bearer security scheme in the generated OpenAPI document.
+///
+/// `utoipa` 5 expects security schemes to be added to the component registry
+/// through a modifier rather than through the `components` attribute.
+struct SecurityAddon;
+
+impl utoipa::Modify for SecurityAddon {
+    fn modify(&self, openapi: &mut OpenApiDocument) {
+        let components = openapi.components.get_or_insert_with(Default::default);
+        components.add_security_scheme(
+            "bearer",
+            utoipa::openapi::security::SecurityScheme::Http(utoipa::openapi::security::Http::new(
+                utoipa::openapi::security::HttpAuthScheme::Bearer,
+            )),
+        );
+    }
+}
+
+/// Builds the OpenAPI document, with the configured title and the crate
+/// version.
+///
+/// The version comes from `Cargo.toml`, so there is one source of truth for it.
+pub fn openapi_document(config: &Config) -> OpenApiDocument {
+    let mut document = ApiDoc::openapi();
+    document.info.title = config.api.title.clone();
+    document.info.version = env!("CARGO_PKG_VERSION").to_string();
+    document
+}
+
 /// Builds the versioned API router.
-pub fn api_routes() -> Router<crate::state::AppState> {
+pub fn api_routes() -> Router<AppState> {
     Router::new()
         // --- authentication ---
         .route("/auth/register", post(handlers::register))
@@ -150,15 +163,15 @@ pub fn api_routes() -> Router<crate::state::AppState> {
         )
 }
 
-/// The Swagger UI explorer, as an Axum router.
+/// The API explorer, as an Axum router.
 ///
 /// `utoipa-swagger-ui` integrates with Axum through `From<SwaggerUi> for
 /// Router<S>`, so the explorer is merged into the application router rather
-/// than used as a handler. The router serves both the UI at
-/// `/api/v1/docs` and the OpenAPI document at `/api/v1/openapi.json`.
-pub fn swagger_ui() -> Router<crate::state::AppState> {
+/// than used as a handler. The router serves both the UI at `/api/v1/docs` and
+/// the OpenAPI document at `/api/v1/openapi.json`.
+pub fn swagger_ui(config: &Config) -> Router<AppState> {
     SwaggerUi::new("/api/v1/docs")
-        .url("/api/v1/openapi.json", ApiDoc::openapi())
+        .url("/api/v1/openapi.json", openapi_document(config))
         .into()
 }
 

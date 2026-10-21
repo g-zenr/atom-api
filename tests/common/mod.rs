@@ -1,14 +1,15 @@
 //! Shared helpers for the integration test suite.
 //!
-//! Every integration test runs against a real PostgreSQL database. To make
-//! that safe, the harness refuses to start unless the target database name
-//! contains `test`; a production database can therefore never be truncated by
-//! an accidental `cargo test` run.
+//! Every integration test runs against a real PostgreSQL database. The harness
+//! applies the migrations, creates a unique account per test and calls the
+//! router directly.
+//!
+//! The configuration starts from [`atom_api::Config::defaults`], which loads
+//! the real `config/` files. The harness then weakens three settings so that
+//! the suite stays fast and deterministic. Nothing else is changed, so a
+//! broken configuration file fails the suite rather than a deployment.
 
 #![allow(dead_code)]
-
-use std::net::SocketAddr;
-use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
@@ -20,13 +21,14 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use atom_api::api;
-use atom_api::config::{
-    Argon2Params, AuthConfig, Config, DatabaseConfig, Environment, RateLimitConfig,
-};
+use atom_api::config::Config;
 use atom_api::state::AppState;
 
 /// Environment variable holding the URL of the disposable test database.
 pub const TEST_DATABASE_URL_VAR: &str = "TEST_DATABASE_URL";
+
+/// The issuer and the audience the test tokens are signed with.
+const TEST_ISSUER: &str = "atom-api-test";
 
 /// A response captured from the API under test.
 #[derive(Debug)]
@@ -48,13 +50,43 @@ impl TestResponse {
     }
 }
 
-/// Builds a test configuration pointing at the disposable test database.
+/// The base configuration for the test suite.
+///
+/// The starting point is the real configuration, so the tests exercise the
+/// real files and the real parser. Only the settings that would make the
+/// suite slow or flaky are changed.
+pub fn test_config() -> Config {
+    let mut config = Config::defaults().expect("the base configuration must be valid");
+
+    config.database.url = test_database_url();
+
+    // A secret for the tests. It is not a placeholder: it is long enough to
+    // satisfy the production rule as well.
+    config.auth.jwt_secret = "test-signing-secret-that-is-long-enough-32b".to_string();
+    config.auth.issuer = TEST_ISSUER.to_string();
+    config.auth.audience = TEST_ISSUER.to_string();
+
+    // Cheap Argon2 parameters, so that the suite is fast. The logic is
+    // proven, never the cost.
+    config.auth.argon2.memory_kib = 8_192;
+    config.auth.argon2.iterations = 1;
+    config.auth.argon2.parallelism = 1;
+
+    // A raised rate limit, so that the suite is never throttled. The limiter
+    // itself has its own test, with its own limit.
+    config.api.rate_limit.max_requests = 10_000;
+
+    config
+}
+
+/// The URL of the disposable test database.
 ///
 /// # Panics
 ///
-/// Panics when `TEST_DATABASE_URL` is unset, does not point at a database
-/// whose name contains `test`, or cannot be parsed.
-pub fn test_config() -> Config {
+/// Panics when `TEST_DATABASE_URL` is unset, or when the database name does
+/// not contain `test`: a production database must never be truncated by an
+/// accidental `cargo test`.
+pub fn test_database_url() -> String {
     let url = std::env::var(TEST_DATABASE_URL_VAR).unwrap_or_else(|_| {
         panic!(
             "{TEST_DATABASE_URL_VAR} must be set to a disposable test database, e.g. \
@@ -67,37 +99,7 @@ pub fn test_config() -> Config {
         "refusing to run integration tests against '{url}': the database name must contain 'test'"
     );
 
-    Config {
-        environment: Environment::Development,
-        bind_addr: "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
-        cors_allowed_origins: Vec::new(),
-        max_body_bytes: 1024 * 1024,
-        request_timeout: Duration::from_secs(30),
-        log_filter: "warn".to_string(),
-        database: DatabaseConfig {
-            url,
-            max_connections: 5,
-            acquire_timeout: Duration::from_secs(5),
-        },
-        auth: AuthConfig {
-            jwt_secret: "test-signing-secret-that-is-long-enough-32b".to_string(),
-            access_token_ttl: Duration::from_secs(900),
-            refresh_token_ttl: Duration::from_secs(86_400),
-            issuer: "atom-api-test".to_string(),
-            audience: "atom-api-test".to_string(),
-            argon2: Argon2Params {
-                // Cheap parameters keep the suite fast. They are not used for
-                // any security claim.
-                memory_kib: 8_192,
-                iterations: 1,
-                parallelism: 1,
-            },
-        },
-        rate_limit: RateLimitConfig {
-            max_requests: 10_000,
-            window: Duration::from_secs(60),
-        },
-    }
+    url
 }
 
 /// Extracts the database name from a PostgreSQL URL.
@@ -107,10 +109,8 @@ fn database_name(url: &str) -> String {
     path.split('?').next().unwrap_or("").to_string()
 }
 
-/// Connects to the test database, applies migrations and returns the state.
-pub async fn test_state() -> AppState {
-    let config = test_config();
-
+/// Connects to the test database, applies the migrations and builds the state.
+pub async fn state_with(config: Config) -> AppState {
     let pool = PgPoolOptions::new()
         .max_connections(config.database.max_connections)
         .acquire_timeout(config.database.acquire_timeout)
@@ -123,29 +123,26 @@ pub async fn test_state() -> AppState {
         .await
         .expect("migrations must apply to the test database");
 
-    AppState::new(config, pool)
+    AppState::new(config, pool).expect("the state must be built")
 }
 
-/// Connects to the test database with a specific authentication rate limit.
-///
-/// Used to test the rate limiter without waiting for a real window to elapse.
+/// The default test state.
+pub async fn test_state() -> AppState {
+    state_with(test_config()).await
+}
+
+/// A test state with a specific authentication rate limit.
 pub async fn test_state_with_rate_limit(max_requests: u32) -> AppState {
     let mut config = test_config();
-    config.rate_limit.max_requests = max_requests;
+    config.api.rate_limit.max_requests = max_requests;
+    state_with(config).await
+}
 
-    let pool = PgPoolOptions::new()
-        .max_connections(config.database.max_connections)
-        .acquire_timeout(config.database.acquire_timeout)
-        .connect(&config.database.url)
-        .await
-        .expect("the test database must be reachable");
-
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("migrations must apply to the test database");
-
-    AppState::new(config, pool)
+/// A test state with a specific request body limit.
+pub async fn test_state_with_body_limit(max_body_bytes: usize) -> AppState {
+    let mut config = test_config();
+    config.app.limits.max_body_bytes = max_body_bytes;
+    state_with(config).await
 }
 
 /// Builds the application router for the given state.
@@ -203,16 +200,6 @@ pub fn request(
     builder.body(body).expect("the request must be valid")
 }
 
-/// A registered user together with their tokens.
-#[derive(Debug, Clone)]
-pub struct TestUser {
-    pub id: Uuid,
-    pub email: String,
-    pub password: String,
-    pub access_token: String,
-    pub refresh_token: String,
-}
-
 /// Generates a unique email address for a test user.
 pub fn unique_email(prefix: &str) -> String {
     format!("{prefix}-{}@example.test", Uuid::new_v4())
@@ -252,6 +239,23 @@ pub async fn register_user(app: &Router, prefix: &str) -> TestUser {
     }
 }
 
+/// Logs a user in and returns the token pair.
+pub async fn login_user(app: &Router, user: &TestUser) -> String {
+    let response = send(
+        app,
+        request(
+            Method::POST,
+            "/api/v1/auth/login",
+            None,
+            Some(json!({ "email": user.email, "password": user.password })),
+        ),
+    )
+    .await;
+
+    let body = response.expect_status(StatusCode::OK);
+    body["tokens"]["access_token"].as_str().unwrap().to_string()
+}
+
 /// Creates a project owned by the given user and returns its id.
 pub async fn create_project(app: &Router, user: &TestUser, name: &str) -> Uuid {
     let response = send(
@@ -269,27 +273,46 @@ pub async fn create_project(app: &Router, user: &TestUser, name: &str) -> Uuid {
     Uuid::parse_str(body["id"].as_str().unwrap()).unwrap()
 }
 
-/// Connects to the test database with a specific request body limit.
-pub async fn test_state_with_body_limit(max_body_bytes: usize) -> AppState {
-    let mut config = test_config();
-    config.max_body_bytes = max_body_bytes;
+/// Creates a task inside a project and returns its id.
+pub async fn create_task(app: &Router, user: &TestUser, project_id: Uuid, title: &str) -> Uuid {
+    let response = send(
+        app,
+        request(
+            Method::POST,
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&user.access_token),
+            Some(json!({ "title": title })),
+        ),
+    )
+    .await;
 
-    let pool = PgPoolOptions::new()
-        .max_connections(config.database.max_connections)
-        .acquire_timeout(config.database.acquire_timeout)
-        .connect(&config.database.url)
-        .await
-        .expect("the test database must be reachable");
+    let body = response.expect_status(StatusCode::CREATED);
+    Uuid::parse_str(body["id"].as_str().unwrap()).unwrap()
+}
 
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("migrations must apply to the test database");
-
-    AppState::new(config, pool)
+/// Asserts the pagination block of a list response.
+pub fn assert_pagination(body: &Value, total: i64, limit: i64, offset: i64) {
+    assert_eq!(body["pagination"]["total"], total, "unexpected total");
+    assert_eq!(body["pagination"]["limit"], limit, "unexpected limit");
+    assert_eq!(body["pagination"]["offset"], offset, "unexpected offset");
+    assert_eq!(
+        body["pagination"]["has_more"],
+        offset + limit < total,
+        "unexpected has_more"
+    );
 }
 
 /// The stored hash of a refresh token, as the database records it.
 pub fn hash_of(refresh_token: &str) -> String {
     atom_api::auth::token::hash_refresh_token(refresh_token)
+}
+
+/// A registered user together with its tokens.
+#[derive(Debug, Clone)]
+pub struct TestUser {
+    pub id: Uuid,
+    pub email: String,
+    pub password: String,
+    pub access_token: String,
+    pub refresh_token: String,
 }

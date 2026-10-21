@@ -36,13 +36,15 @@ atom/api/
 │   ├── agents/             # the agent team
 │   ├── commands/           # reusable slash commands
 │   └── skills/             # reusable workflows
+├── config/                 # the committed configuration files; no secrets
 ├── migrations/             # SQLx migrations (source of truth for the schema)
 ├── scripts/                # validation and helper scripts
 ├── src/
 │   ├── api/                # routing, middleware, extractors
 │   ├── auth/               # authentication and token lifecycle
 │   ├── users/ notes/ projects/ tasks/
-│   ├── config.rs error.rs state.rs pagination.rs ratelimit.rs health.rs
+│   ├── config/             # settings, loader, validation, message catalogue
+│   ├── error.rs state.rs pagination.rs ratelimit.rs health.rs
 ├── tests/                  # HTTP-level integration tests
 └── docs/                   # the project knowledge base
 ```
@@ -121,6 +123,22 @@ These are not negotiable and are not stylistic preferences.
 10. **Public contracts are documented.** A new endpoint or a changed response
     shape means updating the OpenAPI annotations, `docs/api/` and the relevant
     feature documents.
+11. **Inspect the configuration surface before introducing a setting.**
+    Search `config/`, `.env.example` and the reference table in
+    [`docs/architecture/deployment.md`](docs/architecture/deployment.md) first:
+    the value may already exist. Then decide where it belongs.
+    - A value the **database** enforces stays a constant in the code, next to
+      the constraint it mirrors, because a migration is the enforced copy and
+      cannot read a file.
+    - A value that is part of the **published client contract** — the
+      pagination limits — stays in a file, and changing it is a breaking
+      change.
+    - A value a **deployment** may need to change at deploy time also gets an
+      environment variable.
+
+    A new setting is added to the file, to the typed structure, to the loader,
+    to the validation, to `.env.example`, to the reference table and to the
+    tests — **in the same change**.
 
 ---
 
@@ -141,8 +159,12 @@ task follows this protocol.** The full version lives in
    and `docs/decisions/`.
 6. Check `docs/engineering/known-issues.md` and
    `docs/engineering/open-questions.md`.
-7. Inspect the real source, migrations, tests and `git diff`.
-8. Decide whether the task conflicts with an accepted requirement or an
+7. Read the configuration reference in
+   [`docs/architecture/deployment.md`](docs/architecture/deployment.md) and
+   [`config/README.md`](config/README.md) before changing a setting, and
+   update both when a setting changes.
+8. Inspect the real source, migrations, tests and `git diff`.
+9. Decide whether the task conflicts with an accepted requirement or an
    unresolved decision. If it does, **stop and say so** instead of silently
    changing product behaviour.
 
@@ -217,12 +239,19 @@ These files must never be committed, and must never be read into a transcript
 or a log:
 
 - `.env` and any `.env.*` file other than `.env.example`
+- the root `config/` directory, when a file in it holds a secret: the
+  directory is committed and embedded in the binary, so **no file in it may
+  contain a secret**. The signing secret and the database URL have no file
+  layer at all — they are the `APP_JWT_SECRET` and `DATABASE_URL` environment
+  variables
 - `*.pem`, `*.key`, `id_rsa*`
 - anything under `.ssh/`
 - `credentials.json`, `secrets/`
 - the OpenCode global configuration in `~/.config/opencode/`
 
-`.env.example` contains placeholders only and is safe to commit.
+`.env.example` contains placeholders only and is safe to commit. The files in
+`config/` are committed and are safe to commit **as long as they hold no
+secret**.
 
 ---
 

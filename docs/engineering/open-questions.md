@@ -1,7 +1,7 @@
 # ATOM open questions
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 
 Product and architecture decisions that have not been taken yet. Each question
@@ -300,6 +300,38 @@ column in that document is marked as unassigned.
 **Related.** [`../roadmap.md`](../roadmap.md);
 [`../project-truth.md`](../project-truth.md) §3 and §5.
 
+### Q-12 — Should a deployment be able to reload a configuration change without a restart, and which settings may change at run time?
+
+**State:** Open · **Blocks:** nothing today
+
+**Context.** The configuration was centralised in the `config/` directory and
+resolved once at start-up by
+[`../../src/config/loader.rs`](../../src/config/loader.rs). A deployment
+therefore changes a setting by writing a file or by setting an environment
+variable, and the change takes effect only after a restart. The settings that
+are expensive to change at run time are not the same as the ones that are
+dangerous to change at run time: the request timeout and the rate limit could
+plausibly be adjusted without a restart, while the signing secret, the
+database URL and the pagination limits cannot be changed under a running
+process without changing what the running process means. The related question
+is whether the trusted-proxy list — the design of which is `Q-07` — becomes a
+configuration setting; it is currently not a setting at all.
+
+**Options.**
+
+| Option | Impact |
+| ------ | ------ |
+| No reload at all. The configuration is resolved once, at start-up, and a change needs a restart. | The current decision. The cost is that a deployment cannot react to a change without a restart, and a supervised process must be restarted deliberately. The cost of a reload — a partially applied configuration, a secret that changes under a running process — never arises. |
+| A reload of the non-secret settings only. The secrets, the pagination limits and the bind address stay fixed for the life of the process; the rest can be re-read. | A deployment can raise the rate limit or shorten the request timeout without a restart. The cost is a defined subset of reloadable settings, a mechanism to trigger the reload, and the question of what happens to in-flight requests when a limit changes. |
+| A full reload, including the secrets. | Everything can change without a restart. The cost is the largest: a secret that changes under a running process invalidates the tokens that were signed with the old one, and a reload that fails halfway leaves the process in a state that is neither the old configuration nor the new one. |
+
+**Who decides.** The product owner, with the architect and the `devops`
+specialist.
+
+**Related.** `KI-014` in [`known-issues.md`](known-issues.md); `Q-07`;
+[`../../config/README.md`](../../config/README.md);
+[`../architecture/deployment.md`](../architecture/deployment.md).
+
 ---
 
 ## Summary
@@ -317,3 +349,4 @@ column in that document is marked as unassigned.
 | `Q-09` | The rate limiter: fail open or closed, and which algorithm | Open | Nothing today |
 | `Q-10` | Which license does ATOM use? | Open | The publication of the repository |
 | `Q-11` | What are the phases after Phase 1? | Open | The roadmap's phase column |
+| `Q-12` | Reload without a restart, and which settings may change at run time | Open | Nothing today |

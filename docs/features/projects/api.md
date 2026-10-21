@@ -1,7 +1,7 @@
 # Projects — API
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-PROJ-001`](specification.md)
 
@@ -61,11 +61,18 @@ The task endpoints that live under a project are documented in
 
 ### Query parameters — `GET /api/v1/projects`
 
+The endpoint accepts the two shared pagination parameters, which are declared
+once for the whole API in `PaginationQuery`, and one filter of its own:
+
 | Parameter | Type | Default | Meaning |
 | --------- | ---- | ------- | ------- |
-| `search` | string | — | Case-insensitive substring match over the name **or** the description. Trimmed; an empty value is treated as no search. |
 | `limit` | integer | `20` | Page size. Capped at 100. A value of zero or less falls back to 20. |
 | `offset` | integer | `0` | Items to skip. A negative value falls back to 0. |
+| `search` | string | — | Case-insensitive substring match over the name **or** the description. Trimmed; an empty value is treated as no search. |
+
+`limit` and `offset` are the shared pagination parameters; `search` is the
+filter of the projects feature. The convention is described in
+[`conventions.md`](../../api/conventions.md) §5.
 
 ## 3. `GET /api/v1/projects`
 
@@ -244,4 +251,6 @@ curl -i -X DELETE http://127.0.0.1:3000/api/v1/projects/3c5a91e7-0d64-4b28-8f10-
 The five operations are registered in `src/api/routes.rs` and appear in the
 generated document at `/api/v1/openapi.json` with the `ProjectResponse`,
 `ProjectPage`, `CreateProjectRequest` and `UpdateProjectRequest` schemas.
-The `bearer` security scheme is applied to all five.
+The `bearer` security scheme is applied to all five. The list operation
+declares the `ProjectQuery` filter and the shared `PaginationQuery`
+separately, so `limit` and `offset` appear exactly once in the document.

@@ -1,7 +1,7 @@
 # ATOM verification policy
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 
 This document says what must pass before a change is considered complete, what
@@ -59,6 +59,30 @@ unique, and that every feature directory has its five documents.
 `make check` runs gates 1 to 3 in order. `make docs-check` runs the
 documentation gate.
 
+### 1.1 The configuration gate
+
+A change that adds, removes or alters a setting is not complete until three
+things have happened:
+
+1. **The configuration tests pass.** A setting has a default, an override and
+   a validation rule, and each of the three is a case in
+   [`../../src/config/`](../../src/config/). The cases the loader needs are
+   listed in [`strategy.md`](strategy.md) §1.5.
+2. **The documentation checker passes.** The setting appears in
+   [`.env.example`](../../.env.example), and every link in the documents that
+   mention it resolves.
+3. **The configuration reference is updated in the same change.** The
+   reference table in [`../architecture/deployment.md`](../architecture/deployment.md)
+   is the operator-facing contract; a setting that is not in it does not exist
+   for a deployment. The rule that a setting belongs in the file, in the typed
+   structure, in the loader, in the validation, in `.env.example`, in the
+   reference table and in the tests — all in the same change — is
+   [`../../AGENTS.md`](../../AGENTS.md) §4.
+
+The gate is not a fourth command: it is the requirement that the three gates
+above are run on a tree in which the configuration, the reference table and the
+tests agree.
+
 ## 2. What "verified" means
 
 The status vocabulary is defined in [`../../AGENTS.md`](../../AGENTS.md) §6. For
@@ -94,6 +118,7 @@ depth. This is the risk table of the
 | ----- | -------- | -------------- |
 | Routine | A refactor, a documentation change, a test | Implement, run the targeted test, run the three gates, review. |
 | Contract-affecting | A new endpoint, a changed DTO | The above, plus the API documents and the OpenAPI annotations, plus an ADR if a decision was made. |
+| Configuration-affecting | A setting is added, removed or changed | The above, plus the configuration gate in §1.1: the configuration tests, `.env.example`, and the reference table in [`../architecture/deployment.md`](../architecture/deployment.md). |
 | Security-sensitive | Authentication, tokens, authorization | The above, plus the `auth-security` specialist, plus the security cases listed in [`../security/secure-development.md`](../security/secure-development.md) §3. |
 | Data-changing | A migration, a schema change | The above, plus the `database` specialist, plus the migration applied to a clean database. |
 | Cross-module | A refactor that crosses module boundaries | The above, plus the design agreed by the `architect` **before** the code is written. |

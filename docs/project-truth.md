@@ -1,7 +1,7 @@
 # ATOM — project truth
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** product owner, maintained by the `docs` agent
 > **Authority:** this file defines ATOM's *agreed product requirements*. Source
 > code does not change it. See [`README.md`](README.md) for the full authority
@@ -363,7 +363,7 @@ blocks Phase 1 work that does not depend on the answer.
 | Area | Status | Evidence |
 | ---- | ------ | -------- |
 | Rust/Axum modular monolith | Implemented | `src/`, `Cargo.toml` |
-| Typed configuration with start-up validation | Implemented | `src/config.rs` |
+| Typed configuration with start-up validation | Implemented | `src/config/` |
 | Central error contract | Implemented | `src/error.rs`, `src/api/extract.rs` |
 | SQLx migrations | Implemented | `migrations/0001..0003` |
 | User registration, normalization, uniqueness | Verified | `tests/auth_api.rs` |

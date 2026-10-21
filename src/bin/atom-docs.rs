@@ -1,12 +1,12 @@
-//! `atom-docs` — the documentation consistency checker.
+//! `atom-docs` — the repository consistency checker.
 //!
-//! A small, dependency-free checker that validates the documentation tree.
-//! It is a development tool, not part of the API surface, but it ships with
-//! the crate so that every contributor can run it without installing anything
-//! else.
+//! A small, dependency-free checker that validates the documentation tree and
+//! the configuration surface. It is a development tool, not part of the API
+//! surface, but it ships with the crate so that every contributor can run it
+//! without installing anything else.
 //!
 //! ```text
-//! cargo run --bin atom-docs            # check the docs/ tree
+//! cargo run --bin atom-docs            # check the docs/ tree and config/
 //! cargo run --bin atom-docs --strict   # treat warnings as failures
 //! ```
 //!
@@ -18,6 +18,9 @@
 //! 4. Every ADR has a status and a unique identifier.
 //! 5. Every change-log identifier is unique.
 //! 6. Every feature directory has the five required documents.
+//! 7. The configuration directory has its required files.
+//! 8. `.env.example` and the configuration loader agree about the environment
+//!    variables, in both directions.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -59,6 +62,23 @@ const FEATURE_FILES: [&str; 5] = [
 /// The features that must have a complete document set.
 const FEATURES: [&str; 4] = ["authentication", "notes", "projects", "tasks"];
 
+/// The files that must exist in the configuration directory.
+const CONFIG_FILES: [&str; 7] = [
+    "config/README.md",
+    "config/app.toml",
+    "config/api.toml",
+    "config/auth.toml",
+    "config/database.toml",
+    "config/messages.toml",
+    "config/environments/development.toml",
+];
+
+/// The file that lists the environment variables.
+const ENV_EXAMPLE: &str = ".env.example";
+
+/// The file that reads the environment variables.
+const CONFIG_LOADER: &str = "src/config/loader.rs";
+
 /// The result of the run.
 struct Report {
     errors: Vec<String>,
@@ -97,6 +117,8 @@ fn main() -> ExitCode {
     check_adrs(&root, &mut report);
     check_change_log(&root, &mut report);
     check_feature_directories(&root, &mut report);
+    check_configuration(&root, &mut report);
+    check_environment_variables(&root, &mut report);
 
     for warning in &report.warnings {
         println!("WARN  {warning}");
@@ -381,4 +403,82 @@ fn display(root: &Path, path: &Path) -> String {
         .unwrap_or(path)
         .to_string_lossy()
         .replace('\\', "/")
+}
+
+/// Checks that the configuration directory has its required files.
+fn check_configuration(root: &Path, report: &mut Report) {
+    for required in CONFIG_FILES {
+        if !root.join(required).is_file() {
+            report.error(format!("missing configuration file: {required}"));
+        }
+    }
+}
+
+/// Checks that `.env.example` and the configuration loader agree about the
+/// environment variables, in both directions.
+///
+/// A variable that the code reads but the template does not document is a
+/// variable a developer cannot discover. A variable the template documents but
+/// the code does not read is a setting that does nothing.
+fn check_environment_variables(root: &Path, report: &mut Report) {
+    let example = match fs::read_to_string(root.join(ENV_EXAMPLE)) {
+        Ok(contents) => contents,
+        Err(error) => {
+            report.error(format!("could not read {ENV_EXAMPLE}: {error}"));
+            return;
+        }
+    };
+
+    let loader = match fs::read_to_string(root.join(CONFIG_LOADER)) {
+        Ok(contents) => contents,
+        Err(error) => {
+            report.error(format!("could not read {CONFIG_LOADER}: {error}"));
+            return;
+        }
+    };
+
+    let documented: BTreeSet<&str> = example
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| {
+            let (name, _) = line.split_once('=')?;
+            let name = name.trim();
+            if name.is_empty()
+                || !name
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+            {
+                return None;
+            }
+            Some(name)
+        })
+        .collect();
+
+    let read: BTreeSet<&str> = loader
+        .lines()
+        .filter_map(|line| {
+            let start = line.find('"')?;
+            let rest = &line[start + 1..];
+            let end = rest.find('"')?;
+            Some(&rest[..end])
+        })
+        .filter(|name| name.starts_with("APP_") || name.starts_with("DATABASE_"))
+        .collect();
+
+    for name in read.difference(&documented) {
+        report.error(format!(
+            "the configuration reads {name}, but {ENV_EXAMPLE} does not document it"
+        ));
+    }
+
+    for name in documented.difference(&read) {
+        // `TEST_DATABASE_URL` is read by the test harness, not by the loader.
+        if *name == "TEST_DATABASE_URL" {
+            continue;
+        }
+        report.error(format!(
+            "{ENV_EXAMPLE} documents {name}, but the configuration does not read it"
+        ));
+    }
 }

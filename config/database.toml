@@ -1,0 +1,23 @@
+# ATOM — database settings
+#
+# The base layer of the configuration. See `config/README.md` for the
+# precedence model.
+#
+# The connection URL is deliberately absent: it usually contains a password,
+# so it comes from the `DATABASE_URL` environment variable.
+
+[database]
+# The largest number of pooled connections. 10.
+max_connections = 10
+
+# How long a caller waits for a connection from the pool, in seconds. 5.
+#
+# A zero value would mean "wait forever", which is almost never what an
+# operator means, so it is rejected at start-up.
+acquire_timeout_seconds = 5
+
+# How long the initial connection may take, in seconds. 10.
+#
+# Without a bound, an unreachable database hangs the process before it ever
+# binds a port.
+connect_timeout_seconds = 10

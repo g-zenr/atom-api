@@ -1,0 +1,45 @@
+# ATOM — application settings
+#
+# This file is the base layer of the configuration. It is overridden by
+# `config/environments/<APP_ENV>.toml`, which is in turn overridden by the
+# environment variables listed in `.env.example`.
+#
+# Every value here is a non-secret default that is safe to commit. Secrets
+# never appear in this directory: the signing secret and the database
+# password come from the environment.
+#
+# See `config/README.md` for the full precedence model.
+
+[app]
+# The product name, used in the OpenAPI document and in the start-up log.
+name = "ATOM API"
+
+# The socket the HTTP server binds to. Loopback by default: a deployment that
+# wants the API reachable must set this deliberately.
+bind_addr = "127.0.0.1:3000"
+
+# The `tracing` filter directive. An invalid filter is a start-up error, not a
+# silent fallback to `info`.
+log_filter = "info"
+
+[app.limits]
+# Maximum accepted request body, in bytes. 1 MiB.
+max_body_bytes = 1048576
+
+# Maximum time a request may take before it is abandoned, in seconds. 30.
+request_timeout_seconds = 30
+
+# How long the readiness probe waits for the database, in seconds. 1.
+readiness_probe_timeout_seconds = 1
+
+[app.sessions]
+# How often expired refresh sessions are pruned, in seconds. 3600.
+prune_interval_seconds = 3600
+
+# How long an expired refresh session is kept before it is deleted, in
+# seconds. 86400 (one day).
+#
+# This is a security window, not a tuning knob: a revoked session must be
+# retained long enough that a replayed token is still recognised as *reuse*
+# and triggers the mass revocation. It is recorded in ADR-0003.
+prune_grace_seconds = 86400

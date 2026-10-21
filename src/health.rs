@@ -65,9 +65,12 @@ pub async fn live() -> impl IntoResponse {
     )
 )]
 pub async fn ready(State(state): State<AppState>) -> impl IntoResponse {
-    // A one-second timeout keeps a stalled database from hanging the probe.
+    // The probe uses the configured timeout, so that a slow database cannot
+    // hang the probe.
+    let timeout = state.config.app.limits.readiness_probe_timeout;
+
     let database_ok = tokio::time::timeout(
-        std::time::Duration::from_secs(1),
+        timeout,
         sqlx::query_scalar::<_, i32>("SELECT 1").fetch_one(&state.db),
     )
     .await

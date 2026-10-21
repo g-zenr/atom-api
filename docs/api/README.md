@@ -1,7 +1,7 @@
 # ATOM API
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 
 This directory holds the HTTP contract of the ATOM API. It describes the
@@ -35,8 +35,9 @@ silently away from the code.
   `utoipa-swagger-ui`, which is vendored into the binary, so the explorer
   works without network access.
 
-The document describes the API as it is built. Its `info.version` is `0.1.0`
-and its `info.title` is `ATOM API`.
+The document describes the API as it is built. Its `info.version` is the crate
+version from `Cargo.toml` (`0.1.0`), and its `info.title` is the configured
+`api.title` (`ATOM API` by default).
 
 ## 2. How to regenerate and serve it
 
@@ -125,4 +126,5 @@ pipeline is described in full in
 | What does this endpoint take and return? | The feature's `api.md` |
 | Why does the API answer `404` instead of `403`? | [`error-contract.md`](error-contract.md) §6 |
 | How is the schema defined? | [`../database/schema.md`](../database/schema.md) |
+| What settings does the API read? | [`../../config/README.md`](../../config/README.md) |
 | What are the agreed product requirements? | [`../project-truth.md`](../project-truth.md) |

@@ -1,7 +1,7 @@
 # Projects — architecture
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-PROJ-001`](specification.md)
 
@@ -14,16 +14,19 @@ How the projects feature is built. The public contract is in
 | Module | Responsibility |
 | ------ | -------------- |
 | `src/projects/handlers.rs` | HTTP only: extraction, status codes, response serialization. |
-| `src/projects/service.rs` | Business rules: name and description validation, the ownership-aware use cases, the mapping from a repository miss to `404`. |
+| `src/projects/service.rs` | Business rules: name and description validation, the ownership-aware use cases, the mapping from a repository miss to `404`. Every client-facing string comes from the message catalogue, which the service holds. |
 | `src/projects/repository.rs` | SQL: insert, find owned, list owned with search, partial update, delete owned. |
 | `src/projects/models.rs` | The `Project` persistence shape. |
 | `src/projects/dto.rs` | The public contracts: `ProjectResponse`, `CreateProjectRequest`, `UpdateProjectRequest`, `ProjectQuery`, `ProjectPage`, and the length limits. |
+| `src/helpers/validation.rs` | The shared text validators: `required_text` and `bounded_text`. |
 | `src/pagination.rs` | The shared pagination convention. |
 
 The feature is the **owner of the ownership predicate for tasks**: a task
 carries no `user_id` of its own, and its authorization is inherited from the
 project it belongs to. The task feature implements that inheritance in SQL;
-this feature owns the `projects` table it depends on.
+this feature owns the `projects` table it depends on. It shares its text
+rules with the notes and the tasks features through
+`src/helpers/validation.rs`.
 
 ## 2. Interfaces
 
@@ -39,6 +42,11 @@ this feature owns the `projects` table it depends on.
 
 The `owner` argument is the authenticated `user_id` and is the first
 parameter of every method.
+
+`ProjectService` is built once, in `AppState::new`, and is never rebuilt per
+request. It holds the `ProjectRepository` and the message catalogue, so the
+client-facing wording of an error is defined in `config/messages.toml` and
+nowhere else.
 
 ### 2.2 `ProjectRepository`
 
@@ -57,8 +65,20 @@ concatenated in Rust.
 ### 2.3 Validation
 
 `validate_name` and `validate_description` in `src/projects/service.rs` are
-free functions, unit tested and reusable. The limits live in
-`src/projects/dto.rs` as `MAX_NAME_LENGTH` (120) and
+free functions, unit tested and reusable. Both delegate to the shared
+validators in `src/helpers/validation.rs`:
+
+| Shared validator | Behaviour | Used by |
+| ---------------- | --------- | ------- |
+| `required_text` | Trims the value, rejects a value that is empty after trimming, and rejects a value over the maximum. | `validate_name` |
+| `bounded_text` | Keeps the value verbatim, and rejects a value over the maximum. | `validate_description` |
+
+The trimming behaviour is deliberately not uniform across the API: a title, a
+name and a display name are trimmed, while a body and a description are kept
+verbatim, so that a description of spaces is stored as it was sent. The
+database `CHECK` constraints measure the stored value, so the two must agree.
+
+The limits live in `src/projects/dto.rs` as `MAX_NAME_LENGTH` (120) and
 `MAX_DESCRIPTION_LENGTH` (5 000), and the database repeats them as check
 constraints.
 
@@ -177,6 +197,7 @@ remove the tasks, and it does not need to.
 | `src/api/routes.rs` | Registers the five project routes and the `ProjectResponse`, `ProjectPage`, `CreateProjectRequest` and `UpdateProjectRequest` schemas. |
 | `src/api/middleware.rs` | `AuthUser`, the source of the ownership predicate. |
 | `src/pagination.rs` | The shared list envelope and the clamping. |
+| `src/helpers/validation.rs` | The shared text validators used by the notes, projects and tasks services. |
 | `src/projects/**` | The feature itself. |
 | `src/tasks/repository.rs` | Joins `projects` to authorize every task query. |
 | `migrations/0003_projects_and_tasks.sql` | The `projects` table, its index and the `ON DELETE CASCADE` to `tasks`. |
@@ -206,8 +227,10 @@ The wider context is in
   `ILIKE` scan cannot use an ordinary index for a leading wildcard.
 - **The wildcard characters in the search term are not escaped.** `%` and `_`
   in the term are interpreted by `ILIKE` as wildcards.
-- **The service builds its repository per request**, the same way the notes
-  and tasks services do.
+- **The service is built once, so the catalogue cannot change at run time.**
+  `ProjectService::new` is called in `AppState::new`, not in the handler, and
+  the service holds the message catalogue behind an `Arc`. A change to
+  `config/messages.toml` therefore needs a restart.
 - **The task feature depends on the shape of the ownership predicate.** The
   join `JOIN projects p ON p.id = t.project_id` is repeated in every task
   statement; changing it is a change in two features.

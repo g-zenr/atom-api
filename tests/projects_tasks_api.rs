@@ -792,6 +792,13 @@ async fn a_slow_request_is_abandoned_with_the_error_envelope() {
     use std::time::Duration;
 
     // A router with a very short timeout and a deliberately slow handler.
+    //
+    // The timeout travels in the request context, exactly as it does in the
+    // real router.
+    let mut config = common::test_config();
+    config.app.limits.request_timeout = Duration::from_millis(50);
+    let context = atom_api::api::RequestContext::new(&config);
+
     let app = axum::Router::new()
         .route(
             "/slow",
@@ -801,7 +808,7 @@ async fn a_slow_request_is_abandoned_with_the_error_envelope() {
             }),
         )
         .layer(axum::middleware::from_fn(atom_api::api::timeout_middleware))
-        .layer(axum::Extension(Duration::from_millis(50)))
+        .layer(axum::Extension(context))
         .layer(tower_http::request_id::PropagateRequestIdLayer::new(
             axum::http::HeaderName::from_static("x-request-id"),
         ))

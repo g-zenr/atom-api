@@ -1,7 +1,7 @@
 # Notes — API
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-NOTE-001`](specification.md)
 
@@ -61,12 +61,19 @@ The shared list envelope.
 
 ### Query parameters — `GET /api/v1/notes`
 
+The endpoint accepts the two shared pagination parameters, which are declared
+once for the whole API in `PaginationQuery`, and two filters of its own:
+
 | Parameter | Type | Default | Meaning |
 | --------- | ---- | ------- | ------- |
-| `search` | string | — | Free-text match over the title and the body. Trimmed; an empty value is treated as no search. |
-| `archived` | boolean | `false` | `true` returns only archived notes, `false` or omitted returns only active notes. |
 | `limit` | integer | `20` | Page size. Capped at 100. A value of zero or less falls back to 20. |
 | `offset` | integer | `0` | Items to skip. A negative value falls back to 0. |
+| `search` | string | — | Free-text match over the title and the body. Trimmed; an empty value is treated as no search. |
+| `archived` | boolean | `false` | `true` returns only archived notes, `false` or omitted returns only active notes. |
+
+`limit` and `offset` are the shared pagination parameters; `search` and
+`archived` are the filters of the notes feature. The convention is described
+in [`conventions.md`](../../api/conventions.md) §5.
 
 ## 3. `GET /api/v1/notes`
 
@@ -254,4 +261,6 @@ curl -i -X DELETE http://127.0.0.1:3000/api/v1/notes/1f9c6d2e-8f31-4a0b-9d55-2c7
 The five operations are registered in `src/api/routes.rs` and appear in the
 generated document at `/api/v1/openapi.json` with the `NoteResponse`,
 `NotePage`, `CreateNoteRequest` and `UpdateNoteRequest` schemas. The `bearer`
-security scheme is applied to all five.
+security scheme is applied to all five. The list operation declares the
+`NoteQuery` filters and the shared `PaginationQuery` separately, so `limit` and
+`offset` appear exactly once in the document.

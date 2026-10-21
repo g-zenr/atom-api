@@ -1,7 +1,7 @@
 # ATOM — architecture
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `architect` agent
 
 This directory describes **the ATOM Phase 1 backend as it is built**. It is the
@@ -23,6 +23,7 @@ the accepted decisions in [`../decisions/`](../decisions/README.md).
 | [`data-architecture.md`](data-architecture.md) | The persistence model, the ownership model, the search design, the index strategy, the migration/model relationship and the transaction boundaries. |
 | [`security-architecture.md`](security-architecture.md) | Trust boundaries, the authentication boundary, the authorization model, secret handling, rate limiting and error disclosure. |
 | [`deployment.md`](deployment.md) | Configuration reference, secrets, local development, the production checklist, observability and scaling characteristics. |
+| [`../../config/README.md`](../../config/README.md) | The configuration reference: the layers, the precedence, every setting, the secrets, the message catalogue and the validation rules. |
 
 The architecture documents cross-link rather than repeat. The public HTTP
 contract is described in [`../api/`](../api/README.md), the schema in

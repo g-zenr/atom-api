@@ -10,13 +10,6 @@ use crate::error::AppResult;
 use crate::pagination::PaginationQuery;
 use crate::state::AppState;
 use crate::tasks::dto::{CreateTaskRequest, TaskPage, TaskQuery, TaskResponse, UpdateTaskRequest};
-use crate::tasks::repository::TaskRepository;
-use crate::tasks::service::TaskService;
-
-/// Builds the task service from the shared state.
-fn service(state: &AppState) -> TaskService {
-    TaskService::new(TaskRepository::new(state.db.clone()))
-}
 
 /// `GET /api/v1/projects/{project_id}/tasks` — list a project's tasks.
 #[utoipa::path(
@@ -43,7 +36,8 @@ pub async fn list_tasks(
     Query(query): Query<TaskQuery>,
     Query(pagination): Query<PaginationQuery>,
 ) -> AppResult<Json<TaskPage>> {
-    let page = service(&state)
+    let page = state
+        .tasks
         .list_for_project(user.user_id, project_id, query, pagination)
         .await?;
     Ok(Json(TaskPage::from(page)))
@@ -76,7 +70,8 @@ pub async fn create_task(
     Path(project_id): Path<Uuid>,
     Json(payload): Json<CreateTaskRequest>,
 ) -> AppResult<(StatusCode, Json<TaskResponse>)> {
-    let task = service(&state)
+    let task = state
+        .tasks
         .create(user.user_id, project_id, payload)
         .await?;
     Ok((StatusCode::CREATED, Json(task)))
@@ -105,7 +100,7 @@ pub async fn get_task(
     user: AuthUser,
     Path(task_id): Path<Uuid>,
 ) -> AppResult<Json<TaskResponse>> {
-    let task = service(&state).get(user.user_id, task_id).await?;
+    let task = state.tasks.get(user.user_id, task_id).await?;
     Ok(Json(task))
 }
 
@@ -136,9 +131,7 @@ pub async fn update_task(
     Path(task_id): Path<Uuid>,
     Json(payload): Json<UpdateTaskRequest>,
 ) -> AppResult<Json<TaskResponse>> {
-    let task = service(&state)
-        .update(user.user_id, task_id, payload)
-        .await?;
+    let task = state.tasks.update(user.user_id, task_id, payload).await?;
     Ok(Json(task))
 }
 
@@ -165,6 +158,6 @@ pub async fn delete_task(
     user: AuthUser,
     Path(task_id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
-    service(&state).delete(user.user_id, task_id).await?;
+    state.tasks.delete(user.user_id, task_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

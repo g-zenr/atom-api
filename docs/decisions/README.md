@@ -1,7 +1,7 @@
 # ATOM — architecture decision records
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `architect` agent
 
 An architecture decision record (ADR) records **one** decision, the options
@@ -115,8 +115,9 @@ and a unique identifier, and that every relative link in the tree resolves.
 | [ADR-0001](ADR-0001-modular-monolith.md) | ATOM is a modular monolith | Accepted | 2026-10-21 |
 | [ADR-0002](ADR-0002-rust-axum-postgresql.md) | Rust, Axum and PostgreSQL | Accepted | 2026-10-21 |
 | [ADR-0003](ADR-0003-auth-token-design.md) | The access and refresh token design | Accepted | 2026-10-21 |
-| [ADR-0004](ADR-0004-documentation-as-project-truth.md) | The documentation tree is part of the product | Accepted | 2026-10-21 |
+| [ADR-0004](ADR-0004-documentation-as-project-truth.md) | The documentation tree is part of the product | Superseded | 2026-10-21 |
 | [ADR-0005](ADR-0005-ownership-enforced-in-sql.md) | Ownership is enforced in SQL | Accepted | 2026-10-21 |
+| [ADR-0006](ADR-0006-configuration-source-of-truth.md) | The configuration directory is the source of truth | Accepted | 2026-10-22 |
 
 ## 5. Related documents
 

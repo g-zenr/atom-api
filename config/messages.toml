@@ -1,0 +1,128 @@
+# ATOM — client-facing messages
+#
+# The catalogue lives under its own top-level key so that it never collides
+# with the section of the same name in `auth.toml`.
+#
+# Every string that reaches a client through the error envelope lives here.
+# The stable machine-readable error `code` is **not** in this file: the code
+# is part of the API contract and lives in `src/error.rs`.
+#
+# The messages for a database failure and for an unexpected failure are **not**
+# here: they are part of the error type, because they must never be replaced
+# by something that reveals an internal detail.
+#
+# `{}` is a placeholder. The values substituted into it are always numbers
+# that the application controls, never user input, so there is no injection
+# risk. A placeholder without a matching argument is left as `{}` rather than
+# silently dropped, so a mistake is visible instead of invisible.
+#
+# See `config/README.md` for the precedence model.
+
+[messages.general]
+# 422, when a request fails a validation rule.
+validation_failed = "The request failed validation."
+
+# 413, when the request body is larger than the configured limit.
+payload_too_large = "The request body is larger than the server accepts."
+
+# 429, when the caller exceeded the rate limit.
+rate_limited = "Too many requests. Try again later."
+
+# 408, when the request exceeded the configured timeout.
+timeout = "The request timed out."
+
+# 400, when the request body is not valid JSON.
+bad_request = "The request body is not valid JSON."
+
+# 400, when a path or query parameter cannot be parsed.
+malformed_parameter = "The request path or query string is malformed."
+
+# 400, when the request body is valid JSON but does not match the contract.
+body_mismatch = "The request body does not match the expected format."
+
+# 401, when a request needs a bearer token and does not carry a valid one.
+unauthorized = "Authentication is required. Provide a Bearer access token."
+
+# 404, when the route does not exist.
+route_not_found = "The requested route does not exist."
+
+[messages.auth]
+# 401, for every failed login. The message never says which credential was
+# wrong, so that it cannot be used to enumerate accounts.
+invalid_credentials = "Invalid email or password."
+
+# 401, when a bearer token is malformed, expired or signed with another key.
+access_token_invalid = "The access token is invalid or expired."
+
+# 401, when the presented refresh token is not known.
+refresh_token_invalid = "The refresh token is invalid."
+
+# 401, when a refresh token is presented a second time. Every session of the
+# user is revoked at the same time.
+refresh_token_reused = "The refresh token has already been used. All sessions have been revoked."
+
+# 401, when the refresh token has passed its absolute lifetime.
+refresh_token_expired = "The refresh token has expired."
+
+# 403, when the account has been disabled.
+account_disabled = "This account is disabled. Contact an administrator."
+
+# 403, when a caller tries to revoke a session that belongs to somebody else.
+not_own_session = "You may only revoke your own sessions."
+
+# 409, when the email address is already registered.
+email_already_registered = "An account with this email address already exists."
+
+# 422, when the application and the database disagree about a rule. The
+# database message is not returned, because it can contain the failing row.
+database_constraint = "The request failed a database constraint."
+
+[messages.validation]
+# The address is not shaped like an address.
+email_invalid = "must be a valid email address"
+
+# The address is longer than the RFC 5321 path limit of 254 characters.
+email_too_long = "must be at most {} characters long"
+
+# The password is shorter than the configured minimum.
+password_too_short = "must be at least {} characters long"
+
+# The password is longer than the configured maximum.
+password_too_long = "must be at most {} characters long"
+
+# The password has no uppercase letter.
+password_needs_uppercase = "must contain at least one uppercase letter"
+
+# The password has no lowercase letter.
+password_needs_lowercase = "must contain at least one lowercase letter"
+
+# The password has no digit.
+password_needs_digit = "must contain at least one digit"
+
+# The display name is outside the accepted length range.
+display_name_length = "must be between {} and {} characters long"
+
+# The value is empty after trimming.
+not_empty = "must not be empty"
+
+# The title is longer than the accepted maximum.
+title_too_long = "must be at most {} characters long"
+
+# The body is longer than the accepted maximum.
+content_too_long = "must be at most {} characters long"
+
+# The description is longer than the accepted maximum.
+description_too_long = "must be at most {} characters long"
+
+[messages.resources]
+# 404, when the user does not exist.
+user_not_found = "The requested user does not exist."
+
+# 404, when the note does not exist, or is not owned by the caller.
+note_not_found = "The requested note does not exist."
+
+# 404, when the project does not exist, or is not owned by the caller.
+project_not_found = "The requested project does not exist."
+
+# 404, when the task does not exist, or is not owned by the caller.
+task_not_found = "The requested task does not exist."

@@ -1,7 +1,7 @@
 # ATOM secure development rules
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 
 These are the rules a change to this repository must follow, and the concrete
@@ -71,30 +71,50 @@ does not own, and the service converts that into `AppError::NotFound`.
 **Rule.** A password, a token, the signing secret and the database URL must
 never appear in a log line, an error message or an API response. Configuration
 types that carry a secret implement `Debug` manually and print a redaction
-placeholder. The panic handler must not log the panic payload.
+placeholder. The panic handler must not log the panic payload. **No file in
+[`../../config/`](../../config/) may contain a secret**: the directory is
+committed and embedded in the binary, and the two secrets — `DATABASE_URL` and
+`APP_JWT_SECRET` — have no file layer at all.
 
 **Why.** Logs and error bodies outlive the request and reach people and
-systems that the request never did.
+systems that the request never did. A committed configuration file outlives
+the deployment it was written for, and reaches everybody who clones the
+repository.
 
-**Check.** See §2. The `Debug` implementations of `AuthConfig` and
-`DatabaseConfig` must print `[REDACTED]`.
+**Check.** See §2. The `Debug` implementations of `AuthSettings` and
+`DatabaseSettings` must print `[REDACTED]`, and no committed configuration file
+may hold a secret-shaped value.
 
-**Test.** `auth_config_debug_redacts_the_secret` in
-[`../../src/config.rs`](../../src/config.rs), and the error-envelope tests in
-[`../../src/error.rs`](../../src/error.rs).
+**Test.** The error-envelope tests in [`../../src/error.rs`](../../src/error.rs).
+The redaction of the two configuration types needs a unit test next to them in
+[`../../src/config/settings.rs`](../../src/config/settings.rs); **no such test
+is in the tree at the time of writing**, because the coverage was not carried
+over when the configuration module became a directory. It is listed as a gap
+in [`../testing/strategy.md`](../testing/strategy.md) §6.
 
 ### SD-5 — No `unwrap` or `expect` in a request path
 
 **Rule.** A handler, a service or a repository returns `Result` and uses `?`.
-`unwrap` and `expect` are acceptable in tests, in the `main` start-up path and
-in the start-up assertions in [`../../src/api/mod.rs`](../../src/api/mod.rs) —
-nowhere else.
+`unwrap` and `expect` are acceptable in tests, in the `main` start-up path, in
+[`../../src/telemetry.rs`](../../src/telemetry.rs), in the development tool
+[`../../src/bin/atom-docs.rs`](../../src/bin/atom-docs.rs) and in the
+default-value helpers of
+[`../../src/config/settings.rs`](../../src/config/settings.rs) — nowhere else.
+The CORS allowlist is validated when the configuration is loaded, so the router
+needs no assertion of its own.
 
 **Why.** An `unwrap` in a request path turns a recoverable failure into a
 panic, which the panic layer converts into a `500` while discarding the reason.
 
 **Check.** See §2. Every hit must be inside a `#[cfg(test)]` module, in
-[`../../src/telemetry.rs`](../../src/telemetry.rs), or in a start-up assertion.
+[`../../src/telemetry.rs`](../../src/telemetry.rs), in a default-value helper
+that parses a constant, or in the development tool. Nowhere else.
+
+The CORS allowlist is validated when the configuration is loaded, so the router
+needs no assertion of its own. The `panic!` that
+[`../../src/api/mod.rs`](../../src/api/mod.rs) still holds for an origin that
+cannot be parsed is unreachable — the allowlist it reads was refused at
+start-up — and it is a finding until it is removed.
 
 **Test.** The behaviour of the affected path is covered by a case that would
 fail if the code panicked.
@@ -195,10 +215,11 @@ access token, which is not guessable. A rejected request answers `429` with a
 
 **Check.** The handler calls `enforce_rate_limit` as its first action.
 
-**Test.** There is currently **no** HTTP-level test of the limiter. The
+**Test.** `the_authentication_endpoints_are_rate_limited` in
+[`../../tests/auth_api.rs`](../../tests/auth_api.rs) drives the login endpoint
+past the limit and asserts the `429` status and the `rate_limited` code. The
 limiter's own algorithm is covered by the unit tests in
-[`../../src/ratelimit.rs`](../../src/ratelimit.rs). See
-[`../engineering/known-issues.md`](../engineering/known-issues.md).
+[`../../src/ratelimit.rs`](../../src/ratelimit.rs).
 
 ### SD-13 — Never trust `X-Forwarded-For`
 
@@ -215,14 +236,19 @@ comment that explains why it is not read.
 
 ### SD-14 — CORS is an explicit allowlist
 
-**Rule.** `APP_CORS_ALLOWED_ORIGINS` lists the exact origins. An empty list
-disables CORS. A `*` entry is refused at start-up. Credentials are never
-enabled.
+**Rule.** The allowlist in `api.cors.allowed_origins` — or the
+`APP_CORS_ALLOWED_ORIGINS` variable that overrides it — lists the exact
+origins. An empty list disables CORS. A `*` entry, and an origin that is not a
+valid header value, are refused at start-up with a `ConfigError` from
+[`../../src/config/validation.rs`](../../src/config/validation.rs), before the
+socket is bound. Credentials are never enabled.
 
 **Why.** A wildcard with credentials is rejected by browsers and is a
-cross-origin credential foot-gun.
+cross-origin credential foot-gun. A refusal at start-up is better than a
+panic in the router or a layer that silently accepts every origin.
 
-**Check.** See §2: no `allow_credentials`, no wildcard origin.
+**Check.** See §2: no `allow_credentials`, no wildcard origin. The refusal
+lives in the configuration layer, not in the router.
 
 **Test.** No automated test exists. The behaviour is verified by review and by
 starting the server with a wildcard and observing that it refuses to start.
@@ -322,10 +348,25 @@ cross-account session-revocation path in the logout handler. A new
 rg -n '(tracing::)?(info|warn|error|debug)!' src --glob '*.rs' | rg -i 'password|secret|token|url'
 # The configuration types must redact.
 rg -n 'REDACTED' src --glob '*.rs'
+# No committed configuration file may carry a secret-shaped value.
+rg -n -i '(jwt_secret|database_url|password|secret|token|api_key)\s*=\s*"[^"]{8,}"' config --glob '*.toml'
 ```
 
 The first command expects **no output**. The second expects the redaction of
-the `AuthConfig` signing secret and of the `DatabaseConfig` connection URL.
+the `AuthSettings` signing secret and of the `DatabaseSettings` connection URL.
+The third expects **no output**: the configuration directory is committed and
+embedded in the binary, so a secret in a file there is a secret in the
+published source. The two secrets have no file layer at all — they are the
+`DATABASE_URL` and `APP_JWT_SECRET` environment variables.
+
+On Windows without ripgrep, the third command is:
+
+```powershell
+Get-ChildItem -Recurse -File -Path config -Filter *.toml |
+  Select-String -Pattern '(jwt_secret|database_url|password|secret|token|api_key)\s*=\s*"[^"]{8,}"' -CaseSensitive:$false
+```
+
+It must report no match.
 
 ### SD-5 and SD-6 — no `unwrap`, `expect` or `panic!` in a request path
 
@@ -335,10 +376,14 @@ rg -n '\.unwrap\(\)|\.expect\(|panic!|unreachable!|todo!|unimplemented!' src --g
 
 Every hit must be inside a `#[cfg(test)]` module, in
 [`../../src/telemetry.rs`](../../src/telemetry.rs) — the start-up of the
-tracing subscriber — in the start-up assertion in
-[`../../src/api/mod.rs`](../../src/api/mod.rs), or in the development tool
+tracing subscriber — in a default-value helper in
+[`../../src/config/settings.rs`](../../src/config/settings.rs) that parses a
+constant, or in the development tool
 [`../../src/bin/atom-docs.rs`](../../src/bin/atom-docs.rs). Nowhere else. A
-hit in a handler, a service or a repository is a finding.
+hit in a handler, a service or a repository is a finding. The only other hit
+that is tolerated is the unreachable `panic!` in the CORS layer of
+[`../../src/api/mod.rs`](../../src/api/mod.rs), and it is a finding until the
+allowlist is built without it.
 
 ### SD-13 and SD-14 — the proxy header and the CORS allowlist
 
@@ -349,8 +394,11 @@ rg -n 'allow_origin' src --glob '*.rs'
 ```
 
 The first expects only the explanatory comment. The second expects no output.
-The third expects exactly the allowlist built from the configuration, with a
-start-up assertion that refuses `*`.
+The third expects exactly the allowlist built from the configuration. The
+refusal of a wildcard, and of an origin that is not a valid header value,
+happens in [`../../src/config/validation.rs`](../../src/config/validation.rs)
+and stops the process before the socket is bound; the router does not assert
+it.
 
 ### SD-9 — migrations are append-only
 
@@ -369,6 +417,7 @@ transcript, a log or a report:
 | Path | Why |
 | ---- | --- |
 | `.env`, and any `.env.*` other than `.env.example` | Environment values, including the database URL and the signing secret. |
+| any file in [`../../config/`](../../config/) that holds a secret | The configuration directory is committed and embedded in the binary. A secret in a file there is a secret in the published source. `DATABASE_URL` and `APP_JWT_SECRET` have no file layer at all. |
 | `*.pem`, `*.key`, `id_rsa*`, `id_ed25519*` | Private key material. |
 | anything under `.ssh/` | Private keys and known-hosts data. |
 | `credentials.json`, `secrets/` | Service credentials. |
@@ -378,7 +427,9 @@ transcript, a log or a report:
 
 `.env.example` holds placeholders only and is safe to commit. The same list
 appears in [`../../AGENTS.md`](../../AGENTS.md) §8, so that an agent reads it
-before it starts working.
+before it starts working. One entry differs in wording: the configuration
+directory itself **is** committed — what must never be committed is a secret
+inside it.
 
 ```bash
 git check-ignore -v .env

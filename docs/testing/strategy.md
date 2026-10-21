@@ -1,7 +1,7 @@
 # ATOM testing strategy
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 
 This document describes how the ATOM backend is tested: the layers, what each
@@ -27,27 +27,35 @@ before a change is complete. This one says how the tests are built.
 
 Unit tests cover the rules that are pure functions of their input: email
 normalization, the password policy, the display-name rule, note and project
-and task validation, the pagination convention, the password hasher, the token
-service, the error contract, the configuration validation and the rate
-limiter's algorithm.
+and task validation, the shared text validators, the pagination convention, the
+password hasher, the token service, the error contract and the rate limiter's
+algorithm.
 
 They are cheap, they run without a database, and they are where a boundary
 value belongs.
 
-**Current size:** 39 unit tests in 10 modules.
+**Current size:** 80 unit tests in 9 modules.
 
 | Module | Tests |
 | ------ | ----- |
-| [`../../src/config.rs`](../../src/config.rs) | 6 |
-| [`../../src/users/service.rs`](../../src/users/service.rs) | 6 |
-| [`../../src/auth/token.rs`](../../src/auth/token.rs) | 5 |
-| [`../../src/auth/password.rs`](../../src/auth/password.rs) | 4 |
-| [`../../src/error.rs`](../../src/error.rs) | 4 |
-| [`../../src/ratelimit.rs`](../../src/ratelimit.rs) | 3 |
-| [`../../src/notes/service.rs`](../../src/notes/service.rs) | 3 |
+| [`../../src/config/tests.rs`](../../src/config/tests.rs) | 27 |
+| [`../../src/auth/`](../../src/auth/) | 12 |
+| [`../../src/users/service.rs`](../../src/users/service.rs) | 9 |
+| [`../../src/tasks/service.rs`](../../src/tasks/service.rs) | 7 |
+| [`../../src/auth/password.rs`](../../src/auth/password.rs) | 6 |
+| [`../../src/auth/token.rs`](../../src/auth/token.rs) | 6 |
+| [`../../src/notes/service.rs`](../../src/notes/service.rs) | 5 |
+| [`../../src/projects/service.rs`](../../src/projects/service.rs) | 5 |
+| [`../../src/error.rs`](../../src/error.rs) | 5 |
+| [`../../src/helpers/validation.rs`](../../src/helpers/validation.rs) | 3 |
 | [`../../src/pagination.rs`](../../src/pagination.rs) | 3 |
-| [`../../src/tasks/service.rs`](../../src/tasks/service.rs) | 3 |
-| [`../../src/projects/service.rs`](../../src/projects/service.rs) | 2 |
+| [`../../src/ratelimit.rs`](../../src/ratelimit.rs) | 3 |
+| [`../../src/utils/text.rs`](../../src/utils/text.rs) | 2 |
+
+The configuration module [`../../src/config/`](../../src/config/) has **27**
+unit tests of its own, in [`../../src/config/tests.rs`](../../src/config/tests.rs).
+They cover the defaults, the precedence between the three layers, the required
+secrets, every validation rule and the message catalogue.
 
 ### 1.2 Integration
 
@@ -106,6 +114,28 @@ Twenty of the fifty-three integration tests are dedicated security cases:
 A further case, `registration_returns_a_token_pair_and_a_safe_user`, asserts
 that the public user representation carries no secret material.
 
+### 1.5 The configuration loader
+
+The loader in [`../../src/config/loader.rs`](../../src/config/loader.rs)
+resolves three layers — the base files, the environment overlay and the
+environment variables — and hands the result to the rules in
+[`../../src/config/validation.rs`](../../src/config/validation.rs). It is the
+one part of the system whose behaviour is decided by files outside the
+repository, so it needs coverage of its own:
+
+| Case | What it proves |
+| ---- | -------------- |
+| The defaults | The committed files in [`../../config/`](../../config/) parse, and the values match the reference table in [`../architecture/deployment.md`](../architecture/deployment.md). |
+| An environment-variable override | The variable wins over the file, key by key. |
+| The precedence between the layers | The file wins over the compiled default, the overlay wins over the base file, and the variable wins over both. |
+| The environment overlay | `config/environments/<APP_ENV>.toml` is applied for the selected environment, and the overlay of the other environment is not. |
+| A malformed file | A file that cannot be parsed is a start-up error, not a silent fallback. |
+| A missing required secret | `DATABASE_URL` or `APP_JWT_SECRET` missing stops the process before it connects to anything. |
+| Each validation rule | Every rule in [`../../src/config/validation.rs`](../../src/config/validation.rs) refuses the value it exists to refuse. |
+
+**At the time of writing the configuration module has no unit test.** The
+cases above are required, and the absence is listed as a gap in §6.
+
 ## 2. Isolation and the production-safety guard
 
 The integration suite talks to a real PostgreSQL database. Two rules keep that
@@ -136,16 +166,25 @@ connection pool. There is no global fixture, no `OnceLock` of test data and no
 ordering dependency. Any test can be run alone, in any order, and in
 parallel.
 
-**A note on the harness configuration.** The harness deliberately weakens three
-settings so that the suite stays fast and deterministic:
+**A note on the harness configuration.** The harness starts from
+`Config::defaults()`, which loads the real files in [`../../config/`](../../config/)
+without the environment overlay and without the environment variables, and it
+deliberately weakens three settings so that the suite stays fast and
+deterministic:
 
 | Setting | Test value | Production default |
 | ------- | ---------- | ------------------ |
 | Argon2id | 8 MiB, 1 iteration, parallelism 1 | 19 MiB, 2 iterations, parallelism 1 |
-| Access token lifetime | 15 minutes | 15 minutes |
-| Refresh token lifetime | 1 day | 14 days |
 | Rate limit | 10 000 requests per 60 seconds | 10 requests per 60 seconds |
 | Issuer and audience | `atom-api-test` | `atom-api` |
+
+The "production default" column is the value in the committed files in
+[`../../config/`](../../config/), which is what a deployment gets unless it
+overrides it.
+
+The harness also supplies the two values that have no file layer: the
+database URL and the signing secret. The secret is deliberately **not** a
+placeholder, so it satisfies the production rule as well.
 
 The cheap Argon2 parameters and the raised rate limit mean the suite proves
 the *logic*, never the *cost*. A test result never says anything about how
@@ -252,21 +291,15 @@ suite as it stands.
 2. **No contract test of the OpenAPI document.** Nothing asserts that the
    generated document lists every route, that a documented status code is
    reachable, or that the document can be parsed as OpenAPI.
-3. **No test of the token-issuing configuration.** Nothing asserts that the
-   process refuses to start with a short signing secret, or with the
-   documented placeholder in production. Only the validation function is unit
-   tested.
-4. **No test of the login timing equalisation.** The dummy verification exists
+3. **No test of the login timing equalisation.** The dummy verification exists
    and uses the configured cost parameters; nothing measures that the two
    paths take a comparable time.
-5. **No test at the database level of the email constraint.** The normalization
+4. **No test at the database level of the email constraint.** The normalization
    is proven through the API; the `CHECK` constraint itself is not exercised
    with a direct statement.
-6. **No concurrency, load or soak test.** The concurrent refresh of the same
+5. **No concurrency, load or soak test.** The concurrent refresh of the same
    token is covered, but nothing exercises two requests for the same account
    at the same time, or a sustained request rate.
-7. **No fuzzing of the JSON, path and query extractors.**
-8. **No test that the health endpoints answer when the database is
+6. **No fuzzing of the JSON, path and query extractors.**
+7. **No test that the health endpoints answer when the database is
    unreachable.** The degraded branch of the readiness probe is untested.
-13. **No test that the health endpoints answer when the database is
-    unreachable.** The degraded branch of the readiness probe is untested.

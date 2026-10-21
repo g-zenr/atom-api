@@ -43,17 +43,21 @@ configured state.
 | # | Step | Code | Failure behaviour |
 | - | ---- | ---- | ----------------- |
 | 1 | Load `.env` | `dotenvy::dotenv().ok()` | A missing file is not an error. In production the variables come from the real environment. |
-| 2 | Read and validate the configuration | `Config::from_env()` | The process exits with a non-zero status **before** it touches the database. |
-| 3 | Install the tracing subscriber | `telemetry::init(&config.log_filter)` | — |
+| 2 | Load and validate the configuration | `Config::load()` in `src/config/mod.rs` | The process exits with a non-zero status **before** it touches the database. The configuration is resolved from the base files in `config/`, the environment overlay selected by `APP_ENV`, and the environment variables. |
+| 3 | Install the tracing subscriber | `telemetry::init(&config.app.log_filter)` | — |
 | 4 | Open the connection pool | `PgPoolOptions::new()…connect()` | The process exits. |
 | 5 | Apply the pending migrations | `sqlx::migrate!("./migrations").run(&pool)` | The process exits; it never serves against a half-migrated schema. |
-| 6 | Build the shared state | `AppState::new(config.clone(), pool)` | — |
+| 6 | Build the shared state | `AppState::new(config, pool)` | The process exits if the password hasher cannot be built. |
 | 7 | Spawn the session-pruning task | `tokio::spawn(prune_expired_sessions(state.clone()))` | — |
-| 8 | Bind the socket | `TcpListener::bind(config.bind_addr)` | The process exits. |
+| 8 | Bind the socket | `TcpListener::bind(config.app.bind_addr)` | The process exits. |
 | 9 | Serve | `axum::serve(listener, api::router(state))` | — |
 
 The migrations are **embedded in the binary** by `sqlx::migrate!`, so a
-deployed instance never depends on files that sit next to it.
+deployed instance never depends on files that sit next to it. The
+configuration files are embedded the same way, so a deployment needs no
+configuration directory either; a directory found on disk is merged on top of
+the embedded copy. The operator's reference is
+[`deployment.md`](deployment.md) §1.
 
 ### 2.2 Request handling
 
@@ -75,7 +79,8 @@ On Windows there is no `SIGTERM` handler; the Ctrl-C path is the only one.
 
 There is exactly **one** long-lived process in Phase 1. The second binary in
 the crate, `atom-docs` (`src/bin/atom-docs.rs`), is a development tool that
-checks the documentation tree; it is not part of the service.
+checks the documentation tree and the configuration surface; it is not part of
+the service.
 
 ## 3. Components and responsibilities
 
@@ -87,8 +92,9 @@ checks the documentation tree; it is not part of the service.
 | `notes` | `src/notes/` | Notes: create, list, read, partially update, delete, archive and search. |
 | `projects` | `src/projects/` | Projects: create, list, read, partially update, delete. |
 | `tasks` | `src/tasks/` | Tasks inside a project: create, list, read, partially update, delete, with status, priority and ordering. |
-| `config` | `src/config.rs` | Reads every environment variable once, validates it, and hands a typed `Config` to everything else. |
-| `error` | `src/error.rs` | The single `AppError` type, its HTTP status mapping and the public error envelope. |
+| `config` | `src/config/` | Resolves the configuration once, at start-up, from the base files, the environment overlay and the environment variables; validates it; and owns the client-facing message catalogue. |
+| `config` (the files) | `config/` | The committed, non-secret configuration: `app.toml`, `api.toml`, `auth.toml`, `database.toml`, `messages.toml` and the `environments/` overlays. The files are embedded in the binary; a directory found on disk is merged on top of them. |
+| `error` | `src/error.rs` | The single `AppError` type, its stable code module, its HTTP status mapping and the public error envelope. |
 | `state` | `src/state.rs` | `AppState`: the shared, cheaply cloneable dependencies passed explicitly to handlers. |
 | `pagination` | `src/pagination.rs` | The shared `limit`/`offset` convention and the list envelope. |
 | `ratelimit` | `src/ratelimit.rs` | The in-process, fixed-window limiter used by the authentication endpoints. |
@@ -126,9 +132,9 @@ checks the documentation tree; it is not part of the service.
 | ----- | ----- |
 | The binary (`cargo run`, `cargo build --release`) | Implemented |
 | `docker-compose.yml` for a **local PostgreSQL only** | Implemented. It brings up `postgres:18-alpine` and creates the disposable `atom_test` database. It does **not** build an application image. |
-| A background task that prunes the expired refresh sessions | Implemented. It runs every hour and deletes the sessions that expired more than a day ago. |
+| A background task that prunes the expired refresh sessions | Implemented. It runs every hour by default and deletes the sessions that expired more than a day ago; both the interval and the grace period come from the configuration. |
 | A container image for the API | **Not implemented.** |
-| A CI pipeline | **Not implemented.** |
+| A CI pipeline | Implemented. `.github/workflows/ci.yml` runs the formatting check, the linter with warnings denied, the whole test suite against a real PostgreSQL, the release build and the documentation check, on every push to `main` and on every pull request. |
 | A release process | **Not implemented.** |
 | An orchestrator manifest (systemd unit, Kubernetes manifest) | **Not implemented.** |
 
@@ -143,6 +149,7 @@ checks the documentation tree; it is not part of the service.
 | Database driver | `sqlx` (`runtime-tokio`, `tls-rustls`, `postgres`, `macros`, `migrate`, `uuid`, `chrono`, `json`) | 0.8 |
 | Database | PostgreSQL | 14 or newer, per the contributor guide; the local compose file runs `postgres:18-alpine` |
 | Serialization | `serde`, `serde_json` | 1 |
+| Configuration files | `toml` | 1 |
 | OpenAPI | `utoipa`, `utoipa-swagger-ui` (vendored assets) | 5, 9 |
 | Password hashing | `argon2` (Argon2id) | 0.5 |
 | Tokens | `jsonwebtoken` (HS256) | 9 |
@@ -157,6 +164,14 @@ The crate is `atom-api`; the library is `atom_api`; the binaries are
 `atom-api` and `atom-docs`. The crate is marked `publish = false`, and the
 repository contains no `LICENSE` file.
 
+The root `config/` directory is a **first-class part of the repository**, not
+an example: it holds the committed, non-secret settings, the environment
+overlays and the client-facing message catalogue. Its files are embedded in
+the binary, so a deployment needs no configuration directory, and a directory
+found on disk is merged on top of the embedded copy. The reference is
+[`../../config/README.md`](../../config/README.md) and the operator's contract
+is [`deployment.md`](deployment.md) §1.
+
 The reasoning behind the stack is recorded in
 [`../decisions/ADR-0002-rust-axum-postgresql.md`](../decisions/ADR-0002-rust-axum-postgresql.md).
 
@@ -170,7 +185,7 @@ severities and workarounds, is in
 | - | ---------- | ----------- |
 | 1 | The rate limiter is **per process**, and its key is the peer address of the connection. | A multi-instance deployment needs edge rate limiting, and behind a proxy that does not terminate the connection every caller shares one budget. See [`security-architecture.md`](security-architecture.md) §6. |
 | 2 | SQLx statements are checked at **run time**, not at compile time. | A statement that does not match the schema is found when the path runs. The compile-time workflow is documented in [`../database/migration-policy.md`](../database/migration-policy.md) §6 but is not enabled. |
-| 3 | There is **no CI pipeline** and **no container image** for the API. | The quality gates are run by hand. |
+| 3 | There is **no container image** for the API, and no release process. | The quality gates run in CI; the rollout is a manual step. |
 | 4 | The API does **not** terminate TLS. | The process must sit behind a proxy that does. |
 | 5 | The refresh token travels in the **response body**, not in an HTTP-only cookie. | A browser client would have to manage it in scriptable storage. Open question Q2 in [`../project-truth.md`](../project-truth.md) §16. |
 | 6 | There is **no session-management surface** for a user, no password change and no account lockout. | `AuthService::revoke_all_sessions` is not reachable through any endpoint. The expired sessions are removed by the background pruning task. |
@@ -186,4 +201,6 @@ severities and workarounds, is in
 - [`data-architecture.md`](data-architecture.md) — the persistence model.
 - [`security-architecture.md`](security-architecture.md) — the trust model.
 - [`deployment.md`](deployment.md) — configuration and operations.
+- [`../../config/README.md`](../../config/README.md) — the configuration
+  reference.
 - [`../decisions/README.md`](../decisions/README.md) — the accepted decisions.

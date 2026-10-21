@@ -1,7 +1,7 @@
 # Tasks — architecture
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-TASK-001`](specification.md)
 
@@ -14,15 +14,17 @@ How the tasks feature is built. The public contract is in
 | Module | Responsibility |
 | ------ | -------------- |
 | `src/tasks/handlers.rs` | HTTP only: extraction, status codes, response serialization. |
-| `src/tasks/service.rs` | Business rules: title and description validation, the default status and priority, the ownership-aware use cases, the mapping from a repository miss to `404`. |
+| `src/tasks/service.rs` | Business rules: title and description validation, the default status and priority, the ownership-aware use cases, the mapping from a repository miss to `404`. Every client-facing string comes from the message catalogue, which the service holds. |
 | `src/tasks/repository.rs` | SQL: insert through an ownership-checked select, find owned, list owned with filters, partial update, delete owned. |
 | `src/tasks/models.rs` | The `Task` persistence shape and the `TaskStatus` and `TaskPriority` enums, which are both `sqlx::Type` and `ToSchema`. |
 | `src/tasks/dto.rs` | The public contracts: `TaskResponse`, `CreateTaskRequest`, `UpdateTaskRequest`, `TaskQuery`, `TaskPage`, and the length limits. |
+| `src/helpers/validation.rs` | The shared text validators: `required_text` and `bounded_text`. |
 | `src/pagination.rs` | The shared pagination convention. |
 
 The feature depends on the [projects](../projects/architecture.md) feature for
 one thing only: the ownership predicate. It never reads a project column
-other than `id` and `user_id`.
+other than `id` and `user_id`. It shares its text rules with the notes and
+the projects features through `src/helpers/validation.rs`.
 
 ## 2. Interfaces
 
@@ -38,6 +40,11 @@ other than `id` and `user_id`.
 
 The `owner` argument is the authenticated `user_id` and is the first
 parameter of every method.
+
+`TaskService` is built once, in `AppState::new`, and is never rebuilt per
+request. It holds the `TaskRepository` and the message catalogue, so the
+client-facing wording of an error is defined in `config/messages.toml` and
+nowhere else.
 
 ### 2.2 `TaskRepository`
 
@@ -75,6 +82,26 @@ pub enum TaskStatus { Open, InProgress, Done }
 The `serde` attribute fixes the wire names, the `sqlx` attribute binds the
 variants to the PostgreSQL enum types, and `ToSchema` puts them in the
 OpenAPI document. There is no string mapping table to keep in sync.
+
+### 2.4 Validation
+
+`validate_title` and `validate_description` in `src/tasks/service.rs` are
+free functions, unit tested and reusable. Both delegate to the shared
+validators in `src/helpers/validation.rs`:
+
+| Shared validator | Behaviour | Used by |
+| ---------------- | --------- | ------- |
+| `required_text` | Trims the value, rejects a value that is empty after trimming, and rejects a value over the maximum. | `validate_title` |
+| `bounded_text` | Keeps the value verbatim, and rejects a value over the maximum. | `validate_description` |
+
+The trimming behaviour is deliberately not uniform across the API: a title, a
+name and a display name are trimmed, while a body and a description are kept
+verbatim, so that a description of spaces is stored as it was sent. The
+database `CHECK` constraints measure the stored value, so the two must agree.
+
+The limits live in `src/tasks/dto.rs` as `MAX_TITLE_LENGTH` (200) and
+`MAX_DESCRIPTION_LENGTH` (10 000), and the database repeats them as check
+constraints.
 
 ## 3. Data ownership
 
@@ -222,6 +249,7 @@ completion rule:
 | `src/api/routes.rs` | Registers the five task routes and the `TaskResponse`, `TaskPage`, `CreateTaskRequest`, `UpdateTaskRequest`, `TaskStatus` and `TaskPriority` schemas. |
 | `src/api/middleware.rs` | `AuthUser`, the source of the ownership predicate. |
 | `src/pagination.rs` | The shared list envelope and the clamping. |
+| `src/helpers/validation.rs` | The shared text validators used by the notes, projects and tasks services. |
 | `src/tasks/**` | The feature itself. |
 | `src/projects/repository.rs` | The `projects` table the task queries join. |
 | `migrations/0003_projects_and_tasks.sql` | The `tasks` table, the two enum types, the completion constraint and the three indexes. |
@@ -262,3 +290,7 @@ The wider context is in
 - **The `position` space is not managed.** Nothing renormalises the
   positions of a project, so a client that inserts many tasks between two
   neighbours can exhaust the gap.
+- **The service is built once, so the catalogue cannot change at run time.**
+  `TaskService::new` is called in `AppState::new`, not in the handler, and the
+  service holds the message catalogue behind an `Arc`. A change to
+  `config/messages.toml` therefore needs a restart.

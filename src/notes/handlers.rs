@@ -8,16 +8,8 @@ use crate::api::extract::{Json, Path, Query};
 use crate::api::middleware::AuthUser;
 use crate::error::AppResult;
 use crate::notes::dto::{CreateNoteRequest, NotePage, NoteQuery, NoteResponse, UpdateNoteRequest};
-use crate::notes::service::NoteService;
 use crate::pagination::PaginationQuery;
 use crate::state::AppState;
-
-/// Builds the note service from the shared state.
-fn service(state: &AppState) -> NoteService {
-    NoteService::new(crate::notes::repository::NoteRepository::new(
-        state.db.clone(),
-    ))
-}
 
 /// `GET /api/v1/notes` — list the caller's notes.
 #[utoipa::path(
@@ -45,9 +37,7 @@ pub async fn list_notes(
     Query(query): Query<NoteQuery>,
     Query(pagination): Query<PaginationQuery>,
 ) -> AppResult<Json<NotePage>> {
-    let page = service(&state)
-        .list(user.user_id, query, pagination)
-        .await?;
+    let page = state.notes.list(user.user_id, query, pagination).await?;
     Ok(Json(NotePage::from(page)))
 }
 
@@ -75,7 +65,7 @@ pub async fn create_note(
     user: AuthUser,
     Json(payload): Json<CreateNoteRequest>,
 ) -> AppResult<(StatusCode, Json<NoteResponse>)> {
-    let note = service(&state).create(user.user_id, payload).await?;
+    let note = state.notes.create(user.user_id, payload).await?;
     Ok((StatusCode::CREATED, Json(note)))
 }
 
@@ -102,7 +92,7 @@ pub async fn get_note(
     user: AuthUser,
     Path(note_id): Path<Uuid>,
 ) -> AppResult<Json<NoteResponse>> {
-    let note = service(&state).get(user.user_id, note_id).await?;
+    let note = state.notes.get(user.user_id, note_id).await?;
     Ok(Json(note))
 }
 
@@ -133,9 +123,7 @@ pub async fn update_note(
     Path(note_id): Path<Uuid>,
     Json(payload): Json<UpdateNoteRequest>,
 ) -> AppResult<Json<NoteResponse>> {
-    let note = service(&state)
-        .update(user.user_id, note_id, payload)
-        .await?;
+    let note = state.notes.update(user.user_id, note_id, payload).await?;
     Ok(Json(note))
 }
 
@@ -162,6 +150,6 @@ pub async fn delete_note(
     user: AuthUser,
     Path(note_id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
-    service(&state).delete(user.user_id, note_id).await?;
+    state.notes.delete(user.user_id, note_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

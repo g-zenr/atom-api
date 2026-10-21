@@ -36,6 +36,7 @@ The current, evidence-backed state of every feature is in
 | HTTP | Axum 0.8 on Tokio |
 | Database | PostgreSQL, accessed with SQLx 0.8 |
 | Migrations | SQLx migrations, embedded in the binary |
+| Configuration | TOML files in [`config/`](config/), read with the `toml` crate, layered under the environment variables |
 | API documentation | OpenAPI 3.1 via `utoipa`, Swagger UI |
 | Logging | `tracing` with structured output |
 | Password hashing | Argon2id |
@@ -79,16 +80,31 @@ Copy-Item .env.example .env   # Windows PowerShell
 At minimum, set:
 
 ```dotenv
+APP_ENV=development
 DATABASE_URL=postgres://atom:atom@127.0.0.1:5432/atom
 TEST_DATABASE_URL=postgres://atom:atom@127.0.0.1:5432/atom_test
 APP_JWT_SECRET=<at least 32 random bytes>
 ```
+
+`APP_ENV` selects the environment overlay: `development` (also `dev`,
+`local`) or `production` (also `prod`). In production the documented
+placeholder secret is refused.
 
 Generate a development secret:
 
 ```bash
 openssl rand -base64 48          # Linux/macOS
 ```
+
+The configuration itself is resolved from three layers, later wins over
+earlier, key by key: the committed files in [`config/`](config/), the
+environment overlay `config/environments/<APP_ENV>.toml`, and the environment
+variables. The two secrets — `DATABASE_URL` and `APP_JWT_SECRET` — have no
+file layer at all, and **no file in `config/` may contain a secret**.
+
+The full reference is in [`config/README.md`](config/README.md); the
+operator-facing table is in
+[`docs/architecture/deployment.md`](docs/architecture/deployment.md).
 
 `.env` is git-ignored. **Never commit it.** `.env.example` holds placeholders
 only.
@@ -174,8 +190,10 @@ atom/api/
 │   ├── notes/        personal notes
 │   ├── projects/     projects
 │   ├── tasks/        tasks
+│   ├── config/       settings, loader, validation, message catalogue
 │   ├── bin/atom-docs.rs   documentation checker
-│   └── config.rs error.rs state.rs pagination.rs ratelimit.rs telemetry.rs health.rs
+│   └── error.rs state.rs pagination.rs ratelimit.rs telemetry.rs health.rs
+├── config/           the committed configuration files; no secrets
 ├── migrations/       SQLx migrations, embedded in the binary
 ├── tests/            HTTP-level integration tests
 ├── docs/             the project knowledge base

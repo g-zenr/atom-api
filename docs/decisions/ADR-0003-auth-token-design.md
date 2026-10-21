@@ -180,7 +180,7 @@ This decision does not bind the future clients, but it constrains them:
 
 - **The signing secret is the crown jewel.** It is read from
   `APP_JWT_SECRET`, must be at least 32 bytes, and the documented
-  placeholder is refused when `APP_ENV` is `production`. `AuthConfig`
+  placeholder is refused when `APP_ENV` is `production`. `AuthSettings`
   implements `Debug` manually and prints `[REDACTED]`.
 - **The identity comes only from the credential.** `AuthUser` is the only
   way a handler learns the caller's identity, and no request body, header or

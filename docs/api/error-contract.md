@@ -130,7 +130,7 @@ and the API reports them differently on purpose.
   secret, a password, a token or a hash.
 - A password is never echoed back, not even in a validation message.
 - A secret is never logged either. The `Debug` implementations of
-  `DatabaseConfig` and `AuthConfig` replace the URL and the signing secret
+  `DatabaseSettings` and `AuthSettings` replace the URL and the signing secret
   with `[REDACTED]`.
 - The unit tests `internal_errors_do_not_leak_details` and
   `database_errors_do_not_leak_driver_messages` in `src/error.rs` assert

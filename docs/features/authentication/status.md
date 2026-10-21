@@ -2,7 +2,7 @@
 
 # Authentication — status
 
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-AUTH-001`](specification.md)
 
@@ -46,10 +46,18 @@ Supporting evidence that is not tied to one requirement:
   `internal_errors_do_not_leak_details`,
   `database_errors_do_not_leak_driver_messages`,
   `not_found_and_forbidden_map_to_distinct_codes`).
-- The configuration rules are unit tested in `src/config.rs`
-  (`environment_aliases_are_accepted`, `short_secrets_are_rejected`,
-  `placeholder_secret_is_rejected_in_production_only`,
-  `auth_config_debug_redacts_the_secret`).
+- The configuration rules are unit tested in `src/config/tests.rs`
+  (`the_base_configuration_carries_the_documented_defaults`,
+  `the_catalogue_is_loaded_and_complete`,
+  `a_message_template_renders_its_placeholders`,
+  `an_environment_variable_overrides_the_file`,
+  `the_environment_overlay_overrides_the_base_file`,
+  `an_environment_variable_wins_over_the_environment_overlay`,
+  `a_short_secret_is_refused`,
+  `the_placeholder_secret_is_refused_in_production_only`,
+  `the_secret_is_never_rendered`). The module was a single file,
+  `src/config.rs`, until the configuration centralisation; the tests live in
+  the module they test.
 - The end-to-end flow is exercised through the router, not through a mock:
   the integration harness builds the real application router with
   `api::router(state)`.

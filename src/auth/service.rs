@@ -3,23 +3,28 @@
 //! Owns registration, login, refresh-token rotation, logout and session
 //! revocation. The rules enforced here are recorded in
 //! `docs/features/authentication/specification.md`.
+//!
+//! Every client-facing string comes from the message catalogue, so the wording
+//! of an error is defined once for the whole API.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::auth::dto::{AuthResponse, LoginRequest, TokenPair};
 use crate::auth::password::PasswordHasher;
 use crate::auth::repository::RefreshSessionRepository;
-use crate::auth::token::{TokenService, generate_refresh_token, hash_refresh_token};
+use crate::auth::token::{
+    IssuedRefreshToken, TokenService, generate_refresh_token, hash_refresh_token,
+};
+use crate::config::messages::Messages;
 use crate::error::{AppError, AppResult};
 use crate::users::dto::{RegisterRequest, UserResponse};
 use crate::users::repository::UserRepository;
-use crate::users::service::{
-    UserService, validate_display_name, validate_email, validate_password,
-};
+use crate::users::service::UserService;
 
 /// Client metadata recorded alongside a session.
 #[derive(Debug, Clone, Default)]
@@ -27,12 +32,6 @@ pub struct ClientMeta {
     pub user_agent: Option<String>,
     pub ip_address: Option<String>,
 }
-
-/// The message returned for every failed authentication attempt.
-///
-/// A single generic message prevents an attacker from learning whether an
-/// email address is registered.
-const GENERIC_LOGIN_FAILURE: &str = "Invalid email or password.";
 
 /// Authentication use cases.
 #[derive(Clone)]
@@ -42,9 +41,12 @@ pub struct AuthService {
     sessions: RefreshSessionRepository,
     tokens: Arc<TokenService>,
     passwords: Arc<PasswordHasher>,
+    messages: Arc<Messages>,
     refresh_ttl: Duration,
 }
 
+// The service holds a signing secret and a password hasher, so the derived
+// representation would print more than it should.
 impl std::fmt::Debug for AuthService {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AuthService")
@@ -57,18 +59,19 @@ impl AuthService {
     /// Builds the service.
     pub fn new(
         users: UserService,
-        user_repository: UserRepository,
-        sessions: RefreshSessionRepository,
         tokens: Arc<TokenService>,
         passwords: Arc<PasswordHasher>,
+        pool: &PgPool,
+        messages: Arc<Messages>,
         refresh_ttl: Duration,
     ) -> Self {
         Self {
             users,
-            user_repository,
-            sessions,
+            user_repository: UserRepository::new(pool.clone()),
+            sessions: RefreshSessionRepository::new(pool.clone()),
             tokens,
             passwords,
+            messages,
             refresh_ttl,
         }
     }
@@ -79,9 +82,9 @@ impl AuthService {
         request: RegisterRequest,
         meta: &ClientMeta,
     ) -> AppResult<AuthResponse> {
-        let email = validate_email(&request.email)?;
-        validate_password(&request.password)?;
-        let display_name = validate_display_name(&request.display_name)?;
+        let email = self.users.validate_email(&request.email)?;
+        self.users.validate_password(&request.password)?;
+        let display_name = self.users.validate_display_name(&request.display_name)?;
 
         // Argon2id is CPU-bound. Hashing it on a Tokio worker thread would
         // stall that worker for the whole hash, so it is moved to the blocking
@@ -104,7 +107,7 @@ impl AuthService {
 
     /// Authenticates a user and issues a token pair.
     pub async fn login(&self, request: LoginRequest, meta: &ClientMeta) -> AppResult<AuthResponse> {
-        let email = crate::users::service::normalize_email(&request.email);
+        let email = UserService::normalize_email(&request.email);
 
         let user = self.user_repository.find_by_email(&email).await?;
 
@@ -113,19 +116,23 @@ impl AuthService {
             // response time does not reveal whether the account exists.
             self.verify_password(&request.password, self.passwords.dummy_hash())
                 .await?;
-            return Err(AppError::Unauthorized(GENERIC_LOGIN_FAILURE));
+            return Err(AppError::Unauthorized(
+                self.messages.auth.invalid_credentials.clone(),
+            ));
         };
 
         if !self
             .verify_password(&request.password, &user.password_hash)
             .await?
         {
-            return Err(AppError::Unauthorized(GENERIC_LOGIN_FAILURE));
+            return Err(AppError::Unauthorized(
+                self.messages.auth.invalid_credentials.clone(),
+            ));
         }
 
         if !user.is_active {
             return Err(AppError::Forbidden(
-                "This account is disabled. Contact an administrator.",
+                self.messages.auth.account_disabled.clone(),
             ));
         }
 
@@ -173,37 +180,41 @@ impl AuthService {
             .sessions
             .find_by_token_hash(&token_hash)
             .await?
-            .ok_or_else(|| AppError::Unauthorized("The refresh token is invalid."))?;
+            .ok_or_else(|| {
+                AppError::Unauthorized(self.messages.auth.refresh_token_invalid.clone())
+            })?;
 
         if session.revoked_at.is_some() {
             // Reuse of a rotated token: assume the token was stolen and drop
             // every session belonging to the user.
             self.sessions.revoke_all_for_user(session.user_id).await?;
             return Err(AppError::Unauthorized(
-                "The refresh token has already been used. All sessions have been revoked.",
+                self.messages.auth.refresh_token_reused.clone(),
             ));
         }
 
         if !session.is_usable_at(Utc::now()) {
-            return Err(AppError::Unauthorized("The refresh token has expired."));
+            return Err(AppError::Unauthorized(
+                self.messages.auth.refresh_token_expired.clone(),
+            ));
         }
 
         let Some(user) = self.user_repository.find_by_id(session.user_id).await? else {
-            return Err(AppError::Unauthorized("The refresh token is invalid."));
+            return Err(AppError::Unauthorized(
+                self.messages.auth.refresh_token_invalid.clone(),
+            ));
         };
 
         if !user.is_active {
             self.sessions.revoke_all_for_user(user.id).await?;
             return Err(AppError::Forbidden(
-                "This account is disabled. Contact an administrator.",
+                self.messages.auth.account_disabled.clone(),
             ));
         }
 
         let issued = generate_refresh_token();
         let new_session_id = Uuid::new_v4();
-        let expires_at = Utc::now()
-            + chrono::Duration::from_std(self.refresh_ttl)
-                .unwrap_or_else(|_| chrono::Duration::days(14));
+        let expires_at = self.refresh_expiry();
 
         // The replacement row is written first, because the rotation link is a
         // foreign key to it.
@@ -232,22 +243,14 @@ impl AuthService {
         {
             self.sessions.revoke_all_for_user(session.user_id).await?;
             return Err(AppError::Unauthorized(
-                "The refresh token has already been used. All sessions have been revoked.",
+                self.messages.auth.refresh_token_reused.clone(),
             ));
         }
 
-        let access = self
-            .tokens
-            .issue_access_token(&user.id.to_string(), &user.email)?;
+        let tokens = self.token_pair(&issued, user.id, &user.email)?;
 
         Ok(AuthResponse {
-            tokens: TokenPair {
-                access_token: access.token,
-                refresh_token: issued.token,
-                token_type: "Bearer".to_string(),
-                expires_in: self.tokens.access_ttl().as_secs() as i64,
-                expires_at: access.expires_at,
-            },
+            tokens,
             user: UserResponse::from(&user),
         })
     }
@@ -264,7 +267,7 @@ impl AuthService {
         // A caller may only revoke its own sessions.
         if session.user_id != user_id {
             return Err(AppError::Forbidden(
-                "You may only revoke your own sessions.",
+                self.messages.auth.not_own_session.clone(),
             ));
         }
 
@@ -298,9 +301,7 @@ impl AuthService {
     ) -> AppResult<TokenPair> {
         let issued = generate_refresh_token();
         let session_id = Uuid::new_v4();
-        let expires_at = Utc::now()
-            + chrono::Duration::from_std(self.refresh_ttl)
-                .unwrap_or_else(|_| chrono::Duration::days(14));
+        let expires_at = self.refresh_expiry();
 
         self.sessions
             .insert(
@@ -313,36 +314,61 @@ impl AuthService {
             )
             .await?;
 
+        self.token_pair(&issued, user_id, email)
+    }
+
+    /// Builds the token pair for a refresh token that was just issued.
+    ///
+    /// The lifetime in the response comes from the token service, so that the
+    /// advertised lifetime and the lifetime inside the token cannot drift
+    /// apart.
+    fn token_pair(
+        &self,
+        issued: &IssuedRefreshToken,
+        user_id: Uuid,
+        email: &str,
+    ) -> AppResult<TokenPair> {
         let access = self
             .tokens
             .issue_access_token(&user_id.to_string(), email)?;
 
         Ok(TokenPair {
             access_token: access.token,
-            refresh_token: issued.token,
+            refresh_token: issued.token.clone(),
             token_type: "Bearer".to_string(),
             expires_in: self.tokens.access_ttl().as_secs() as i64,
             expires_at: access.expires_at,
         })
     }
 
+    /// The absolute expiry of a refresh session.
+    fn refresh_expiry(&self) -> DateTime<Utc> {
+        Utc::now()
+            + chrono::Duration::from_std(self.refresh_ttl)
+                .unwrap_or_else(|_| chrono::Duration::days(14))
+    }
+
     /// Validates the credentials carried by a bearer token.
     pub async fn authenticate_bearer(&self, token: &str) -> AppResult<UserResponse> {
-        let claims = self.tokens.decode_access_token(token)?;
+        let claims = self
+            .tokens
+            .decode_access_token(token)
+            .map_err(|_| AppError::Unauthorized(self.messages.auth.access_token_invalid.clone()))?;
+
         let user_id = Uuid::parse_str(&claims.sub)
-            .map_err(|_| AppError::Unauthorized("The access token is invalid or expired."))?;
+            .map_err(|_| AppError::Unauthorized(self.messages.auth.access_token_invalid.clone()))?;
 
         let user = self.user_repository.find_by_id(user_id).await?;
 
         let Some(user) = user else {
             return Err(AppError::Unauthorized(
-                "The access token is invalid or expired.",
+                self.messages.auth.access_token_invalid.clone(),
             ));
         };
 
         if !user.is_active {
             return Err(AppError::Forbidden(
-                "This account is disabled. Contact an administrator.",
+                self.messages.auth.account_disabled.clone(),
             ));
         }
 

@@ -1,0 +1,50 @@
+# ATOM — authentication settings
+#
+# The base layer of the configuration. See `config/README.md` for the
+# precedence model.
+#
+# The signing secret is deliberately absent: it is a secret and comes from the
+# `APP_JWT_SECRET` environment variable.
+
+[auth]
+# Lifetime of an access token, in seconds. 900 (15 minutes).
+access_token_ttl_seconds = 900
+
+# Absolute lifetime of a refresh token, in seconds. 1209600 (14 days).
+refresh_token_ttl_seconds = 1209600
+
+# The `iss` claim written into every access token, and required back from it.
+issuer = "atom-api"
+
+# The `aud` claim written into every access token, and required back from it.
+audience = "atom-api"
+
+# The clock-skew allowance applied when validating an access token, in
+# seconds. 30.
+#
+# A deployment whose hosts drift by more than this will see unexplained
+# `401` responses.
+clock_skew_seconds = 30
+
+[auth.argon2]
+# The Argon2id memory cost, in KiB. 19456 (19 MiB).
+#
+# The cost may be raised; it may not be lowered below 8192 KiB, which is a
+# security floor rather than a setting.
+memory_kib = 19456
+
+# The Argon2id iteration count. 2.
+iterations = 2
+
+# The Argon2id degree of parallelism. 1.
+parallelism = 1
+
+[auth.password]
+# The shortest accepted password, in characters. 12.
+min_length = 12
+
+# The longest accepted password, in characters. 256.
+#
+# The maximum is an explicit bound on the cost of hashing a very long
+# password, which is a denial-of-service amplifier.
+max_length = 256

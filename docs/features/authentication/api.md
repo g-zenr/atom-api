@@ -100,8 +100,8 @@ Creates an account and returns the first token pair.
 
 | Field | Type | Required | Rules |
 | ----- | ---- | -------- | ----- |
-| `email` | string | yes | Trimmed and lower-cased. Must contain an `@`, a non-empty local part, and a domain that contains a `.` and does not start with one. At most 254 characters. |
-| `password` | string | yes | 12 to 256 characters. At least one uppercase letter, one lowercase letter and one digit. |
+| `email` | string | yes | Trimmed and lower-cased. Must contain an `@`, a non-empty local part, and a domain that contains a `.` and does not start with one. At most 254 characters, the `MAX_EMAIL_LENGTH` constant. |
+| `password` | string | yes | The configured password policy: from `auth.password.min_length` to `auth.password.max_length` characters, 12 to 256 by default. At least one uppercase letter, one lowercase letter and one digit. |
 | `display_name` | string | yes | Trimmed. 1 to 120 characters. |
 
 ### Response — `201 Created`

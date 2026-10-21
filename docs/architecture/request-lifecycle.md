@@ -17,27 +17,28 @@ socket
   │
   ├─ 1  CorsLayer               explicit origin allowlist; absent when the list is empty
   ├─ 2  TraceLayer              structured request logging
-  ├─ 3  DefaultBodyLimit        bounded request body size
+  ├─ 3  DefaultBodyLimit        the configured body limit
   ├─ 4  SetRequestIdLayer       sets the `x-request-id` header
   ├─ 5  PropagateRequestIdLayer echoes `x-request-id` into the response
-  ├─ 6  timeout_middleware      APP_REQUEST_TIMEOUT_SECONDS, answers 408
-  ├─ 7  CatchPanicLayer         a panic becomes a 500, never a dropped connection
+  ├─ 6  Extension(RequestContext)  the message catalogue and the request limits
+  ├─ 7  timeout_middleware      the configured timeout, answers 408
+  ├─ 8  CatchPanicLayer         a panic becomes a 500, never a dropped connection
   │
-  ├─ 8  route match
+  ├─ 9  route match
   │      ├─ /health/live, /health/ready        unauthenticated
   │      ├─ /api/v1/...                        the versioned API
-  │      ├─ /api/v1/docs/, /api/v1/openapi.json  the API explorer
+  │      ├─ /api/v1/docs/, /api/v1/openapi.json  the API explorer, when it is enabled
   │      └─ anything else                      the 404 fallback
   │
-  ├─ 9  extractors              State, AuthUser, Path, Query, HeaderMap, ClientIp, then the body
+  ├─ 10 extractors              State, AuthUser, Path, Query, HeaderMap, ClientIp, then the body
   │
-  ├─ 10 handler                 HTTP semantics, status codes, serialization
+  ├─ 11 handler                 HTTP semantics, status codes, serialization
   │
-  ├─ 11 service                 business rules, validation
+  ├─ 12 service                 business rules, validation
   │
-  ├─ 12 repository              parameterised SQL with the ownership predicate
+  ├─ 13 repository              parameterised SQL with the ownership predicate
   │
-  └─ 13 PostgreSQL             the answer comes back up the same path
+  └─ 14 PostgreSQL             the answer comes back up the same path
 ```
 
 ## 2. The middleware stack
@@ -55,13 +56,13 @@ source:
 
 | # | Layer | Source | What it does |
 | - | ----- | ------ | ------------ |
-| 1 | `CorsLayer` | `api::cors_layer` | Added **last**, so it is the outermost layer. It is only installed when `APP_CORS_ALLOWED_ORIGINS` is not empty. It allows `GET`, `POST`, `PATCH`, `PUT`, `DELETE` and `OPTIONS`, and the `Authorization`, `Content-Type` and `Accept` request headers. The preflight cache is 600 s. Credentials are not enabled. |
+| 1 | `CorsLayer` | `api::cors_layer` | Added **last**, so it is the outermost layer. It is only installed when the configured allowlist is not empty. It allows `GET`, `POST`, `PATCH`, `PUT`, `DELETE` and `OPTIONS`, and the `Authorization`, `Content-Type` and `Accept` request headers. The preflight cache is 600 s. Credentials are not enabled. |
 | 2 | `TraceLayer` | `tower_http::trace::TraceLayer::new_for_http()` | Emits a structured span and an event per request. |
-| 3 | `DefaultBodyLimit` | `axum::extract::DefaultBodyLimit::max(config.max_body_bytes)` | The configured body limit, 1 MiB by default. See §6. |
+| 3 | `DefaultBodyLimit` | `axum::extract::DefaultBodyLimit::max(config.app.limits.max_body_bytes)` | The configured body limit, 1 MiB by default. See §6. |
 | 4 | `SetRequestIdLayer` | `tower_http::request_id::SetRequestIdLayer` with `MakeRequestUuid` | Sets the `x-request-id` request header to a UUIDv4 when the request does not already carry one. |
 | 5 | `PropagateRequestIdLayer` | `tower_http::request_id::PropagateRequestIdLayer::new("x-request-id")` | Copies the `x-request-id` request header into the response header. Because layer 4 is outside it, the header is already set when this layer reads it. |
-| 6 | `Extension` | `axum::Extension(config.request_timeout)` | Puts the configured timeout into the request extensions. It is applied after the middleware, so it is the outer of the two and the value is already there when the timeout middleware reads it. |
-| 7 | `timeout_middleware` | `api::timeout_middleware` in `src/api/mod.rs` | Bounds the server-side processing time at `APP_REQUEST_TIMEOUT_SECONDS` (30 s by default) and answers `408` in the standard error envelope when it expires. |
+| 6 | `Extension` | `axum::Extension(RequestContext::new(&config))` | Puts the per-request context into the request extensions. The context carries the **message catalogue** and the **request limits** — the body limit and the request timeout. It is applied after the middleware, so it is the outer of the two and the value is already there when the timeout middleware and the extractors read it. |
+| 7 | `timeout_middleware` | `api::timeout_middleware` in `src/api/mod.rs` | Bounds the server-side processing time at the configured request timeout (30 s by default) and answers `408` in the standard error envelope when it expires. The timeout is read from the `RequestContext` extension, not from a separate one. |
 | 8 | `CatchPanicLayer` | `tower_http::catch_panic::CatchPanicLayer::custom(api::routes::handle_panic)` | The innermost layer. It catches a panic raised by the handler and turns it into a `500` in the standard error envelope. |
 
 The timeout is **inner** to the request-id pair, so a request that is
@@ -75,13 +76,13 @@ is not reachable from a browser.
 
 When the list is not empty:
 
-- an entry of `*` trips a start-up assertion and the process refuses to
-  start, because a wildcard origin combined with credentials is a security
-  foot-gun;
-- an entry that is not a valid header value panics with the offending origin
-  in the message. Both checks happen while the router is built — which is
-  after the socket is bound but before a single request is served, so the
-  process never answers traffic with an unchecked allowlist;
+- an entry of `*` is refused by the configuration validation, before the
+  socket is bound: it is a `ConfigError`, not an assertion, because a
+  wildcard origin combined with credentials is a security foot-gun;
+- an entry that is not a valid header value is refused by the same rule, for
+  the same reason;
+- the router keeps a `panic!` for an origin that fails to parse. The
+  validation makes it unreachable; it is an invariant, not a check;
 - the allowed methods and headers are fixed in the source; only the origins
   are configurable.
 
@@ -127,9 +128,10 @@ Router::new()
 | `DELETE /api/v1/tasks/{task_id}` | `tasks::handlers::delete_task` | bearer |
 
 The API explorer is merged at the top level, not nested, and serves the UI at
-`/api/v1/docs/` and the document at `/api/v1/openapi.json`. It is registered
+`/api/v1/docs` and the document at `/api/v1/openapi.json`. It is registered
 **only** there: registering the document a second time would create two
-handlers for the same method and path.
+handlers for the same method and path. It is merged **only** when the
+configured `api.docs_enabled` is true; the production overlay turns it off.
 
 ## 4. The extractor order inside a handler
 
@@ -156,10 +158,18 @@ so the order is:
    disabled account. A missing, malformed or invalid credential is
    `AppError::Unauthorized`; a disabled account is `AppError::Forbidden`.
 3. `Path`, `Query` and `HeaderMap` — the remaining parts of the request. Each
-   rejection is an `AppError::BadRequest`.
-4. `Json<T>` — the body. A body that is not valid JSON is
-   `AppError::BadRequest`; a well-formed body that does not match the
-   contract is a `422` validation failure naming the field `body`.
+   rejection is an `AppError::BadRequest` carrying the catalogue message
+   `malformed_parameter` — "The request path or query string is malformed."
+4. `Json<T>` — the body. A body that is not valid JSON is an
+   `AppError::BadRequest` carrying the catalogue message `bad_request` — "The
+   request body is not valid JSON." A well-formed body that does not match
+   the contract is a `422` validation failure naming the field `body` and
+   carrying the catalogue message `validation_failed`.
+
+The extractors take their message text from the catalogue the `RequestContext`
+extension carries, so no extractor reads the configuration or the environment
+itself. The catalogue lives in `config/messages.toml`; the stable error code
+comes from the `code` module in `src/error.rs`.
 
 `ClientIp` is an ordinary `FromRequestParts` extractor. It reads the
 `ConnectInfo<SocketAddr>` extension and returns `None` when the server was
@@ -232,22 +242,23 @@ consequence is documented in
 
 ## 6. Bodies, timeouts and memory
 
-- **Timeout.** `api::timeout_middleware` bounds the whole request at
-  `APP_REQUEST_TIMEOUT_SECONDS` (30 s by default) and answers `408`. It is
-  a custom middleware, not a `tower_http` layer: it reads the timeout from
-  the request extensions and answers with `AppError::Timeout`, so the body of
+- **Timeout.** `api::timeout_middleware` bounds the whole request at the
+  configured request timeout (30 s by default) and answers `408`. It is a
+  custom middleware, not a `tower_http` layer: it reads the timeout from the
+  `RequestContext` extension the router installed, and answers with
+  `AppError::Timeout` carrying the catalogue message `timeout`, so the body of
   that response **is** the JSON envelope, with the code `timeout`.
-- **Body limit.** The router installs `DefaultBodyLimit::max(config.max_body_bytes)`,
-  1 MiB by default. Axum documents that layer as applying only to the
-  extractors that consult it — Axum's own `Bytes`, `Json`, `String` and
-  `Form`. Every endpoint of this API reads its body through the project's
-  own `api::extract::Json`, which calls `req.into_limited_body()` and
-  therefore **does** consult the configured limit. **The effective cap on a
-  JSON body is `APP_MAX_BODY_BYTES`**, and the extractor's own constant of
-  4 MiB is the backstop for a request that reaches the extractor without the
-  layer; it also bounds a configured limit that is larger than 4 MiB. A body
-  over the cap is answered with `AppError::PayloadTooLarge`, which is a
-  `413` in the standard envelope.
+- **Body limit.** The router installs
+  `DefaultBodyLimit::max(config.app.limits.max_body_bytes)`, 1 MiB by
+  default. Axum documents that layer as applying only to the extractors that
+  consult it — Axum's own `Bytes`, `Json`, `String` and `Form`. Every
+  endpoint of this API reads its body through the project's own
+  `api::extract::Json`, which calls `req.into_limited_body()` and therefore
+  **does** consult the configured limit. **The effective cap on a JSON body is
+  the configured limit**, and there is no second, independent cap: the
+  extractor passes `usize::MAX` to `axum::body::to_bytes`, so a configured
+  limit is honoured in full. A body over the cap is answered with
+  `AppError::PayloadTooLarge`, which is a `413` in the standard envelope.
 - **No concurrency limit.** There is no per-client cap on the number of
   simultaneous requests, and the timeout does not bound the work a query
   performs inside the database.
@@ -274,6 +285,13 @@ a response by hand.
 | The timeout middleware | `Timeout` | `408` | `timeout`, in the envelope |
 | The body limit — a body over the configured limit | `PayloadTooLarge` | `413` | `payload_too_large` |
 | `routes::not_found` — an unmatched route | — | `404` | `not_found`, in the envelope |
+
+Every message text in that table comes from the catalogue in
+`config/messages.toml`, resolved at the call site. The two exceptions are
+the database failure and the unexpected failure: their text is fixed in the
+error type, because it must never be replaced by something that reveals an
+internal detail. The **code** is the contract, and it has exactly one
+definition each in the `code` module in `src/error.rs`.
 
 A server error is logged at `error` level. A **database** failure is logged
 with its SQLSTATE and the error kind only — the driver message is not

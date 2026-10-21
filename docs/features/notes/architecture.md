@@ -1,7 +1,7 @@
 # Notes — architecture
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-NOTE-001`](specification.md)
 
@@ -14,16 +14,18 @@ How the notes feature is built. The public contract is in
 | Module | Responsibility |
 | ------ | -------------- |
 | `src/notes/handlers.rs` | HTTP only: extraction, status codes, response serialization. |
-| `src/notes/service.rs` | Business rules: title and content validation, the ownership-aware use cases, the mapping from a repository miss to `404`. |
+| `src/notes/service.rs` | Business rules: title and content validation, the ownership-aware use cases, the mapping from a repository miss to `404`. Every client-facing string comes from the message catalogue, which the service holds. |
 | `src/notes/repository.rs` | SQL: insert, find owned, list owned with filters, partial update, delete owned. |
 | `src/notes/models.rs` | The `Note` persistence shape. |
 | `src/notes/dto.rs` | The public contracts: `NoteResponse`, `CreateNoteRequest`, `UpdateNoteRequest`, `NoteQuery`, `NotePage`, and the length limits. |
+| `src/helpers/validation.rs` | The shared text validators: `required_text` and `bounded_text`. |
 | `src/pagination.rs` | The shared pagination convention: `PaginationQuery`, `Pagination`, `Page<T>`. |
 
-The feature depends on `src/pagination.rs` for the list envelope and on the
-`AuthUser` extractor in `src/api/middleware.rs` for the caller's identity. It
-depends on nothing else in the domain: notes do not know about projects or
-tasks.
+The feature depends on `src/pagination.rs` for the list envelope, on the
+shared text validators in `src/helpers/validation.rs` for the title and the
+content, and on the `AuthUser` extractor in `src/api/middleware.rs` for the
+caller's identity. It depends on nothing else in the domain: notes do not
+know about projects or tasks.
 
 ## 2. Interfaces
 
@@ -40,6 +42,11 @@ tasks.
 The `owner` argument is the authenticated `user_id`. It is the first
 parameter of every method, which makes it impossible to call a notes method
 without saying whose notes are meant.
+
+`NoteService` is built once, in `AppState::new`, and is never rebuilt per
+request. It holds the `NoteRepository` and the message catalogue, so the
+client-facing wording of an error is defined in `config/messages.toml` and
+nowhere else.
 
 ### 2.2 `NoteRepository`
 
@@ -58,9 +65,22 @@ contains no user input.
 ### 2.3 Validation
 
 `validate_title` and `validate_content` in `src/notes/service.rs` are free
-functions, so they can be unit tested and reused. The length limits live in
-`src/notes/dto.rs` as `MAX_TITLE_LENGTH` (200) and `MAX_CONTENT_LENGTH`
-(100 000), and the database repeats them as check constraints.
+functions, so they can be unit tested and reused. Both delegate to the shared
+validators in `src/helpers/validation.rs`:
+
+| Shared validator | Behaviour | Used by |
+| ---------------- | --------- | ------- |
+| `required_text` | Trims the value, rejects a value that is empty after trimming, and rejects a value over the maximum. | `validate_title` |
+| `bounded_text` | Keeps the value verbatim, and rejects a value over the maximum. | `validate_content` |
+
+The trimming behaviour is deliberately not uniform across the API: a title, a
+name and a display name are trimmed, while a body and a description are kept
+verbatim, so that a body of spaces is stored as it was sent. The database
+`CHECK` constraints measure the stored value, so the two must agree.
+
+The length limits live in `src/notes/dto.rs` as `MAX_TITLE_LENGTH` (200) and
+`MAX_CONTENT_LENGTH` (100 000), and the database repeats them as check
+constraints.
 
 ## 3. Data ownership
 
@@ -190,6 +210,7 @@ omitted is never written, so it cannot be nulled by accident.
 | `src/api/extract.rs` | The `Path`, `Query` and `Json` extractors that keep the error envelope intact. |
 | `src/api/middleware.rs` | `AuthUser`, the source of the ownership predicate. |
 | `src/pagination.rs` | The shared list envelope and the limit and offset clamping. |
+| `src/helpers/validation.rs` | The shared text validators used by the notes, projects and tasks services. |
 | `src/notes/**` | The feature itself. |
 | `migrations/0002_notes.sql` | The `notes` table, its indexes and the generated `search_vector` column. |
 
@@ -218,9 +239,10 @@ The wider context is in
   expensive part of a listing.
 - **The archive filter has no "both" mode.** A client that wants active and
   archived notes must make two requests.
-- **The service builds its repository per request.** `NoteService::new` is
-  called in the handler with a clone of the pool. This is cheap, but it means
-  the service is not a singleton.
+- **The service is built once, so the catalogue cannot change at run time.**
+  `NoteService::new` is called in `AppState::new`, not in the handler, and the
+  service holds the message catalogue behind an `Arc`. A change to
+  `config/messages.toml` therefore needs a restart.
 - **No transaction spans two statements.** The feature performs single-statement
   writes, so no transaction is needed; the moment it does, a transaction
   belongs in the repository.

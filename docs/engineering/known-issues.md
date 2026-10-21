@@ -1,7 +1,7 @@
 # ATOM known issues
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 
 Confirmed defects, limitations and gaps: things that are known to be wrong, to
@@ -158,7 +158,7 @@ together with CI, which is `KI-005`.
 [`../security/threat-model.md`](../security/threat-model.md); requirement
 [`../project-truth.md`](../project-truth.md) §12.
 
-### KI-005 - There is no CI pipeline
+### KI-005 — There is no CI pipeline
 
 **Status:** Closed (2026-10-22) — **Severity:** Medium
 
@@ -199,13 +199,14 @@ pinned surface than an image.
 **Workaround.** Build the release binary with `cargo build --release` and run
 it with the environment configuration in place.
 
-**Resolution.** [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
-runs the formatting check, the lint, the test suite, a release build, the
-documentation check and the OpenCode configuration check on every push and
-pull request. The workflow has not yet run on a GitHub runner, because the
-repository has not been published.
+**Remediation status.** Not started. The pipeline in
+[`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) builds a release
+binary, but it does not build an image. The deployment artefact is still the
+binary, the configuration files in [`../../config/`](../../config/) and the
+environment variables.
 
-**Related.** Requirement [`../project-truth.md`](../project-truth.md) §3.
+**Related.** Requirement [`../project-truth.md`](../project-truth.md) §3;
+`KI-005`.
 
 ### KI-007 — The refresh token is returned in the response body
 
@@ -416,6 +417,53 @@ owner and the maintainer respectively.
 
 ---
 
+### KI-014 — The configuration has no reload, no remote source and no visible merge rule
+
+**Status:** Open (accepted) · **Severity:** Low
+
+**Description.** The configuration was centralised in the `config/` directory
+and resolved once at start-up by [`../../src/config/loader.rs`](../../src/config/loader.rs).
+Three limitations remain:
+
+1. There is no command-line or remote configuration source, and the
+   configuration cannot be reloaded: a change to a file or to an environment
+   variable takes effect only after a restart.
+2. The pagination limits (`api.pagination.default_limit` and
+   `api.pagination.max_limit`) are part of the published client convention, so
+   changing them is a breaking change for a client that was written against
+   the current values.
+3. A file found on disk is merged **on top of** the embedded copy, key by key.
+   An operator who points `ATOM_CONFIG_DIR` at a directory that contains a
+   partial file gets the embedded values for everything the file does not
+   mention. That is the intended behaviour, but it is not obvious from the
+   file itself.
+
+**Impact.** An operator cannot change a limit without a restart of the
+process, and cannot see, from the file alone, which values are in force.
+A pagination limit that is raised changes what every existing client
+receives, so the setting is only safe to change deliberately. The merge rule
+means a short override file is not a complete configuration, which is easy to
+misread as "the rest is unset".
+
+**Workaround.** Restart the process after every configuration change. Write an
+override file that contains every key it intends to change, and treat the
+committed files in [`../../config/`](../../config/) as the source of the
+values that are not overridden. Change a pagination limit only as a deliberate,
+announced change to the client contract.
+
+**Remediation status.** Not started. The reload question — whether a
+deployment may change a setting without a restart, and which settings may
+change at run time — is `Q-12` in
+[`open-questions.md`](open-questions.md). The merge rule is documented in
+[`../../config/README.md`](../../config/README.md) §2.
+
+**Related.** `Q-12` in [`open-questions.md`](open-questions.md);
+[`../../config/README.md`](../../config/README.md);
+[`../architecture/deployment.md`](../architecture/deployment.md);
+[`../api/conventions.md`](../api/conventions.md).
+
+---
+
 ## Summary
 
 | ID | Title | Status | Severity |
@@ -433,3 +481,4 @@ owner and the maintainer respectively.
 | `KI-011` | `.env.example` describes truncation the harness does not do | Closed | Low |
 | `KI-012` | There is no account lockout and no breach detection | Open | Medium |
 | `KI-013` | Two documentation links do not resolve | Closed | Low |
+| `KI-014` | The configuration has no reload, no remote source and no visible merge rule | Open | Low |

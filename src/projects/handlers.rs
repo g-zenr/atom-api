@@ -11,14 +11,7 @@ use crate::pagination::PaginationQuery;
 use crate::projects::dto::{
     CreateProjectRequest, ProjectPage, ProjectQuery, ProjectResponse, UpdateProjectRequest,
 };
-use crate::projects::repository::ProjectRepository;
-use crate::projects::service::ProjectService;
 use crate::state::AppState;
-
-/// Builds the project service from the shared state.
-fn service(state: &AppState) -> ProjectService {
-    ProjectService::new(ProjectRepository::new(state.db.clone()))
-}
 
 /// `GET /api/v1/projects` — list the caller's projects.
 #[utoipa::path(
@@ -43,9 +36,7 @@ pub async fn list_projects(
     Query(query): Query<ProjectQuery>,
     Query(pagination): Query<PaginationQuery>,
 ) -> AppResult<Json<ProjectPage>> {
-    let page = service(&state)
-        .list(user.user_id, query, pagination)
-        .await?;
+    let page = state.projects.list(user.user_id, query, pagination).await?;
     Ok(Json(ProjectPage::from(page)))
 }
 
@@ -73,7 +64,7 @@ pub async fn create_project(
     user: AuthUser,
     Json(payload): Json<CreateProjectRequest>,
 ) -> AppResult<(StatusCode, Json<ProjectResponse>)> {
-    let project = service(&state).create(user.user_id, payload).await?;
+    let project = state.projects.create(user.user_id, payload).await?;
     Ok((StatusCode::CREATED, Json(project)))
 }
 
@@ -100,7 +91,7 @@ pub async fn get_project(
     user: AuthUser,
     Path(project_id): Path<Uuid>,
 ) -> AppResult<Json<ProjectResponse>> {
-    let project = service(&state).get(user.user_id, project_id).await?;
+    let project = state.projects.get(user.user_id, project_id).await?;
     Ok(Json(project))
 }
 
@@ -131,7 +122,8 @@ pub async fn update_project(
     Path(project_id): Path<Uuid>,
     Json(payload): Json<UpdateProjectRequest>,
 ) -> AppResult<Json<ProjectResponse>> {
-    let project = service(&state)
+    let project = state
+        .projects
         .update(user.user_id, project_id, payload)
         .await?;
     Ok(Json(project))
@@ -160,6 +152,6 @@ pub async fn delete_project(
     user: AuthUser,
     Path(project_id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
-    service(&state).delete(user.user_id, project_id).await?;
+    state.projects.delete(user.user_id, project_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

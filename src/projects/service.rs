@@ -1,11 +1,19 @@
 //! Project use cases.
+//!
+//! Every client-facing string comes from the message catalogue, so the wording
+//! of an error is defined once for the whole API.
+
+use std::sync::Arc;
 
 use uuid::Uuid;
 
-use crate::error::{AppError, AppResult, FieldViolation};
+use crate::config::messages::Messages;
+use crate::error::{AppError, AppResult};
+use crate::helpers::{bounded_text, required_text};
 use crate::pagination::{Page, PaginationQuery};
 use crate::projects::dto::{
-    CreateProjectRequest, ProjectQuery, ProjectResponse, UpdateProjectRequest,
+    CreateProjectRequest, MAX_DESCRIPTION_LENGTH, MAX_NAME_LENGTH, ProjectQuery, ProjectResponse,
+    UpdateProjectRequest,
 };
 use crate::projects::repository::ProjectRepository;
 
@@ -13,12 +21,16 @@ use crate::projects::repository::ProjectRepository;
 #[derive(Debug, Clone)]
 pub struct ProjectService {
     repository: ProjectRepository,
+    messages: Arc<Messages>,
 }
 
 impl ProjectService {
     /// Builds the service.
-    pub fn new(repository: ProjectRepository) -> Self {
-        Self { repository }
+    pub fn new(repository: ProjectRepository, messages: Arc<Messages>) -> Self {
+        Self {
+            repository,
+            messages,
+        }
     }
 
     /// Creates a project owned by `owner`.
@@ -27,8 +39,8 @@ impl ProjectService {
         owner: Uuid,
         request: CreateProjectRequest,
     ) -> AppResult<ProjectResponse> {
-        let name = validate_name(&request.name)?;
-        let description = validate_description(&request.description)?;
+        let name = validate_name(&request.name, &self.messages)?;
+        let description = validate_description(&request.description, &self.messages)?;
 
         let project = self
             .repository
@@ -64,7 +76,7 @@ impl ProjectService {
             .repository
             .find_owned(id, owner)
             .await?
-            .ok_or(AppError::NotFound("The requested project does not exist."))?;
+            .ok_or_else(|| AppError::NotFound(self.messages.resources.project_not_found.clone()))?;
 
         Ok(ProjectResponse::from(&project))
     }
@@ -76,18 +88,22 @@ impl ProjectService {
         id: Uuid,
         request: UpdateProjectRequest,
     ) -> AppResult<ProjectResponse> {
-        let name = request.name.as_deref().map(validate_name).transpose()?;
+        let name = request
+            .name
+            .as_deref()
+            .map(|name| validate_name(name, &self.messages))
+            .transpose()?;
         let description = request
             .description
             .as_deref()
-            .map(validate_description)
+            .map(|description| validate_description(description, &self.messages))
             .transpose()?;
 
         let project = self
             .repository
             .update_owned(id, owner, name.as_deref(), description.as_deref())
             .await?
-            .ok_or(AppError::NotFound("The requested project does not exist."))?;
+            .ok_or_else(|| AppError::NotFound(self.messages.resources.project_not_found.clone()))?;
 
         Ok(ProjectResponse::from(&project))
     }
@@ -97,7 +113,9 @@ impl ProjectService {
         let deleted = self.repository.delete_owned(id, owner).await?;
 
         if !deleted {
-            return Err(AppError::NotFound("The requested project does not exist."));
+            return Err(AppError::NotFound(
+                self.messages.resources.project_not_found.clone(),
+            ));
         }
 
         Ok(())
@@ -105,58 +123,91 @@ impl ProjectService {
 }
 
 /// Validates a project name.
-pub fn validate_name(name: &str) -> AppResult<String> {
-    let trimmed = name.trim();
-    let length = trimmed.chars().count();
-
-    if length == 0 {
-        return Err(AppError::validation(vec![FieldViolation::new(
-            "name",
-            "must not be empty",
-        )]));
-    }
-
-    if length > crate::projects::dto::MAX_NAME_LENGTH {
-        return Err(AppError::validation(vec![FieldViolation::new(
-            "name",
-            format!(
-                "must be at most {} characters long",
-                crate::projects::dto::MAX_NAME_LENGTH
-            ),
-        )]));
-    }
-
-    Ok(trimmed.to_string())
+///
+/// The name is trimmed, and a name that is empty after trimming is rejected.
+/// The stored value is therefore the trimmed one, which is what the database
+/// constraint `projects_name_length_chk` measures.
+pub fn validate_name(name: &str, messages: &Messages) -> AppResult<String> {
+    required_text(
+        "name",
+        name,
+        MAX_NAME_LENGTH,
+        &messages.validation.title_too_long,
+        messages,
+    )
 }
 
 /// Validates a project description.
-pub fn validate_description(description: &str) -> AppResult<String> {
-    if description.chars().count() > crate::projects::dto::MAX_DESCRIPTION_LENGTH {
-        return Err(AppError::validation(vec![FieldViolation::new(
-            "description",
-            format!(
-                "must be at most {} characters long",
-                crate::projects::dto::MAX_DESCRIPTION_LENGTH
-            ),
-        )]));
-    }
-
-    Ok(description.to_string())
+///
+/// The description is kept verbatim: a description of spaces is stored as it
+/// was sent. The stored value is what the database constraint
+/// `projects_description_length_chk` measures.
+pub fn validate_description(description: &str, messages: &Messages) -> AppResult<String> {
+    bounded_text(
+        "description",
+        description,
+        MAX_DESCRIPTION_LENGTH,
+        &messages.validation.description_too_long,
+        messages,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::code;
+
+    fn messages() -> Messages {
+        // The shipped catalogue, so that the tests exercise the same templates
+        // the application serves.
+        Messages::from_toml(include_str!("../../config/messages.toml"))
+            .expect("the message catalogue parses")
+    }
 
     #[test]
     fn names_are_trimmed_and_required() {
-        assert_eq!(validate_name("  ATOM  ").unwrap(), "ATOM");
-        assert!(validate_name("   ").is_err());
+        let messages = messages();
+        assert_eq!(validate_name("  ATOM  ", &messages).unwrap(), "ATOM");
+        assert!(validate_name("   ", &messages).is_err());
+    }
+
+    #[test]
+    fn oversized_names_are_rejected() {
+        let messages = messages();
+        let long = "x".repeat(MAX_NAME_LENGTH + 1);
+        assert!(validate_name(&long, &messages).is_err());
+    }
+
+    #[test]
+    fn the_name_limit_in_the_message_comes_from_the_constant() {
+        let messages = messages();
+        let long = "x".repeat(MAX_NAME_LENGTH + 1);
+
+        let error = validate_name(&long, &messages).unwrap_err();
+        let body = error.body();
+
+        assert_eq!(body.error.code, code::VALIDATION_FAILED);
+        assert_eq!(body.error.details[0].field, "name");
+        assert_eq!(
+            body.error.details[0].message,
+            format!("must be at most {MAX_NAME_LENGTH} characters long")
+        );
     }
 
     #[test]
     fn oversized_descriptions_are_rejected() {
-        let long = "x".repeat(crate::projects::dto::MAX_DESCRIPTION_LENGTH + 1);
-        assert!(validate_description(&long).is_err());
+        let messages = messages();
+        let long = "x".repeat(MAX_DESCRIPTION_LENGTH + 1);
+        assert!(validate_description(&long, &messages).is_err());
+    }
+
+    #[test]
+    fn descriptions_are_kept_verbatim() {
+        let messages = messages();
+        assert_eq!(
+            validate_description("   ", &messages).unwrap(),
+            "   ",
+            "a description of spaces is stored as it was sent"
+        );
     }
 }

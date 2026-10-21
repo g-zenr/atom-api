@@ -1,6 +1,6 @@
 # ADR-0004 — The documentation tree is part of the product
 
-> **Status:** Accepted
+> **Status:** Superseded
 > **Date:** 2026-10-21
 > **Owner:** architect
 
@@ -221,6 +221,10 @@ code review and of the quality gate.
 Supersedes: none. This is the first decision about the documentation
 process.
 
-Superseded by: none. A review of this decision is due when the project
-adopts a second, non-git artefact — a hosted wiki or a generated site —
-because that would break the "usable from a clone" property.
+Superseded by: ADR-0006, in the narrow sense that the claim above — that the
+published configuration reference is the single list of the *environment
+variables* — no longer describes the system, which now resolves its settings
+from three layers. The rest of this decision stands. A review of this
+decision is due when the project adopts a second, non-git artefact — a hosted
+wiki or a generated site — because that would break the "usable from a clone"
+property.

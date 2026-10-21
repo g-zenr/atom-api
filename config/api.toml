@@ -1,0 +1,39 @@
+# ATOM — API settings
+#
+# The base layer of the configuration. See `config/README.md` for the
+# precedence model.
+
+[api]
+# The title of the generated OpenAPI document.
+title = "ATOM API"
+
+# Whether the OpenAPI document and the API explorer are served.
+#
+# They are useful in development and are usually not wanted in a public
+# production deployment. Set this to `false` to remove both routes.
+docs_enabled = true
+
+[api.cors]
+# The origins allowed to make cross-origin requests.
+#
+# An empty list disables CORS entirely, which is the correct behaviour for an
+# API that is not reachable from a browser. A wildcard is refused: it cannot be
+# combined with credentials safely.
+allowed_origins = []
+
+[api.pagination]
+# The page size used when a caller does not ask for one. 20.
+#
+# This is part of the published client convention: changing it changes what
+# a client receives for the same request.
+default_limit = 20
+
+# The largest page a caller may ask for. 100.
+max_limit = 100
+
+[api.rate_limit]
+# How many authentication attempts one client may make per window. 10.
+max_requests = 10
+
+# The length of the rate-limit window, in seconds. 60.
+window_seconds = 60

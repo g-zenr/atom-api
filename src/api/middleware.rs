@@ -3,15 +3,15 @@
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-use axum::Json;
-use axum::extract::{ConnectInfo, FromRequestParts};
-use axum::http::StatusCode;
+use axum::extract::FromRequestParts;
+use axum::extract::{ConnectInfo, State};
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use uuid::Uuid;
 
-use crate::error::{AppError, AppResult};
+use crate::api::RequestContext;
+use crate::error::AppError;
 use crate::ratelimit::Decision;
 use crate::state::AppState;
 
@@ -28,9 +28,6 @@ pub struct AuthUser {
     pub email: String,
 }
 
-/// The message returned for every authentication failure.
-const UNAUTHORIZED: &str = "Authentication is required. Provide a Bearer access token.";
-
 impl FromRequestParts<AppState> for AuthUser {
     type Rejection = AppError;
 
@@ -38,23 +35,39 @@ impl FromRequestParts<AppState> for AuthUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
+        let messages = parts
+            .extensions
+            .get::<RequestContext>()
+            .map(|context| context.messages.clone())
+            .ok_or_else(|| AppError::Internal("the request context is missing".to_string()))?;
+
         let header = parts
             .headers
             .get(AUTHORIZATION)
-            .ok_or(AppError::Unauthorized(UNAUTHORIZED))?;
+            .ok_or_else(|| AppError::Unauthorized(messages.general.unauthorized.clone()))?;
 
         let value = header
             .to_str()
-            .map_err(|_| AppError::Unauthorized(UNAUTHORIZED))?;
+            .map_err(|_| AppError::Unauthorized(messages.general.unauthorized.clone()))?;
 
         let token = value
             .strip_prefix("Bearer ")
             .or_else(|| value.strip_prefix("bearer "))
             .map(str::trim)
             .filter(|token| !token.is_empty())
-            .ok_or(AppError::Unauthorized(UNAUTHORIZED))?;
+            .ok_or_else(|| AppError::Unauthorized(messages.general.unauthorized.clone()))?;
 
-        let user = state.auth_service().authenticate_bearer(token).await?;
+        let user = state
+            .auth_service()
+            .authenticate_bearer(token)
+            .await
+            .map_err(|error| match error {
+                AppError::Unauthorized(_) => {
+                    AppError::Unauthorized(messages.auth.access_token_invalid.clone())
+                }
+                AppError::Forbidden(message) => AppError::Forbidden(message),
+                other => other,
+            })?;
 
         Ok(AuthUser {
             user_id: user.id,
@@ -105,8 +118,10 @@ const UNKNOWN_CLIENT: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 /// # Errors
 ///
 /// Returns [`AppError::RateLimited`] when the caller exceeded the limit.
-pub fn enforce_rate_limit(state: &AppState, client: ClientIp) -> AppResult<()> {
+pub fn enforce_rate_limit(state: &AppState, client: ClientIp) -> Result<(), AppError> {
     let key = client.get().unwrap_or(UNKNOWN_CLIENT);
+
+    let messages = &state.config.messages;
 
     match state.rate_limiter.check(key) {
         Decision::Allowed => Ok(()),
@@ -114,20 +129,12 @@ pub fn enforce_rate_limit(state: &AppState, client: ClientIp) -> AppResult<()> {
             retry_after_seconds,
         } => Err(AppError::RateLimited {
             retry_after_seconds,
+            message: messages.general.rate_limited.clone(),
         }),
     }
 }
 
 /// The response returned for an unmatched route.
-pub async fn not_found() -> impl IntoResponse {
-    (
-        StatusCode::NOT_FOUND,
-        Json(crate::error::ErrorBody {
-            error: crate::error::ErrorDetail {
-                code: "not_found",
-                message: "The requested route does not exist.".to_string(),
-                details: Vec::new(),
-            },
-        }),
-    )
+pub async fn not_found(State(state): State<AppState>) -> Response {
+    AppError::NotFound(state.config.messages.general.route_not_found.clone()).into_response()
 }

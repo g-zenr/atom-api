@@ -1,7 +1,7 @@
 # Tasks — API
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-TASK-001`](specification.md)
 
@@ -68,12 +68,19 @@ root. The general rules are in
 
 ### Query parameters — `GET /api/v1/projects/{project_id}/tasks`
 
+The endpoint accepts the two shared pagination parameters, which are declared
+once for the whole API in `PaginationQuery`, and two filters of its own:
+
 | Parameter | Type | Default | Meaning |
 | --------- | ---- | ------- | ------- |
-| `status` | string | — | Filter by status: `open`, `in_progress` or `done`. |
-| `priority` | string | — | Filter by priority: `low`, `medium`, `high` or `urgent`. |
 | `limit` | integer | `20` | Page size. Capped at 100. A value of zero or less falls back to 20. |
 | `offset` | integer | `0` | Items to skip. A negative value falls back to 0. |
+| `status` | string | — | Filter by status: `open`, `in_progress` or `done`. |
+| `priority` | string | — | Filter by priority: `low`, `medium`, `high` or `urgent`. |
+
+`limit` and `offset` are the shared pagination parameters; `status` and
+`priority` are the filters of the tasks feature. The convention is described
+in [`conventions.md`](../../api/conventions.md) §5.
 
 ## 3. `GET /api/v1/projects/{project_id}/tasks`
 
@@ -279,4 +286,6 @@ The five operations are registered in `src/api/routes.rs` and appear in the
 generated document at `/api/v1/openapi.json` with the `TaskResponse`,
 `TaskPage`, `CreateTaskRequest` and `UpdateTaskRequest` schemas, and with
 `TaskStatus` and `TaskPriority` as named schemas. The `bearer` security
-scheme is applied to all five.
+scheme is applied to all five. The list operation declares the `TaskQuery`
+filters and the shared `PaginationQuery` separately, so `limit` and `offset`
+appear exactly once in the document.

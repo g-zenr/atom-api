@@ -1,7 +1,7 @@
 # ATOM documentation
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 
 This directory is ATOM's knowledge base. It is written so that a contributor
@@ -89,6 +89,7 @@ A feature is never `Verified` because its code exists or compiles.
 | [`architecture/data-architecture.md`](architecture/data-architecture.md) | The schema, the ownership model, search and indexing. |
 | [`architecture/security-architecture.md`](architecture/security-architecture.md) | Trust boundaries, the authentication boundary, the authorization model. |
 | [`architecture/deployment.md`](architecture/deployment.md) | Configuration, secrets, running it, scaling and the production checklist. |
+| [`../config/README.md`](../config/README.md) | The configuration reference: the layers, the precedence, every setting, the secrets, the message catalogue and the validation rules. |
 
 ### Decisions
 
@@ -98,8 +99,9 @@ A feature is never `Verified` because its code exists or compiles.
 | [`decisions/ADR-0001-modular-monolith.md`](decisions/ADR-0001-modular-monolith.md) | ATOM is a modular monolith. |
 | [`decisions/ADR-0002-rust-axum-postgresql.md`](decisions/ADR-0002-rust-axum-postgresql.md) | The technology stack. |
 | [`decisions/ADR-0003-auth-token-design.md`](decisions/ADR-0003-auth-token-design.md) | The access/refresh token design. |
-| [`decisions/ADR-0004-documentation-as-project-truth.md`](decisions/ADR-0004-documentation-as-project-truth.md) | The documentation tree is part of the product. |
+| [`decisions/ADR-0004-documentation-as-project-truth.md`](decisions/ADR-0004-documentation-as-project-truth.md) | The documentation tree is part of the product. Superseded, in the narrow sense, by ADR-0006. |
 | [`decisions/ADR-0005-ownership-enforced-in-sql.md`](decisions/ADR-0005-ownership-enforced-in-sql.md) | Authorization is enforced in SQL, not in handlers. |
+| [`decisions/ADR-0006-configuration-source-of-truth.md`](decisions/ADR-0006-configuration-source-of-truth.md) | The configuration directory is the source of truth; the secrets are held only in the environment. |
 
 ### Features
 

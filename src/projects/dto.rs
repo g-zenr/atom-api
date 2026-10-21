@@ -9,8 +9,19 @@ use crate::pagination::{Page, Pagination};
 use crate::projects::models::Project;
 
 /// Maximum accepted project name length.
+///
+/// Mirrors the database constraint `projects_name_length_chk`
+/// (`CHECK (CHAR_LENGTH(name) BETWEEN 1 AND 120)`) in
+/// `migrations/0003_projects_and_tasks.sql`. The migration is the enforced
+/// copy; this constant is the application-side mirror of it.
 pub const MAX_NAME_LENGTH: usize = 120;
+
 /// Maximum accepted project description length.
+///
+/// Mirrors the database constraint `projects_description_length_chk`
+/// (`CHECK (CHAR_LENGTH(description) <= 5000)`) in
+/// `migrations/0003_projects_and_tasks.sql`. The migration is the enforced
+/// copy; this constant is the application-side mirror of it.
 pub const MAX_DESCRIPTION_LENGTH: usize = 5_000;
 
 /// The public representation of a project.
@@ -62,16 +73,17 @@ pub struct UpdateProjectRequest {
 }
 
 /// Query parameters accepted by `GET /api/v1/projects`.
+///
+/// Only the feature filters live here. The pagination parameters live in
+/// [`crate::pagination::PaginationQuery`], which the handler extracts
+/// separately: declaring `limit` and `offset` in both places would publish
+/// them twice in the generated OpenAPI document.
 #[derive(Debug, Clone, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct ProjectQuery {
     /// Free-text search over name and description.
     #[param(example = "phase")]
     pub search: Option<String>,
-    /// Maximum number of items to return.
-    pub limit: Option<i64>,
-    /// Number of items to skip.
-    pub offset: Option<i64>,
 }
 
 /// The response body of `GET /api/v1/projects`.

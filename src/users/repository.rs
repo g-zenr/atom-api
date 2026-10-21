@@ -7,7 +7,8 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::error::{AppError, AppResult};
+use crate::config::messages::Messages;
+use crate::error::{AppError, AppResult, code};
 use crate::users::models::User;
 
 /// The SQLSTATE code PostgreSQL uses for a unique-constraint violation.
@@ -30,6 +31,10 @@ impl UserRepository {
 
     /// Inserts a new user.
     ///
+    /// The catalogue is a parameter because this method is the only layer
+    /// that recognises the SQLSTATE codes, and the two failures it can tell
+    /// apart have a client-facing wording.
+    ///
     /// # Errors
     ///
     /// Returns [`AppError::Conflict`] when the email is already registered and
@@ -40,6 +45,7 @@ impl UserRepository {
         email: &str,
         password_hash: &str,
         display_name: &str,
+        messages: &Messages,
     ) -> AppResult<User> {
         let result = sqlx::query_as::<_, User>(
             r#"
@@ -61,7 +67,7 @@ impl UserRepository {
                 if error.code().as_deref() == Some(UNIQUE_VIOLATION) =>
             {
                 Err(AppError::Conflict(
-                    "An account with this email address already exists.",
+                    messages.auth.email_already_registered.clone(),
                 ))
             }
             // A `CHECK` violation means the application and the database
@@ -72,8 +78,8 @@ impl UserRepository {
                 if error.code().as_deref() == Some(CHECK_VIOLATION) =>
             {
                 Err(AppError::validation_with(
-                    "validation_failed",
-                    "The request failed a database constraint.",
+                    code::VALIDATION_FAILED,
+                    messages.auth.database_constraint.clone(),
                 ))
             }
             Err(error) => Err(AppError::Database(error)),

@@ -38,6 +38,19 @@ pub struct AccessTokenClaims {
     pub jti: String,
 }
 
+/// Why an access token could not be verified.
+///
+/// The type carries the reason without any wording: the client-facing text
+/// comes from the message catalogue, in the authentication service. A caller
+/// must not be able to tell the failure modes apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum TokenError {
+    /// The token is malformed, expired, signed with another key, or issued
+    /// for another issuer or audience.
+    #[error("the access token could not be verified")]
+    Invalid,
+}
+
 /// A freshly issued access token.
 #[derive(Debug, Clone)]
 pub struct IssuedAccessToken {
@@ -53,6 +66,7 @@ pub struct TokenService {
     issuer: String,
     audience: String,
     access_ttl: Duration,
+    clock_skew: Duration,
 }
 
 impl std::fmt::Debug for TokenService {
@@ -61,19 +75,27 @@ impl std::fmt::Debug for TokenService {
             .field("issuer", &self.issuer)
             .field("audience", &self.audience)
             .field("access_ttl", &self.access_ttl)
+            .field("clock_skew", &self.clock_skew)
             .finish_non_exhaustive()
     }
 }
 
 impl TokenService {
     /// Builds a token service from configuration.
-    pub fn new(secret: &str, issuer: &str, audience: &str, access_ttl: Duration) -> Self {
+    pub fn new(
+        secret: &str,
+        issuer: &str,
+        audience: &str,
+        access_ttl: Duration,
+        clock_skew: Duration,
+    ) -> Self {
         Self {
             encoding_key: EncodingKey::from_secret(secret.as_bytes()),
             decoding_key: DecodingKey::from_secret(secret.as_bytes()),
             issuer: issuer.to_string(),
             audience: audience.to_string(),
             access_ttl,
+            clock_skew,
         }
     }
 
@@ -106,20 +128,21 @@ impl TokenService {
     ///
     /// # Errors
     ///
-    /// Returns [`AppError::Unauthorized`] for every failure mode (bad
-    /// signature, expiry, wrong issuer or audience). The caller must not be
-    /// able to distinguish between them.
-    pub fn decode_access_token(&self, token: &str) -> AppResult<AccessTokenClaims> {
+    /// Returns [`TokenError::Invalid`] for every failure mode (bad signature,
+    /// expiry, wrong issuer or audience). The caller must not be able to
+    /// distinguish between them.
+    pub fn decode_access_token(&self, token: &str) -> Result<AccessTokenClaims, TokenError> {
         let mut validation = Validation::new(Algorithm::HS256);
         validation.set_issuer(&[self.issuer.as_str()]);
         validation.set_audience(&[self.audience.as_str()]);
         validation.set_required_spec_claims(&["exp", "sub", "iss", "aud"]);
-        // Small clock-skew allowance for distributed deployments.
-        validation.leeway = 30;
+        // The clock-skew allowance comes from the configuration, so that a
+        // deployment whose hosts drift can widen it without a code change.
+        validation.leeway = self.clock_skew.as_secs();
 
         decode::<AccessTokenClaims>(token, &self.decoding_key, &validation)
             .map(|data| data.claims)
-            .map_err(|_| AppError::Unauthorized("The access token is invalid or expired."))
+            .map_err(|_| TokenError::Invalid)
     }
 
     /// Lifetime of the access tokens this service issues.
@@ -163,12 +186,16 @@ use base64::Engine as _;
 mod tests {
     use super::*;
 
+    /// The clock-skew allowance the tests use.
+    const CLOCK_SKEW: Duration = Duration::from_secs(30);
+
     fn service() -> TokenService {
         TokenService::new(
             "a-test-signing-secret-that-is-long-enough-32b",
             "atom-api",
             "atom-api",
             Duration::from_secs(900),
+            CLOCK_SKEW,
         )
     }
 
@@ -193,6 +220,7 @@ mod tests {
             "atom-api",
             "atom-api",
             Duration::from_secs(900),
+            CLOCK_SKEW,
         );
         let issued = other
             .issue_access_token("user-1", "a@example.test")
@@ -208,6 +236,7 @@ mod tests {
             "somebody-else",
             "atom-api",
             Duration::from_secs(900),
+            CLOCK_SKEW,
         );
         let issued = other
             .issue_access_token("user-1", "a@example.test")
@@ -220,6 +249,45 @@ mod tests {
         let service = service();
         assert!(service.decode_access_token("not.a.token").is_err());
         assert!(service.decode_access_token("").is_err());
+    }
+
+    #[test]
+    fn every_failure_mode_is_the_same_error() {
+        let service = service();
+        let issued = service
+            .issue_access_token("user-1", "a@example.com")
+            .unwrap();
+
+        // A token this service issued decodes.
+        let claims = service
+            .decode_access_token(&issued.token)
+            .expect("a token this service issued must decode");
+        assert_eq!(claims.sub, "user-1");
+
+        // Every failure mode is the same error, so that a caller cannot tell
+        // a forged token from an expired one.
+        assert_eq!(
+            service.decode_access_token("not.a.token").unwrap_err(),
+            TokenError::Invalid
+        );
+        assert_eq!(
+            service.decode_access_token("").unwrap_err(),
+            TokenError::Invalid
+        );
+
+        // A token signed with another key is refused.
+        let other = TokenService::new(
+            "a-completely-different-secret-of-sufficient-length",
+            "atom-api",
+            "atom-api",
+            Duration::from_secs(900),
+            CLOCK_SKEW,
+        );
+        let foreign = other.issue_access_token("user-1", "a@example.com").unwrap();
+        assert_eq!(
+            service.decode_access_token(&foreign.token).unwrap_err(),
+            TokenError::Invalid
+        );
     }
 
     #[test]
