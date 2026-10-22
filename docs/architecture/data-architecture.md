@@ -150,11 +150,21 @@ CREATE INDEX notes_search_vector_idx ON notes USING GIN (search_vector);
 - The query is:
 
   ```sql
-  AND ($3::text IS NULL OR search_vector @@ plainto_tsquery('simple', $3))
+  AND search_vector @@ plainto_tsquery('simple', $3)
   ```
 
   `plainto_tsquery` treats the search term as a bag of words with no
   operators, so a client cannot inject a tsquery expression.
+- **The clause lives in its own statement.** A listing with a search term and a
+  listing without one are two statements, not one statement guarded by
+  `($3::text IS NULL OR …)`. The guard was measured against the split: under a
+  generic plan it hid the selectivity of the search from the planner, which
+  then read the owner's whole active set and discarded 19 000 of 20 000 rows
+  as a filter. With the split the planner intersects
+  `notes_user_id_archived_idx` and `notes_search_vector_idx` in a `BitmapAnd`:
+  **10.80 ms became 0.85 ms and 819 buffers became 21**, and the same change on
+  the count took **9.93 ms to 1.33 ms**. That is why `src/notes/repository.rs`
+  writes the four statements out as constants instead of assembling one.
 
 ### 3.2 Why the `simple` configuration
 
@@ -181,15 +191,16 @@ Projects have no `tsvector`. The optional search on
 `GET /api/v1/projects` is a case-insensitive substring match:
 
 ```sql
-AND ($2::text IS NULL
-     OR name ILIKE '%' || $2 || '%'
+AND (name ILIKE '%' || $2 || '%'
      OR description ILIKE '%' || $2 || '%')
 ```
 
 It is a deliberate difference from the notes search: a project is a short
 label, and a substring match is enough to find one. The trade-off is that a
 leading wildcard cannot use a B-tree index, so the project search is a scan
-within the owner's rows.
+within the owner's rows. Like the notes search, the clause is in its own
+statement rather than guarded by `($2::text IS NULL OR …)`, so the listing
+without a term stays on `projects_user_id_created_at_idx`.
 
 ### 3.4 Tasks: no search
 
@@ -219,16 +230,19 @@ tiny.
 The primary keys of `users`, `refresh_sessions`, `notes`, `projects` and
 `tasks` are indexed by their `PRIMARY KEY` constraint.
 
-Two gaps are worth naming:
+Three gaps are worth naming:
 
 - The **project search** uses a leading wildcard and therefore has no
   supporting index. It scans the owner's rows, which is bounded by the
   owner's own project count.
-- The **note search** uses a GIN index on `search_vector` alone, and the
-  owner filter is applied on top of it. The planner can therefore use either
-  the GIN index and then discard the notes of other owners, or the owner
-  index and then discard the notes that do not match. One of the two filters
-  is always a post-filter.
+- The **note search** uses a GIN index on `search_vector` alone, so the index
+  itself is not restricted to the owner. The planner intersects it with
+  `notes_user_id_archived_idx` in a `BitmapAnd` — measured at 0.85 ms and 21
+  buffers over 20 000 owner rows — so both predicates are served by an index
+  and neither is a post-filter over the owner's whole set. A *partial* GIN
+  index keyed on the owner would be faster still, but `user_id` cannot appear
+  in an index on a generated `tsvector` column, and a per-owner index is not
+  worth the write cost at this scale.
 - The **expired-session cleanup** filters on `expires_at`, for which there is
   no index. The background task in `src/main.rs` calls
   `RefreshSessionRepository::delete_expired` every hour, so the scan runs
@@ -261,8 +275,10 @@ Two rules make this work:
   `Project`, `Task` and `User` carry the persistence shape, including
   `user_id` and `password_hash`. The public shapes — `NoteResponse`,
   `ProjectResponse`, `TaskResponse`, `UserResponse` — are separate types
-  with an explicit `From<&Model>` conversion. `UserResponse` therefore
-  cannot leak the password hash.
+  with an explicit `From<Model>` conversion. The model is consumed rather
+  than borrowed, so the strings of a listed page move into the response
+  instead of being copied. `UserResponse` therefore cannot leak the password
+  hash.
 
 The migrations are embedded in the binary with `sqlx::migrate!("./migrations")`
 and are applied at start-up, before the socket is bound.
@@ -304,7 +320,28 @@ A transaction is therefore a known, deliberate absence rather than an
 oversight. The migration policy in
 [`../database/migration-policy.md`](../database/migration-policy.md) already
 requires an explicit transaction for any future multi-step write that cannot
-fail safe.
+fail safe. The requirement it implements is in
+[`../project-truth.md`](../project-truth.md) §12, which allows an exception
+when an accepted ADR records that the ordering fails safe, and
+[`../decisions/ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md)
+is that ADR.
+
+### 7.1 The deadline is preserved by the rotation
+
+The replacement session **inherits the original `expires_at`**. The rotation
+does not recompute the expiry from the current time, so the absolute lifetime
+of a session is measured from the moment it was created, and a client that
+refreshes every hour does not extend its own session indefinitely.
+
+The property matters because the absolute lifetime is the upper bound on the
+value of a stolen refresh token. A rotation that recomputed the deadline
+would silently turn the absolute lifetime into a sliding one: the only bound
+would be "as long as the thief keeps refreshing", and the lifetime recorded
+in [`../decisions/ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md)
+would no longer be a bound at all.
+
+The defect that broke this property, and its resolution, are recorded as
+`KI-015` in [`../engineering/known-issues.md`](../engineering/known-issues.md).
 
 ## 8. Related documents
 

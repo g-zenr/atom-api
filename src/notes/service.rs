@@ -8,8 +8,9 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::config::messages::Messages;
+use crate::config::settings::PaginationSettings;
 use crate::error::{AppError, AppResult};
-use crate::helpers::{bounded_text, required_text};
+use crate::helpers::{bounded_text, required_text, validate_search};
 use crate::notes::dto::{
     CreateNoteRequest, MAX_CONTENT_LENGTH, MAX_TITLE_LENGTH, NoteQuery, NoteResponse,
     UpdateNoteRequest,
@@ -22,14 +23,20 @@ use crate::pagination::{Page, PaginationQuery};
 pub struct NoteService {
     repository: NoteRepository,
     messages: Arc<Messages>,
+    pagination: PaginationSettings,
 }
 
 impl NoteService {
     /// Builds the service.
-    pub fn new(repository: NoteRepository, messages: Arc<Messages>) -> Self {
+    pub fn new(
+        repository: NoteRepository,
+        messages: Arc<Messages>,
+        pagination: PaginationSettings,
+    ) -> Self {
         Self {
             repository,
             messages,
+            pagination,
         }
     }
 
@@ -43,7 +50,7 @@ impl NoteService {
             .insert(Uuid::new_v4(), owner, &title, &content)
             .await?;
 
-        Ok(NoteResponse::from(&note))
+        Ok(NoteResponse::from(note))
     }
 
     /// Lists the owner's notes.
@@ -54,11 +61,16 @@ impl NoteService {
         pagination: PaginationQuery,
     ) -> AppResult<Page<NoteResponse>> {
         let filters = NoteFilters {
-            search: query.search,
+            search: query
+                .search
+                .as_deref()
+                .map(|term| validate_search(term, &self.messages))
+                .transpose()?
+                .filter(|term| !term.is_empty()),
             archived: query.archived,
         };
 
-        let limit = pagination.effective_limit();
+        let limit = pagination.effective_limit(&self.pagination);
         let offset = pagination.effective_offset();
 
         let (notes, total) = self
@@ -66,7 +78,9 @@ impl NoteService {
             .list_owned(owner, &filters, limit, offset)
             .await?;
 
-        let items = notes.iter().map(NoteResponse::from).collect();
+        // The page is consumed: the strings of every note are moved into the
+        // response rather than copied.
+        let items = notes.into_iter().map(NoteResponse::from).collect();
 
         Ok(Page::new(items, limit, offset, total))
     }
@@ -79,7 +93,7 @@ impl NoteService {
             .await?
             .ok_or_else(|| AppError::NotFound(self.messages.resources.note_not_found.clone()))?;
 
-        Ok(NoteResponse::from(&note))
+        Ok(NoteResponse::from(note))
     }
 
     /// Applies a partial update to one of the owner's notes.
@@ -112,7 +126,7 @@ impl NoteService {
             .await?
             .ok_or_else(|| AppError::NotFound(self.messages.resources.note_not_found.clone()))?;
 
-        Ok(NoteResponse::from(&note))
+        Ok(NoteResponse::from(note))
     }
 
     /// Deletes one of the owner's notes.
@@ -139,7 +153,7 @@ pub fn validate_title(title: &str, messages: &Messages) -> AppResult<String> {
         "title",
         title,
         MAX_TITLE_LENGTH,
-        &messages.validation.title_too_long,
+        &messages.validation.too_long,
         messages,
     )
 }
@@ -154,7 +168,7 @@ pub fn validate_content(content: &str, messages: &Messages) -> AppResult<String>
         "content",
         content,
         MAX_CONTENT_LENGTH,
-        &messages.validation.content_too_long,
+        &messages.validation.too_long,
         messages,
     )
 }
@@ -162,32 +176,26 @@ pub fn validate_content(content: &str, messages: &Messages) -> AppResult<String>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::messages::test_messages;
     use crate::error::code;
-
-    fn messages() -> Messages {
-        // The shipped catalogue, so that the tests exercise the same templates
-        // the application serves.
-        Messages::from_toml(include_str!("../../config/messages.toml"))
-            .expect("the message catalogue parses")
-    }
 
     #[test]
     fn titles_are_trimmed_and_must_not_be_empty() {
-        let messages = messages();
+        let messages = test_messages();
         assert_eq!(validate_title("  hello  ", &messages).unwrap(), "hello");
         assert!(validate_title("   ", &messages).is_err());
     }
 
     #[test]
     fn oversized_titles_are_rejected() {
-        let messages = messages();
+        let messages = test_messages();
         let long = "x".repeat(MAX_TITLE_LENGTH + 1);
         assert!(validate_title(&long, &messages).is_err());
     }
 
     #[test]
     fn the_title_limit_in_the_message_comes_from_the_constant() {
-        let messages = messages();
+        let messages = test_messages();
         let long = "x".repeat(MAX_TITLE_LENGTH + 1);
 
         let error = validate_title(&long, &messages).unwrap_err();
@@ -203,14 +211,14 @@ mod tests {
 
     #[test]
     fn oversized_content_is_rejected() {
-        let messages = messages();
+        let messages = test_messages();
         let long = "x".repeat(MAX_CONTENT_LENGTH + 1);
         assert!(validate_content(&long, &messages).is_err());
     }
 
     #[test]
     fn content_is_kept_verbatim() {
-        let messages = messages();
+        let messages = test_messages();
         assert_eq!(validate_content("   ", &messages).unwrap(), "   ");
     }
 }

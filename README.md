@@ -191,6 +191,8 @@ atom/api/
 │   ├── projects/     projects
 │   ├── tasks/        tasks
 │   ├── config/       settings, loader, validation, message catalogue
+│   ├── helpers/      the shared text validators
+│   ├── utils/        the generic text helpers
 │   ├── bin/atom-docs.rs   documentation checker
 │   └── error.rs state.rs pagination.rs ratelimit.rs telemetry.rs health.rs
 ├── config/           the committed configuration files; no secrets

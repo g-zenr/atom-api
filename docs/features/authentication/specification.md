@@ -29,11 +29,12 @@ the `user_id` that scopes every private query.
 
 ## 2. Status
 
-**Implemented.** The endpoints, the token lifecycle and the ownership
-predicate exist and are covered by integration tests, but at least one
-accepted requirement — rate limiting on the authentication endpoints — is
-implemented without an HTTP-level test, so the feature is not yet `Verified`.
-See [status.md](status.md) for the full evidence and the remaining gaps.
+**Verified.** The endpoints, the token lifecycle and the ownership predicate
+exist, and every accepted requirement in §5 is covered by a named test. The
+status was raised from `Implemented` on 2026-10-21, when the last four gaps
+were closed by new tests: the HTTP-level rate-limit test, the disabled-account
+test, the expired-refresh-token test and the expired-access-token test. See
+[status.md](status.md) for the full evidence and the remaining gaps.
 
 ## 3. Scope
 
@@ -140,6 +141,9 @@ where the requirement is implemented and where it is covered.
 
 - The presented refresh token is revoked and replaced by a new one. The
   client must persist the new value; the old one is dead.
+- The replacement **inherits the absolute deadline** of the session it
+  replaces. A rotation never extends the lifetime: the session dies at the
+  deadline it was created with, however often the client refreshes.
 - Presenting an already-revoked token is treated as reuse: **every** session
   of that user is revoked and the request fails with `401`. The message is
   `The refresh token has already been used. All sessions have been revoked.`
@@ -221,7 +225,8 @@ A change to this feature is complete when all of the following hold.
 - **There is no way to list or revoke sessions from outside.** A caller who
   suspects a compromise must wait for the token to expire or rotate it.
 - **There is no idle timeout on refresh tokens.** A session lives for its
-  whole absolute lifetime. This is an open question in
+  whole absolute lifetime, and a rotation preserves that deadline rather than
+  extending it. This is an open question in
   [`project-truth.md`](../../project-truth.md) §16.
 - **A disabled account is only detectable at authentication time.** An access
   token that was issued before the account was disabled is rejected on the

@@ -62,18 +62,21 @@ The shared list envelope.
 ### Query parameters — `GET /api/v1/notes`
 
 The endpoint accepts the two shared pagination parameters, which are declared
-once for the whole API in `PaginationQuery`, and two filters of its own:
+once for the whole API in `PaginationQuery` and described in
+[`conventions.md`](../../api/conventions.md) §5, and two filters of its own:
 
 | Parameter | Type | Default | Meaning |
 | --------- | ---- | ------- | ------- |
-| `limit` | integer | `20` | Page size. Capped at 100. A value of zero or less falls back to 20. |
-| `offset` | integer | `0` | Items to skip. A negative value falls back to 0. |
-| `search` | string | — | Free-text match over the title and the body. Trimmed; an empty value is treated as no search. |
+| `search` | string | — | Free-text match over the title and the body. Trimmed; an empty value is treated as no search. At most 200 characters. |
 | `archived` | boolean | `false` | `true` returns only archived notes, `false` or omitted returns only active notes. |
 
 `limit` and `offset` are the shared pagination parameters; `search` and
-`archived` are the filters of the notes feature. The convention is described
-in [`conventions.md`](../../api/conventions.md) §5.
+`archived` are the filters of the notes feature, and they are the only
+parameters this endpoint declares of its own. A `search` term longer than 200
+characters is a `422` validation failure that names the `search` field; the
+bound is enforced by the shared validator `validate_search` in
+`src/helpers/validation.rs`, and its wording comes from the message catalogue
+in `config/messages.toml`.
 
 ## 3. `GET /api/v1/notes`
 
@@ -107,6 +110,7 @@ The order is `created_at DESC`, then `id DESC`.
 | ------ | ---- | ---- |
 | `400` | `bad_request` | A query parameter cannot be parsed, for example `limit=abc` or `archived=maybe`. |
 | `401` | `unauthorized` | No access token, or an invalid one. |
+| `422` | `validation_failed` | The `search` term is longer than 200 characters. `details` names the field. |
 | `500` | `database_error` | The database failed. |
 
 ```bash

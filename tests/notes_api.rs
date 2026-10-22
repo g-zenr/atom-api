@@ -1,9 +1,11 @@
 //! Integration tests for the notes endpoints.
 
-mod common;
+pub mod common;
 
 use axum::http::{Method, StatusCode};
-use common::{app, register_user, request, send, test_state};
+use common::{
+    app, assert_pagination, register_user, request, send, test_state, test_state_with_pagination,
+};
 use serde_json::json;
 
 #[tokio::test]
@@ -207,7 +209,7 @@ async fn the_listing_only_contains_the_callers_notes() {
     let body = response.expect_status(StatusCode::OK);
 
     assert_eq!(body["items"].as_array().unwrap().len(), 2);
-    assert_eq!(body["pagination"]["total"], 2);
+    assert_pagination(&body, 2, 20, 0);
     for item in body["items"].as_array().unwrap() {
         assert!(
             item["title"].as_str().unwrap().contains("note"),
@@ -272,6 +274,35 @@ async fn search_matches_title_and_content() {
     .await;
     let body = response.expect_status(StatusCode::OK);
     assert_eq!(body["items"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_search_term_over_the_bound_is_refused() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "notes-search-bound").await;
+
+    // One character more than the bound of 200.
+    let term = "x".repeat(201);
+
+    let response = send(
+        &app,
+        request(
+            Method::GET,
+            &format!("/api/v1/notes?search={term}"),
+            Some(&user.access_token),
+            None,
+        ),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::UNPROCESSABLE_ENTITY);
+
+    assert_eq!(body["error"]["code"], "validation_failed");
+    assert_eq!(body["error"]["details"][0]["field"], "search");
+    assert_eq!(
+        body["error"]["details"][0]["message"],
+        "must be at most 200 characters long"
+    );
 }
 
 #[tokio::test]
@@ -381,10 +412,7 @@ async fn pagination_is_applied_and_reported() {
     let body = response.expect_status(StatusCode::OK);
 
     assert_eq!(body["items"].as_array().unwrap().len(), 2);
-    assert_eq!(body["pagination"]["total"], 5);
-    assert_eq!(body["pagination"]["limit"], 2);
-    assert_eq!(body["pagination"]["offset"], 0);
-    assert_eq!(body["pagination"]["has_more"], true);
+    assert_pagination(&body, 5, 2, 0);
 }
 
 #[tokio::test]
@@ -404,4 +432,173 @@ async fn the_note_id_must_be_a_uuid() {
     )
     .await
     .expect_status(StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn the_reported_total_is_the_size_of_the_filtered_set() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "notes-total").await;
+
+    for (title, content) in [
+        ("alpha one", "body one"),
+        ("alpha two", "body two"),
+        ("beta three", "body three"),
+        ("gamma four", "body four"),
+    ] {
+        send(
+            &app,
+            request(
+                Method::POST,
+                "/api/v1/notes",
+                Some(&user.access_token),
+                Some(json!({ "title": title, "content": content })),
+            ),
+        )
+        .await
+        .expect_status(StatusCode::CREATED);
+    }
+
+    // The page query and the count query must filter identically, otherwise
+    // the total silently drifts away from the rows that were returned.
+    for (query, expected) in [
+        ("", 4),
+        ("?search=alpha", 2),
+        ("?search=beta", 1),
+        ("?search=nothing-matches-this", 0),
+        ("?archived=true", 0),
+    ] {
+        let response = send(
+            &app,
+            request(
+                Method::GET,
+                &format!("/api/v1/notes{query}"),
+                Some(&user.access_token),
+                None,
+            ),
+        )
+        .await;
+        let body = response.expect_status(StatusCode::OK);
+
+        assert_eq!(
+            body["pagination"]["total"], expected,
+            "unexpected total for '{query}'"
+        );
+        assert_eq!(
+            body["items"].as_array().unwrap().len(),
+            expected,
+            "the page and the count must describe the same set for '{query}'"
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_offset_past_the_end_still_reports_the_whole_filtered_set() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "notes-offset").await;
+
+    for index in 0..5 {
+        send(
+            &app,
+            request(
+                Method::POST,
+                "/api/v1/notes",
+                Some(&user.access_token),
+                Some(json!({ "title": format!("note {index}") })),
+            ),
+        )
+        .await
+        .expect_status(StatusCode::CREATED);
+    }
+
+    let response = send(
+        &app,
+        request(
+            Method::GET,
+            "/api/v1/notes?limit=2&offset=100",
+            Some(&user.access_token),
+            None,
+        ),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::OK);
+
+    assert_eq!(body["items"].as_array().unwrap().len(), 0);
+    assert_pagination(&body, 5, 2, 100);
+}
+
+#[tokio::test]
+async fn the_configured_page_bounds_are_applied_to_the_note_listing() {
+    // Bounds that are neither the shipped defaults nor any plausible
+    // compiled-in constant, so a fallback to a literal cannot pass this test.
+    let state = test_state_with_pagination(7, 13).await;
+    let bounds = state.config.api.pagination;
+    let app = app(state);
+    let user = register_user(&app, "notes-bounds").await;
+
+    for index in 0..3 {
+        send(
+            &app,
+            request(
+                Method::POST,
+                "/api/v1/notes",
+                Some(&user.access_token),
+                Some(json!({ "title": format!("bounded {index}") })),
+            ),
+        )
+        .await
+        .expect_status(StatusCode::CREATED);
+    }
+
+    // A limit far above the configured maximum is answered with the maximum,
+    // not with the requested value.
+    let response = send(
+        &app,
+        request(
+            Method::GET,
+            "/api/v1/notes?limit=100000",
+            Some(&user.access_token),
+            None,
+        ),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::OK);
+    assert_eq!(
+        body["pagination"]["limit"], bounds.max_limit,
+        "the request must be capped at the configured maximum"
+    );
+    assert_eq!(
+        body["pagination"]["offset"], 0,
+        "the offset must be the one that was applied"
+    );
+
+    // No limit falls back to the configured default.
+    let response = send(
+        &app,
+        request(Method::GET, "/api/v1/notes", Some(&user.access_token), None),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::OK);
+    assert_eq!(
+        body["pagination"]["limit"], bounds.default_limit,
+        "the default must come from the configuration"
+    );
+
+    // A non-positive limit also falls back to the configured default.
+    let response = send(
+        &app,
+        request(
+            Method::GET,
+            "/api/v1/notes?limit=0",
+            Some(&user.access_token),
+            None,
+        ),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::OK);
+    assert_eq!(
+        body["pagination"]["limit"], bounds.default_limit,
+        "a non-positive limit must not bypass the default"
+    );
 }

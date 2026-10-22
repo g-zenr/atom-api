@@ -50,8 +50,25 @@ its data in PostgreSQL through SQLx.**
 | Serialization | `serde` and `serde_json` | 1 |
 | API description | `utoipa` with `utoipa-swagger-ui` | 5 / 9 |
 
-The consequences of the choice are:
+### Amendment — the dependency list since the decision was accepted
 
+**The decision is unchanged.** Rust with Axum on Tokio, storing data in
+PostgreSQL through SQLx, is still the stack. What changed is the *detail* of
+the manifest, which the table above records as it was accepted.
+
+| Change | Why | Reference |
+| ------ | --- | --------- |
+| The `sqlx` `json` feature was removed | No column is a `JSON` or `JSONB` column, and no statement uses `sqlx::types::Json`. The feature compiled code the crate never called. | `ATOM-CHANGE-20261022-003` |
+| The `axum` `macros` feature was removed | The crate uses no `debug_handler`, `debug_middleware` or `#[derive(FromRef)]`. | `ATOM-CHANGE-20261022-003` |
+| The `tokio` `sync` feature was removed | The only mutex in the crate is `std::sync::Mutex`. | `ATOM-CHANGE-20261022-003` |
+| `tower` became a development dependency | The application uses `axum` and `tower-http`; `tower` is needed only by the test harness. | `ATOM-CHANGE-20261022-003` |
+| The `hex` crate was removed | One call site formats a SHA-256 digest; `sha2`'s own output implements `LowerHex`. The encoding is pinned by a literal assertion. | `ATOM-CHANGE-20261022-003` |
+
+The `sqlx` `macros`, `migrate`, `uuid` and `chrono` features remain, because
+`sqlx::migrate!`, `#[derive(FromRow)]` and the UUID and timestamp columns
+depend on them.
+
+The consequences of the choice are:
 - **The router, the middleware and the extractors are explicit.** The
   middleware stack is assembled in one function, `api::router`, so that the
   security posture of the API can be read in one file.

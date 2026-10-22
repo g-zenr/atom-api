@@ -30,7 +30,7 @@ Source: `src/api/mod.rs`, `src/api/routes.rs`, `src/api/middleware.rs`,
 | Aspect | Description |
 | ------ | ----------- |
 | Responsibility | Builds the router, installs the middleware stack, defines the route table and the OpenAPI document, and provides the shared extractors. It owns the *shape* of the HTTP surface, never the business rules. |
-| Public interface | `api::router(state) -> Router`, `api::routes::api_routes() -> Router<AppState>`, `api::routes::swagger_ui() -> Router<AppState>`, `api::routes::ApiDoc`, `api::routes::not_found`, `api::routes::handle_panic`, `api::timeout_middleware`, `api::RequestContext`, `api::RequestSettings`, `api::middleware::AuthUser`, `api::middleware::ClientIp`, `api::middleware::enforce_rate_limit`, `api::extract::Json`, `api::extract::Path`, `api::extract::Query`. |
+| Public interface | `api::router(state) -> Router`, `api::routes::api_routes() -> Router<AppState>`, `api::routes::swagger_ui() -> Router<AppState>`, `api::routes::ApiDoc`, `api::routes::not_found`, `api::routes::handle_panic`, `api::timeout_middleware`, `api::RequestContext`, `api::middleware::AuthUser`, `api::middleware::ClientIp`, `api::middleware::enforce_rate_limit`, `api::extract::Json`, `api::extract::Path`, `api::extract::Query`. |
 | May depend on | `config`, `error`, `state`, `health`, and the *handlers* of every feature module. It must not depend on a feature module's repository or service directly. |
 | Data ownership | None. The module reads and writes no table. |
 | Invariants | The middleware stack is installed exactly once, in `router`. The router installs a `RequestContext` extension on every request; it carries the client-facing message catalogue and the request limits, so that no layer or extractor has to read the configuration or the environment itself. Health routes stay outside `/api/v1` and outside the authentication boundary. Every extractor rejection is an `AppError`, so every rejection uses the documented error envelope. |
@@ -90,7 +90,7 @@ Source: `src/notes/handlers.rs`, `src/notes/service.rs`,
 | Aspect | Description |
 | ------ | ----------- |
 | Responsibility | Notes: create, list, read, partially update, delete, archive and search. |
-| Public interface | `NoteService` with `create`, `list`, `get`, `update`, `delete`; the free functions `validate_title`, `validate_content`, which delegate to the shared `required_text` and `bounded_text` in `src/helpers/validation.rs`; `NoteRepository` with `insert`, `find_owned`, `list_owned`, `update_owned`, `delete_owned`; `NoteFilters`; the DTOs `CreateNoteRequest`, `UpdateNoteRequest`, `NoteQuery`, `NoteResponse`, `NotePage`; the model `Note`. |
+| Public interface | `NoteService` with `create`, `list`, `get`, `update`, `delete`; the free functions `validate_title`, `validate_content`, which delegate to the shared `required_text` and `bounded_text` in `src/helpers/validation.rs`; `NoteRepository` with `insert`, `find_owned`, `list_owned`, `update_owned`, `delete_owned`; `NoteFilters`; the DTOs `CreateNoteRequest`, `UpdateNoteRequest`, `NoteQuery`, `NoteResponse`, `NotePage`; the model `Note`. The search term is bounded by the shared `validate_search`, also in `src/helpers/validation.rs`. |
 | May depend on | `error`, `pagination`, `helpers`, `config` (for the message catalogue), `api::extract`, `api::middleware`. It must not depend on `projects` or `tasks`, so that a future "note attached to a task" does not require a schema change to the `notes` table. |
 | Data ownership | The `notes` table. |
 | Invariants | Every statement carries the caller's `user_id`. A note that the caller does not own is invisible to the repository and is answered with `404`. The listing is ordered by `created_at DESC, id DESC`. The archive filter is tri-state: omitted and `false` both return active notes only, `true` returns archived notes only. A partial update never writes `null` over an existing value: the update uses `COALESCE($n, column)`. |
@@ -110,7 +110,7 @@ Source: `src/projects/handlers.rs`, `src/projects/service.rs`,
 | Aspect | Description |
 | ------ | ----------- |
 | Responsibility | Projects: create, list, read, partially update, delete. A project is the container that owns tasks. |
-| Public interface | `ProjectService` with `create`, `list`, `get`, `update`, `delete`; the free functions `validate_name`, `validate_description`, which delegate to the shared `required_text` and `bounded_text` in `src/helpers/validation.rs`; `ProjectRepository` with `insert`, `find_owned`, `list_owned`, `update_owned`, `delete_owned`; the DTOs `CreateProjectRequest`, `UpdateProjectRequest`, `ProjectQuery`, `ProjectResponse`, `ProjectPage`; the model `Project`. |
+| Public interface | `ProjectService` with `create`, `list`, `get`, `update`, `delete`; the free functions `validate_name`, `validate_description`, which delegate to the shared `required_text` and `bounded_text` in `src/helpers/validation.rs`; `ProjectRepository` with `insert`, `find_owned`, `list_owned`, `update_owned`, `delete_owned`; the DTOs `CreateProjectRequest`, `UpdateProjectRequest`, `ProjectQuery`, `ProjectResponse`, `ProjectPage`; the model `Project`. The search term is bounded by the shared `validate_search`, also in `src/helpers/validation.rs`. |
 | May depend on | `error`, `pagination`, `helpers`, `config` (for the message catalogue), `api::extract`, `api::middleware`. It must not depend on `tasks`: `tasks` depends on `projects`, not the other way round. |
 | Data ownership | The `projects` table. It is the parent of `tasks`; deleting a project cascades to its tasks through `ON DELETE CASCADE` in the database. |
 | Invariants | Every statement carries the caller's `user_id`. A project that the caller does not own is answered with `404`. The listing is ordered by `created_at DESC, id DESC`. A partial update uses `COALESCE($n, column)` and never nulls an omitted field. The optional search is a case-insensitive substring match over the name and the description. |
@@ -167,6 +167,7 @@ The rules the module enforces, in one place:
 | The two secrets are present, and the signing secret is at least 32 bytes. | `validate` and `validate_secret` in `src/config/validation.rs`. |
 | In `Production`, the documented placeholder secret is refused. | `validate_secret` in `src/config/validation.rs`. |
 | The body limit, the request timeout, the readiness timeout, the prune interval and the prune grace are positive. | `validate_settings` in `src/config/validation.rs`. |
+| The prune grace is at least one hour, the password minimum at least twelve characters, the clock-skew allowance at most five minutes, the access-token lifetime at most one day and the refresh-token lifetime at most one year. | `validate_settings` in `src/config/validation.rs`. The bounds are constants beside the rules, not settings. |
 | The pagination default is positive and the maximum is at least the default. | `validate_settings` in `src/config/validation.rs`. |
 | The rate limit is positive and its window is not zero. | `validate_settings` in `src/config/validation.rs`. |
 | The CORS allowlist contains no wildcard and every origin is a valid header value. | `validate_cors` in `src/config/validation.rs`. |
@@ -200,12 +201,12 @@ Source: `src/state.rs`.
 | Aspect | Description |
 | ------ | ----------- |
 | Responsibility | Holds the shared dependencies and passes them to the handlers explicitly. There is no global mutable state. |
-| Public interface | `AppState` with the public fields `config`, `db`, `rate_limiter`, `tokens`, `passwords`, `auth`, `notes`, `projects` and `tasks`, the accessor `auth_service()` and the method `prune_expired_sessions(grace)`. |
+| Public interface | `AppState` with the public fields `config`, `db`, `rate_limiter`, `auth`, `notes`, `projects` and `tasks`. The five services are reached through their field, which is the only idiom. The `tokens` and `passwords` fields, the `sessions()` accessor, the `auth_service()` accessor and the `prune_expired_sessions(grace)` method were removed: nothing outside the module used them, and the authentication service already holds the `TokenService`, the `PasswordHasher` and the session repository. |
 | May depend on | `config`, `auth`, `users`, `notes`, `projects`, `tasks`, `ratelimit`. |
 | Data ownership | The `PgPool`. It shares the pool with every repository, but each repository holds its own clone of the handle. |
 | Invariants | `AppState` is cheap to clone: every field is `Arc`-backed or a `PgPool` handle. The authentication service and the three feature services are constructed **once**, at start-up, and are never rebuilt per request: a handler reaches the use cases through `state.notes`, `state.projects` and `state.tasks`. There is no per-request service constructor. |
 | Error handling | None of its own. `AppState::new` takes an already validated `Config` and an already connected pool, and fails only when the password hasher cannot be built from the configured Argon2 parameters. |
-| Security boundary | Holds the signing secret inside `TokenService` and the Argon2 parameters inside `PasswordHasher`. Neither is exposed in a `Debug` rendering. |
+| Security boundary | The signing secret and the Argon2 parameters are reachable only through the authentication service, which holds the `TokenService` and the `PasswordHasher`. Neither is exposed in a `Debug` rendering. |
 | Testing approach | No dedicated test file. `tests/common/mod.rs` builds the state through `AppState::new` with a test configuration. |
 | Known limitations | The services are built once, so the configuration cannot change at run time. There is no way to rotate the signing secret without restarting the process. |
 
@@ -216,13 +217,13 @@ Source: `src/pagination.rs`.
 | Aspect | Description |
 | ------ | ----------- |
 | Responsibility | One pagination convention and one list envelope for every list endpoint. |
-| Public interface | `PaginationQuery` with `effective_limit` and `effective_offset`, `Pagination::new`, `Page<T>::new`, the constants `DEFAULT_LIMIT` (20) and `MAX_LIMIT` (100). |
+| Public interface | `PaginationQuery` with `effective_limit` and `effective_offset`, `Pagination::new`, `Page<T>::new`, and `PaginationSettings` — the two bounds that `effective_limit` clamps into. The bounds come from the configuration: `api.pagination.default_limit` and `api.pagination.max_limit`. There is no compile-time constant any more, so the published page size has exactly one home. |
 | May depend on | Nothing inside the crate. |
 | Data ownership | No data. |
-| Invariants | The effective limit is never above 100 and never below the default; a non-positive limit falls back to 20. A negative offset is treated as zero. `has_more` is `offset + limit < total`. |
+| Invariants | The effective limit is never above the configured maximum page size and never below the configured default page size; a non-positive limit falls back to the default. A negative offset is treated as zero. `has_more` is `offset + limit < total`. The two bounds are part of the published client convention, so changing them is a breaking change for a client. |
 | Error handling | None. The clamping happens silently, so an out-of-range limit is not a validation failure. |
 | Security boundary | The limit caps how much data one request can pull out of the database. |
-| Testing approach | Unit tests in `src/pagination.rs` cover the clamping, the fallback and the `has_more` computation. The HTTP-level envelope is exercised by `tests/notes_api.rs`. |
+| Testing approach | Unit tests in `src/pagination.rs` cover the clamping into the configured range, the configured default, the fallback and the `has_more` computation. The HTTP-level envelope is exercised by `tests/notes_api.rs`. |
 | Known limitations | The convention is `limit`/`offset`, so a deep page costs the database a large offset. There is no cursor. |
 
 ### 7.5 `ratelimit` — the in-process limiter
@@ -232,10 +233,10 @@ Source: `src/ratelimit.rs`.
 | Aspect | Description |
 | ------ | ----------- |
 | Responsibility | A fixed-window request counter, keyed by client address, for the authentication endpoints. |
-| Public interface | `RateLimiter::new`, `RateLimiter::check`, `RateLimiter::reset`, and the `Decision` enum (`Allowed`, `Rejected { retry_after_seconds }`). |
+| Public interface | `RateLimiter::new`, `RateLimiter::check` and the `Decision` enum (`Allowed`, `Rejected { retry_after_seconds }`). `reset()` was removed: only a test used it. |
 | May depend on | Nothing inside the crate. `api::middleware::enforce_rate_limit` is the only caller. |
 | Data ownership | A `Mutex<HashMap<IpAddr, WindowEntry>>` in the process memory. Nothing is persisted. |
-| Invariants | Entries whose window has elapsed are dropped on every check, so the map cannot grow without bound. A rejected call reports the remaining seconds of the window. |
+| Invariants | Entries whose window has elapsed are swept at most once per window, so a check no longer costs one visit per tracked client. Because sweeps are at most one window apart, an entry lives for at most two windows: the map holds the clients of the last two windows and stays bounded. A client's window resets on its own timeline, so its decision never depends on when the sweep last ran. A rejected call reports the remaining seconds of the window. |
 | Error handling | None. `enforce_rate_limit` converts a rejection into `AppError::RateLimited`, which becomes a `429` with a `retry-after` header. |
 | Security boundary | A defence-in-depth control on the authentication boundary. It is **not** a substitute for edge rate limiting. |
 | Testing approach | Unit tests in `src/ratelimit.rs` cover the limit, the independence of clients and the window reset. The HTTP-level behaviour is exercised by `the_authentication_endpoints_are_rate_limited` in [`../../tests/auth_api.rs`](../../tests/auth_api.rs). |
@@ -248,14 +249,14 @@ Source: `src/telemetry.rs`.
 | Aspect | Description |
 | ------ | ----------- |
 | Responsibility | Installs the global tracing subscriber and selects the formatter. |
-| Public interface | `telemetry::init(filter: &str)`. |
+| Public interface | `telemetry::init(filter: &str, environment: Environment) -> Result<(), Box<dyn Error>>`. |
 | May depend on | Nothing inside the crate. |
 | Data ownership | The global subscriber. |
-| Invariants | The filter comes from the configuration: `app.log_filter`, which the environment variable `APP_LOG_FILTER` overrides and the environment overlay can replace. A debug build uses the human-readable formatter; a release build uses the JSON formatter with a flattened event. |
-| Error handling | None of its own. It panics if a subscriber is already installed, which can only be a programming error. |
+| Invariants | The filter comes from the configuration: `app.log_filter`, which the environment variable `APP_LOG_FILTER` overrides and the environment overlay can replace. The formatter follows the **environment**, not the build profile: `APP_ENV=production` uses the JSON formatter with a flattened event, and any other environment uses the human-readable one. A release build that runs a development deployment therefore gets readable logs, and a debug build that runs a production deployment gets JSON. |
+| Error handling | Returns an error when the filter is not a valid directive, or when a subscriber is already installed. It does **not** fall back to `info`: the filter was validated when the configuration was loaded, so an invalid one is a start-up failure. |
 | Security boundary | The log sink is a secret-bearing boundary: the formatter never adds request bodies, and the error renderer redacts internal detail before it can reach a log line. |
 | Testing approach | No dedicated test. The format is exercised by running the service. |
-| Known limitations | There is no redaction layer over arbitrary log fields, no audit trail and no metric export. The formatter choice is made by build profile, not by configuration. |
+| Known limitations | There is no redaction layer over arbitrary log fields, no audit trail and no metric export. The formatter has two choices and no per-deployment override beyond `APP_ENV`. |
 
 ### 7.7 `health` — probes
 
@@ -272,6 +273,40 @@ Source: `src/health.rs`.
 | Security boundary | Both endpoints are unauthenticated and reveal only whether the process is alive and whether the database answered. They expose no internal detail. |
 | Testing approach | No dedicated automated test. The behaviour was exercised by an operator run; see [`../engineering/implementation-status.md`](../engineering/implementation-status.md). |
 | Known limitations | The readiness probe checks only the database. There is no dependency on a cache, a broker or an upstream service, because Phase 1 has none. |
+
+### 7.8 `helpers` — the shared text validators
+
+Source: `src/helpers/validation.rs`.
+
+| Aspect | Description |
+| ------ | ----------- |
+| Responsibility | The validation rules that more than one feature module needs, defined once: the trimming behaviour, the length bounds and the wording of a rejection. |
+| Public interface | `required_text` (trims, rejects an empty value, bounds the length), `bounded_text` (keeps the value verbatim, bounds the length), `validate_search` (trims a search term and bounds it at 200 characters), `field_error`, and the constant `MAX_SEARCH_LENGTH` (200). |
+| May depend on | `error`, `config` (for the message catalogue) and `utils::text` (for the character count). It must not depend on a feature module. |
+| Data ownership | No data. |
+| Invariants | Every field-level rejection is reported the same way: one field violation in the details, and the shared `validation_failed` message from the catalogue. The trimming behaviour is deliberately **not** uniform: a title, a name and a display name are trimmed, while a body and a description are kept verbatim, because the database `CHECK` constraints measure the stored value. A search term is trimmed and an empty term means "no filter" rather than an error. |
+| Error handling | None of its own. Every failure is an `AppError::Validation` with a `422`. |
+| Security boundary | It is the layer that gives every request input a bound, so that one request cannot make the database tokenise an arbitrarily long string. |
+| Testing approach | Unit tests in `src/helpers/validation.rs` cover the trimming, the empty value, the length boundary, the verbatim behaviour and the search bound (`a_search_term_is_trimmed_and_bounded`). The `422` the search bound produces is covered at HTTP level by `a_search_term_over_the_bound_is_refused` in [`../../tests/notes_api.rs`](../../tests/notes_api.rs). |
+| Known limitations | The bounds are constants of the module, not settings. The search bound in particular is not configurable, because a deployment has no reason to accept a longer term. |
+
+### 7.9 `utils` — the generic text operations
+
+Source: `src/utils/mod.rs`, `src/utils/text.rs`.
+
+| Aspect | Description |
+| ------ | ----------- |
+| Responsibility | The generic, domain-independent text operations that more than one module needs: the character count and the blank test. A utility must not know the business rules of notes, projects or tasks, and must not know the error type of a particular feature; a helper that needs either belongs in [`helpers`](#78-helpers--the-shared-text-validators) instead. |
+| Public interface | `char_len` (the number of characters in a string) and `is_blank` (whether a string is empty or contains only whitespace), in `utils::text` and re-exported at the root of the module as `utils::{char_len, is_blank}`. |
+| May depend on | Nothing inside the crate. |
+| Data ownership | No data. |
+| Invariants | `char_len` counts **characters**, not bytes: `str::len` counts bytes, which is the wrong measure for a length limit a user reads in characters — a name of 60 emoji is 240 bytes and 60 characters. Every length rule in the API is expressed in characters. `is_blank` trims before it tests, so a value of only whitespace is blank. |
+| Error handling | None. Neither function can fail; the caller decides what a blank or an over-long value means. |
+| Security boundary | None of its own. It is the counting primitive underneath the shared validators, which are the layer that gives every request input a bound. |
+| Testing approach | Unit tests in `src/utils/text.rs` cover the character count against a multi-byte string and a pair of emoji, and the blank test against an empty string, a whitespace-only string and a value with content. |
+| Known limitations | The module holds two functions and no string-normalisation helper: trimming and the case rules stay where the business rules live, in `src/helpers/validation.rs` and `src/users/service.rs`. |
+
+---
 
 ## 8. Related documents
 

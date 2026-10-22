@@ -11,9 +11,6 @@
 # See `config/README.md` for the full precedence model.
 
 [app]
-# The product name, used in the OpenAPI document and in the start-up log.
-name = "ATOM API"
-
 # The socket the HTTP server binds to. Loopback by default: a deployment that
 # wants the API reachable must set this deliberately.
 bind_addr = "127.0.0.1:3000"
@@ -32,6 +29,16 @@ request_timeout_seconds = 30
 # How long the readiness probe waits for the database, in seconds. 1.
 readiness_probe_timeout_seconds = 1
 
+# The ceiling on how long in-flight requests may finish after the process is
+# asked to stop, in seconds. 10.
+#
+# The server stops accepting new connections as soon as it receives the signal,
+# then drains; this value bounds that drain, so that a request that never
+# completes cannot keep the process alive forever. It was a hard-coded 100 ms,
+# which is shorter than any load balancer's deregistration delay and therefore
+# could not serve its purpose.
+shutdown_grace_seconds = 10
+
 [app.sessions]
 # How often expired refresh sessions are pruned, in seconds. 3600.
 prune_interval_seconds = 3600
@@ -39,7 +46,11 @@ prune_interval_seconds = 3600
 # How long an expired refresh session is kept before it is deleted, in
 # seconds. 86400 (one day).
 #
-# This is a security window, not a tuning knob: a revoked session must be
-# retained long enough that a replayed token is still recognised as *reuse*
-# and triggers the mass revocation. It is recorded in ADR-0003.
+# The grace keeps the row of an expired session alive for a while, so that a
+# token that expired recently is still recognised as *expired* rather than as
+# one that never existed. The reuse detection is not affected: a revoked
+# session is kept until its absolute deadline, which is the refresh-token
+# lifetime.
+#
+# The value may be raised, but not below one hour.
 prune_grace_seconds = 86400

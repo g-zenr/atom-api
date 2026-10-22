@@ -16,13 +16,14 @@ use crate::state::AppState;
 use crate::tasks::handlers as task_handlers;
 
 /// The OpenAPI document for the ATOM API.
+///
+/// The derive takes no `info(...)` block on purpose: the title and the
+/// version are set at run time from the configuration and from `Cargo.toml`,
+/// so the derive must not carry a second, stale copy of either. What the
+/// derive does derive - the title, the version and the description - comes
+/// from the crate metadata.
 #[derive(OpenApi)]
 #[openapi(
-    info(
-        title = "ATOM API",
-        version = "0.1.0",
-        description = "API-first personal workspace platform. Phase 1: authentication, notes, projects and tasks."
-    ),
     paths(
         crate::health::live,
         crate::health::ready,
@@ -111,7 +112,10 @@ impl utoipa::Modify for SecurityAddon {
 /// Builds the OpenAPI document, with the configured title and the crate
 /// version.
 ///
-/// The version comes from `Cargo.toml`, so there is one source of truth for it.
+/// The title comes from the configuration and the version from `Cargo.toml`,
+/// so there is one source of truth for each. The derive fills the title and
+/// the version from the crate metadata; they are overwritten here so that the
+/// title is the configured one and the version is the crate's own.
 pub fn openapi_document(config: &Config) -> OpenApiDocument {
     let mut document = ApiDoc::openapi();
     document.info.title = config.api.title.clone();

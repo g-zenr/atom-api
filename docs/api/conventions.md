@@ -93,8 +93,26 @@ document.
 
 | Parameter | Type | Default | Rules |
 | --------- | ---- | ------- | ----- |
-| `limit` | integer | `20` | The page size. Values above `100` are clamped to `100`. A value of zero or less falls back to `20`. |
+| `limit` | integer | `20` | The page size. A value above the maximum page size is clamped to it. A value of zero or less falls back to the default page size. |
 | `offset` | integer | `0` | The number of items to skip. A negative value falls back to `0`. |
+
+Both bounds are **configured values**, resolved once at start-up, not
+compile-time constants:
+
+| Setting | Default | What it bounds |
+| ------- | ------- | -------------- |
+| `api.pagination.default_limit` | `20` | The page size used when the caller does not ask for one. |
+| `api.pagination.max_limit` | `100` | The largest page a caller may ask for. |
+
+They live in `config/api.toml` and are described in
+[`../architecture/deployment.md`](../architecture/deployment.md) §1.3. The
+defaults in the table above are the committed ones; a deployment that
+overrides them changes both.
+
+**Changing either of them is a breaking change for a client.** The same
+request then returns a different page, and a client written against the
+previous bound pages differently. They are therefore part of the published
+client convention, not a tuning knob.
 
 A `limit` or `offset` that is not an integer is a malformed request and
 returns `400`.
@@ -136,22 +154,26 @@ declared by the feature that owns it and is listed here once:
 
 | Endpoint | Filter | Effect |
 | -------- | ------ | ------ |
-| `GET /notes` | `search` | Full-text match over the title and the body. |
+| `GET /notes` | `search` | Full-text match over the title and the body. At most 200 characters. |
 | `GET /notes` | `archived` | `true` returns only archived notes; `false` or omitted returns only active notes. |
-| `GET /projects` | `search` | Case-insensitive substring match over the name and the description. |
+| `GET /projects` | `search` | Case-insensitive substring match over the name and the description. At most 200 characters. |
 | `GET /projects/{project_id}/tasks` | `status` | Only tasks with that status. |
 | `GET /projects/{project_id}/tasks` | `priority` | Only tasks with that priority. |
 
+The 200-character bound on `search` is a rule of the service layer, not of the
+query string: the shared validator `validate_search` in
+`src/helpers/validation.rs` rejects a longer term with a `422` validation
+failure that names the `search` field, and the wording comes from the message
+catalogue in `config/messages.toml`. A term is also trimmed, and an empty
+term is treated as no search at all.
+
 ### The full parameter set
 
-The two shared parameters plus the filters of the endpoint. A parameter is
-never listed twice for the same endpoint:
-
-| Endpoint | Query parameters |
-| -------- | ---------------- |
-| `GET /notes` | `limit`, `offset`, `search`, `archived` |
-| `GET /projects` | `limit`, `offset`, `search` |
-| `GET /projects/{project_id}/tasks` | `limit`, `offset`, `status`, `priority` |
+Every list endpoint accepts the two shared parameters above plus the filters
+that belong to it. A parameter is never listed twice for the same endpoint:
+the pagination parameters are declared once for the whole API in
+`PaginationQuery`, and a feature declares only its own filters, so the
+generated OpenAPI document publishes each parameter exactly once.
 
 ## 6. Timestamps
 
@@ -195,24 +217,36 @@ The resources that support PATCH are notes, projects and tasks.
 
 ## 9. The body size limit
 
-- The **effective ceiling** on a request body is `APP_MAX_BODY_BYTES`
-  (1 MiB by default). The router installs it as
-  `DefaultBodyLimit::max(config.max_body_bytes)`, and the JSON extractor in
-  `src/api/extract.rs` reads that limit through
-  `req.into_limited_body()`, so the configured value is what is enforced.
-- The extractor additionally passes a constant of **4 MiB**
-  (`4 * 1024 * 1024` bytes) to `axum::body::to_bytes`. It is the backstop for
-  a request that reaches the extractor without the layer installed, and it
-  also bounds a configured limit that is larger than 4 MiB: a body is refused
-  when it exceeds either of the two limits.
+- A body is refused when it exceeds **either** of two limits:
+  - the **configured** limit, `app.limits.max_body_bytes`, which the
+    environment variable `APP_MAX_BODY_BYTES` overrides and which is
+    **1 MiB** (`1048576` bytes) by default. The router installs it as an Axum
+    `DefaultBodyLimit`, and the JSON extractor in `src/api/extract.rs` reads
+    it through `req.into_limited_body()`, so the configured value is what is
+    enforced for every request that passes through the router;
+  - the **4 MiB backstop**, the constant `MAX_BODY_BYTES_BACKSTOP`
+    (`4 * 1024 * 1024` bytes) in `src/config/validation.rs`, which is passed to
+    `axum::body::to_bytes`. It bounds the extractor even when the layer is
+    not installed.
+- The backstop is a constant and not a setting, because it is a safety ceiling
+  of the parser rather than a deployment policy. The configuration validation
+  **refuses** a `max_body_bytes` above it, so a deployment that raises
+  `APP_MAX_BODY_BYTES` above 4 MiB does not start at all; the operator sees
+  the bound named in the start-up error.
 - A body over the limit is rejected with `413` and the code
   `payload_too_large` in the standard envelope.
 - The limit applies to the raw body, before it is parsed.
 
 ## 10. CORS
 
-- CORS is **disabled** when `APP_CORS_ALLOWED_ORIGINS` is empty. That is the
-  correct configuration for an API that is not reachable from a browser.
+- CORS is **disabled** when the resolved allowlist is empty. That is the
+  correct configuration for an API that is not reachable from a browser. The
+  allowlist is `api.cors.allowed_origins`, which is empty in
+  `config/api.toml` and which the environment variable
+  `APP_CORS_ALLOWED_ORIGINS` overrides. The variable therefore wins over the
+  committed default: a `.env` that carries a non-empty value enables CORS
+  even though the file says "off". See
+  [`../architecture/deployment.md`](../architecture/deployment.md) §5.2.
 - When it is configured, the allowlist is **explicit**. A wildcard `*` is
   rejected at start-up: the process refuses to start rather than shipping a
   foot-gun, because a wildcard origin combined with credentials is rejected
@@ -258,8 +292,12 @@ curl -s http://127.0.0.1:3000/health/ready
 
 - Every request carries an `x-request-id` header. If the client supplies
   one, it is used; otherwise the server generates a UUID.
-- The identifier is echoed on the response and appears in the structured
-  log lines of the request.
+- The identifier is echoed on the response. It is carried by the header and
+  by the tracing span of the request; it is **not** written as an explicit
+  field on every log line, so correlating a single log line with a request
+  relies on the tracing span context. The flow is in
+  [`../architecture/request-lifecycle.md`](../architecture/request-lifecycle.md)
+  §8.
 - The header is named `x-request-id`, not the more modern `traceparent`; the
   project does not implement W3C trace context.
 

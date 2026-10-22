@@ -95,17 +95,29 @@ The default lifetime is 14 days, configured by
 than the access-token lifetime. There is no idle timeout: a session that is
 used every day still dies on its absolute expiry.
 
+**The implementation now matches the absolute-lifetime answer that
+[`../decisions/ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md)
+already records.** ADR-0003 decided that there is one absolute lifetime and no
+idle timeout, and the rotation preserves it: the replacement session inherits
+the original `expires_at`, so a rotation never extends the absolute lifetime
+of a session. The part of the question that is still open is the **idle
+timeout**: whether a session that is not used for a while should expire
+earlier than its absolute deadline.
+
 **Options.**
 
 | Option | Impact |
 | ------ | ------ |
-| Keep one absolute lifetime and no idle timeout. | The current behaviour. A stolen token is worthless after the lifetime, and the owner never has to think about it. The cost is that a long-lived session on a device that is no longer used stays valid until the deadline. |
+| Keep one absolute lifetime and no idle timeout. | The current behaviour, and the decision ADR-0003 already records. A stolen token is worthless after the lifetime, and the owner never has to think about it. The cost is that a long-lived session on a device that is no longer used stays valid until the deadline. |
 | Add an idle timeout on top of the absolute lifetime. | A session that is unused for, say, 30 days expires. The cost is an extra column, an extra predicate in the session query, and a rule for what the idle timeout is. |
-| Add a sliding absolute lifetime: each rotation extends the deadline. | The owner is never logged out. The cost is that a stolen token can be kept alive indefinitely by the thief, which removes the upper bound that makes the absolute lifetime valuable. |
+| Add a sliding absolute lifetime: each rotation extends the deadline. | The owner is never logged out. The cost is that a stolen token can be kept alive indefinitely by the thief, which removes the upper bound that makes the absolute lifetime valuable. **This option contradicts ADR-0003** and would need a new decision that supersedes it. |
 
 **Who decides.** The product owner, with the security specialist.
 
-**Related.** [`../project-truth.md`](../project-truth.md) §16 Q3.
+**Related.** [`../project-truth.md`](../project-truth.md) §16 Q3;
+[`../decisions/ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md);
+`KI-015` in [`known-issues.md`](known-issues.md), the defect that let a
+rotation extend the absolute lifetime.
 
 ### Q-04 — Should note search support ranking and highlighting?
 
@@ -180,19 +192,22 @@ ordering inside a project".
 
 **State:** Open · **Blocks:** the deployment topology
 
-**Context.** The API refuses to trust `X-Forwarded-For`, which is correct: the
-header is client-controlled. But the server also does not install the
-connection information, so every request currently shares one rate-limit
-bucket (`KI-010`). The requirement
-[`../project-truth.md`](../project-truth.md) §9.11 says the API "refuses to
-trust `X-Forwarded-For` unless a trusted proxy sets it" — the second half of
-that sentence has no implementation.
+**Context.** The API never reads `X-Forwarded-For`, which is correct: the
+header is client-controlled. The server installs the connection information,
+so the rate limiter is keyed by the **peer address** of the connection
+(`KI-010` is Closed). What the API cannot do is tell a proxy from a client:
+there is no trusted-proxy declaration anywhere, so behind a reverse proxy
+that does not terminate the connection every request carries the proxy's
+address and the budget is shared again (`KI-003`). The requirement
+[`../project-truth.md`](../project-truth.md) §9.11 says the API "never reads
+the `X-Forwarded-For` header, and there is no trusted-proxy declaration" —
+the first half is implemented, and the second half is the open question.
 
 **Options.**
 
 | Option | Impact |
 | ------ | ------ |
-| The proxy terminates the connection, and the API reads the peer address from the socket. | The simplest correct answer, and the one the current design is closest to. The cost is that the API must be given the connection information, and the topology must not have the proxy in front of a proxy without the last hop terminating. |
+| The proxy terminates the connection, and the API reads the peer address from the socket. | The simplest correct answer, and the one the current design already implements. The cost is that the topology must not have the proxy in front of a proxy without the last hop terminating, so it constrains the deployment rather than the code. |
 | The API is given a list of trusted proxy addresses, and it walks the `X-Forwarded-For` chain from the right, stopping at the first address it does not trust. | The standard approach, and it supports a proxy chain. The cost is a configuration surface, a parsing rule, and the risk of a parsing mistake that re-opens the spoofing hole. |
 | The edge limiter is the only rate limit, and the API's limiter stays a backstop with a shared key. | The simplest to operate. The cost is that the in-process limiter is close to useless, and the API is weaker if the edge is missing. |
 
@@ -257,17 +272,29 @@ accepted risks `AR-1` and `AR-7` in
 
 **State:** Open · **Blocks:** the publication of the repository
 
-**Context.** [`../../Cargo.toml`](../../Cargo.toml) declares
-`license = "MIT"`, `publish = false` and no `LICENSE` file is committed.
-[`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) §9 records that the license
-has not been chosen yet, and that the crate is marked `publish = false` so it
-cannot be published by accident.
+**Context.** [`../../Cargo.toml`](../../Cargo.toml) declares **no** licence at
+all. The manifest carries the comment "The licence has not been chosen yet."
+and has no `license` key; the only licensing statement in it is
+`publish = false`, which keeps the crate from being published to a registry by
+accident. No `LICENSE` file is committed either.
+[`../../README.md`](../../README.md) and
+[`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) §9 agree with the manifest:
+both record that the licence has not been chosen yet, and both list "choose a
+licence and add the corresponding `LICENSE` file" as a step that is still to
+be taken.
+
+The decision the owner has to make is therefore **not** "add the missing
+`LICENSE` file". Neither the file nor the manifest key is present, and no
+part of the repository depends on the licence being named. What is missing is
+the **choice itself**: until it is made, the manifest cannot carry a
+`license` key, no `LICENSE` file can be written, and the two cannot be made
+to agree.
 
 **Options.**
 
 | Option | Impact |
 | ------ | ------ |
-| MIT, as the manifest already declares. | Permissive, well understood, and consistent with the manifest. The cost is that it must actually be chosen, a `LICENSE` file must be committed, and the manifest and the file must agree. |
+| MIT. | Permissive, well understood, and the most common choice for a small Rust project. The cost is that the choice has to be made deliberately, that a `LICENSE` file must be committed, and that the manifest and the file must then agree. |
 | Apache-2.0. | Permissive, with an explicit patent grant. The cost is a longer file, and a `NOTICE` convention to follow. |
 | AGPL. | Requires that a modified deployment is offered to its users. The cost is a much stronger obligation on anyone who forks the project, and it is a decision the maintainer has to make deliberately. |
 | Keep it unlicensed. | The current de facto state. The cost is that nobody may legally use, fork or contribute to the project, which contradicts the open-source goal. |
@@ -275,6 +302,7 @@ cannot be published by accident.
 **Who decides.** The project owner.
 
 **Related.** [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) §9;
+[`../../README.md`](../../README.md);
 [`../../Cargo.toml`](../../Cargo.toml).
 
 ### Q-11 — What are the phases after Phase 1?
@@ -340,7 +368,7 @@ specialist.
 | -- | -------- | ----- | ------ |
 | `Q-01` | Deleted project: delete the tasks or archive them? | Open | A change to the delete behaviour |
 | `Q-02` | Refresh token: response body or HTTP-only cookie? | Open | The browser client design |
-| `Q-03` | Refresh-token absolute lifetime and idle timeout | Open | The session policy |
+| `Q-03` | Refresh-token absolute lifetime and idle timeout | Open | The session policy — the absolute lifetime is settled by ADR-0003, the idle timeout is not |
 | `Q-04` | Note search: ranking and highlighting? | Open | The search experience |
 | `Q-05` | Web client cookies and the CSRF strategy | Open | The web client, not the API |
 | `Q-06` | Task ordering semantics and a reordering endpoint | Open | A change to the task ordering |

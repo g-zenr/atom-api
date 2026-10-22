@@ -13,6 +13,7 @@ use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, deco
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
 
@@ -23,7 +24,12 @@ const REFRESH_TOKEN_BYTES: usize = 32;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccessTokenClaims {
     /// Subject: the user id.
-    pub sub: String,
+    ///
+    /// It is typed as a [`Uuid`] so that a malformed subject is a type error
+    /// at the trust boundary rather than a string that has to be parsed
+    /// afterwards. The wire format is unchanged: a UUID serialises as the
+    /// hyphenated string it has always been.
+    pub sub: Uuid,
     /// Convenience claim carrying the user's email.
     pub email: String,
     /// Issuer.
@@ -104,18 +110,18 @@ impl TokenService {
     /// # Errors
     ///
     /// Returns [`AppError::Internal`] when the token cannot be signed.
-    pub fn issue_access_token(&self, user_id: &str, email: &str) -> AppResult<IssuedAccessToken> {
+    pub fn issue_access_token(&self, user_id: Uuid, email: &str) -> AppResult<IssuedAccessToken> {
         let now = Utc::now();
         let expires_at = now + chrono::Duration::from_std(self.access_ttl).unwrap_or_default();
 
         let claims = AccessTokenClaims {
-            sub: user_id.to_string(),
+            sub: user_id,
             email: email.to_string(),
             iss: self.issuer.clone(),
             aud: self.audience.clone(),
             exp: expires_at.timestamp(),
             iat: now.timestamp(),
-            jti: uuid::Uuid::new_v4().to_string(),
+            jti: Uuid::new_v4().to_string(),
         };
 
         let token = encode(&Header::new(Algorithm::HS256), &claims, &self.encoding_key)
@@ -176,7 +182,9 @@ pub fn generate_refresh_token() -> IssuedRefreshToken {
 pub fn hash_refresh_token(token: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(token.as_bytes());
-    hex::encode(hasher.finalize())
+    // The digest is formatted as lower-case hexadecimal without a separator,
+    // which is the encoding the stored hashes use.
+    format!("{:x}", hasher.finalize())
 }
 
 /// Base64url engine without padding, used for opaque tokens.
@@ -189,12 +197,18 @@ mod tests {
     /// The clock-skew allowance the tests use.
     const CLOCK_SKEW: Duration = Duration::from_secs(30);
 
+    /// The access-token lifetime the tests use.
+    const ACCESS_TTL: Duration = Duration::from_secs(900);
+
+    /// The subject the tests use.
+    const USER: Uuid = Uuid::from_u128(0x0192_0000_0000_7000_8000_0000_0000_0001);
+
     fn service() -> TokenService {
         TokenService::new(
             "a-test-signing-secret-that-is-long-enough-32b",
             "atom-api",
             "atom-api",
-            Duration::from_secs(900),
+            ACCESS_TTL,
             CLOCK_SKEW,
         )
     }
@@ -202,11 +216,9 @@ mod tests {
     #[test]
     fn issued_tokens_verify_and_carry_the_subject() {
         let service = service();
-        let issued = service
-            .issue_access_token("user-1", "a@example.test")
-            .unwrap();
+        let issued = service.issue_access_token(USER, "a@example.test").unwrap();
         let claims = service.decode_access_token(&issued.token).unwrap();
-        assert_eq!(claims.sub, "user-1");
+        assert_eq!(claims.sub, USER);
         assert_eq!(claims.email, "a@example.test");
         assert_eq!(claims.iss, "atom-api");
         assert_eq!(claims.aud, "atom-api");
@@ -219,12 +231,10 @@ mod tests {
             "a-completely-different-secret-of-sufficient-length",
             "atom-api",
             "atom-api",
-            Duration::from_secs(900),
+            ACCESS_TTL,
             CLOCK_SKEW,
         );
-        let issued = other
-            .issue_access_token("user-1", "a@example.test")
-            .unwrap();
+        let issued = other.issue_access_token(USER, "a@example.test").unwrap();
         assert!(issuer.decode_access_token(&issued.token).is_err());
     }
 
@@ -235,12 +245,10 @@ mod tests {
             "a-test-signing-secret-that-is-long-enough-32b",
             "somebody-else",
             "atom-api",
-            Duration::from_secs(900),
+            ACCESS_TTL,
             CLOCK_SKEW,
         );
-        let issued = other
-            .issue_access_token("user-1", "a@example.test")
-            .unwrap();
+        let issued = other.issue_access_token(USER, "a@example.test").unwrap();
         assert!(issuer.decode_access_token(&issued.token).is_err());
     }
 
@@ -254,15 +262,13 @@ mod tests {
     #[test]
     fn every_failure_mode_is_the_same_error() {
         let service = service();
-        let issued = service
-            .issue_access_token("user-1", "a@example.com")
-            .unwrap();
+        let issued = service.issue_access_token(USER, "a@example.com").unwrap();
 
         // A token this service issued decodes.
         let claims = service
             .decode_access_token(&issued.token)
             .expect("a token this service issued must decode");
-        assert_eq!(claims.sub, "user-1");
+        assert_eq!(claims.sub, USER);
 
         // Every failure mode is the same error, so that a caller cannot tell
         // a forged token from an expired one.
@@ -280,10 +286,10 @@ mod tests {
             "a-completely-different-secret-of-sufficient-length",
             "atom-api",
             "atom-api",
-            Duration::from_secs(900),
+            ACCESS_TTL,
             CLOCK_SKEW,
         );
-        let foreign = other.issue_access_token("user-1", "a@example.com").unwrap();
+        let foreign = other.issue_access_token(USER, "a@example.com").unwrap();
         assert_eq!(
             service.decode_access_token(&foreign.token).unwrap_err(),
             TokenError::Invalid
@@ -297,5 +303,15 @@ mod tests {
         assert_ne!(first.token, second.token);
         assert_eq!(first.token_hash, hash_refresh_token(&first.token));
         assert!(!first.token_hash.contains(&first.token));
+    }
+
+    #[test]
+    fn the_stored_hash_is_lower_case_hexadecimal() {
+        // A literal, so that a change of the encoding cannot pass unnoticed:
+        // the stored hashes are what the lookup matches against.
+        assert_eq!(
+            hash_refresh_token("atom"),
+            "1bf521836de96e75fac7f9dedda4d92ebe4c01b987781e419ec0e421611a39d0"
+        );
     }
 }

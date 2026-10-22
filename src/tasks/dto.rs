@@ -48,13 +48,17 @@ pub struct TaskResponse {
     pub completed_at: Option<DateTime<Utc>>,
 }
 
-impl From<&Task> for TaskResponse {
-    fn from(task: &Task) -> Self {
+/// Builds the public representation of a task.
+///
+/// The model is consumed rather than borrowed, so that the strings of a
+/// listed page are moved into the response instead of being copied.
+impl From<Task> for TaskResponse {
+    fn from(task: Task) -> Self {
         Self {
             id: task.id,
             project_id: task.project_id,
-            title: task.title.clone(),
-            description: task.description.clone(),
+            title: task.title,
+            description: task.description,
             status: task.status,
             priority: task.priority,
             position: task.position,

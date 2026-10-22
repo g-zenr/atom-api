@@ -1,7 +1,7 @@
 # Projects — specification
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 > **Feature identifier:** `ATOM-FEAT-PROJ-001`
 > **Feature name:** Projects, their lifecycle and the fate of their tasks
@@ -26,11 +26,10 @@ implemented is the one described here.
 
 ## 2. Status
 
-**Implemented.** The CRUD lifecycle, the ownership isolation and the
-delete-cascade are covered by integration tests in
-`tests/projects_tasks_api.rs`. The search and the pagination of the project
-listing are implemented but have no HTTP-level test, so the feature is not
-`Verified`. See [status.md](status.md) for the full evidence and the gaps.
+**Verified.** The CRUD lifecycle, the ownership isolation, the delete-cascade,
+the search and the pagination of the project listing are each covered by a
+named integration test in `tests/projects_tasks_api.rs`. See
+[status.md](status.md) for the full evidence.
 
 ## 3. Scope
 
@@ -69,7 +68,7 @@ The source of truth is [`project-truth.md`](../../project-truth.md) §4.4.
 | ID | Requirement | Implementation | Covered by |
 | -- | ----------- | -------------- | ---------- |
 | `PROJ-R01` | Create, list, read, update and delete projects. | `src/projects/service.rs`, `src/projects/repository.rs` | `tests/projects_tasks_api.rs` — `projects_can_be_created_read_updated_and_deleted` |
-| `PROJ-R02` | Optional search and pagination over projects. | `ProjectRepository::list_owned` with `ILIKE` over the name and the description, plus the shared pagination | **Search and pagination are not covered at HTTP level.** The listing itself is exercised by `tasks_can_be_created_and_listed_inside_a_project` and by the test helper `create_project`. |
+| `PROJ-R02` | Optional search and pagination over projects. | `ProjectRepository::list_owned` with `ILIKE` over the name and the description, plus the shared pagination | `tests/projects_tasks_api.rs` — `projects_can_be_searched` and `project_listing_is_paginated`. |
 | `PROJ-R03` | A defined behaviour when a project is deleted. | `DELETE FROM projects WHERE id = $1 AND user_id = $2`; the `tasks.project_id` foreign key is `ON DELETE CASCADE` | `tests/projects_tasks_api.rs` — `deleting_a_project_removes_its_tasks` |
 | `PROJ-R04` | Strict ownership isolation. | every statement in `src/projects/repository.rs` carries `user_id = $2` | `tests/projects_tasks_api.rs` — `a_project_of_another_user_is_invisible` |
 
@@ -91,10 +90,12 @@ The requirement that a task belongs to a project is the
   `created_at DESC`, then `id DESC`.
 - `?search=<term>` matches the term, case-insensitively, as a substring of
   the name **or** of the description. The term is trimmed; an empty term is
-  treated as no search at all.
-- `?limit=` and `?offset=` follow the shared convention: 20 by default,
-  capped at 100, a non-positive limit falls back to 20 and a negative offset
-  falls back to 0.
+  treated as no search at all. A term longer than 200 characters is a `422`
+  validation failure that names the `search` field.
+- `?limit=` and `?offset=` follow the shared convention: the configured
+  default page size (20 by default), clamped to the configured maximum page
+  size (100 by default), a non-positive limit falls back to the default and a
+  negative offset falls back to 0.
 - The response uses the shared list envelope.
 
 ### 6.3 Reading, updating and deleting
@@ -153,8 +154,6 @@ A change to this feature is complete when all of the following hold.
   term is bound as a parameter, so there is no injection risk; the wildcard
   characters `%` and `_` in the term are **not** escaped, so a term
   containing them behaves as a wildcard.
-- **The project listing is not tested with a search term or a pagination
-  window** at the HTTP level.
 - **The description may be empty.** An empty description is a valid state,
   not an error.
 - **A project has no ordering of its own.** The listing order is the

@@ -76,6 +76,11 @@ presented twice.**
 - **Lifetime: 14 days** by default
   (`APP_REFRESH_TOKEN_TTL_SECONDS`), and the configuration refuses a refresh
   lifetime that is not longer than the access-token lifetime.
+- **The rotation does not extend the session.** The replacement session
+  inherits the original `expires_at`, so the absolute lifetime is measured
+  from the first login and a rotation cannot push it out. A stolen refresh
+  token therefore has a fixed upper bound, which is the property that makes
+  the absolute lifetime worth having.
 - The session row also records the user agent and the client address, for a
   future session-management surface.
 
@@ -191,8 +196,12 @@ This decision does not bind the future clients, but it constrains them:
   only half of the authorization model; the other half is ADR-0005.
 - **The authentication endpoints are rate limited.** Three endpoints
   (`register`, `login`, `refresh`) are protected by the in-process limiter.
-  The limiter is per process and its key is currently shared by every
-  caller, which makes edge rate limiting an operator obligation.
+  The limiter is per process and its key is the peer address of the
+  connection, so a deployment behind a proxy that does not terminate the
+  connection shares one budget; that makes edge rate limiting an operator
+  obligation. (`KI-010` in
+  [`../engineering/known-issues.md`](../engineering/known-issues.md) was a
+  defect in that wiring and is Closed.)
 - **Password verification is deliberately expensive.** Argon2id with an
   8 MiB floor is the dominant cost of the authentication endpoints. It is
   bounded by the password-length cap and by the rate limit.

@@ -96,7 +96,7 @@ router directly.
 | **The per-user session revocation over HTTP.** `AuthService::revoke_all_sessions` has no endpoint, so it is covered at the service level by `revoking_every_session_invalidates_the_refresh_tokens` rather than over HTTP. The product question of whether such an endpoint should exist is `Q-08` in [`open-questions.md`](../../engineering/open-questions.md). |
 | **The timing of the generic login failure.** The unknown-address path performs a real Argon2 verification against a dummy hash with the configured cost parameters, but a test cannot assert the absence of a timing difference without a statistical method that would be flaky in CI. |
 | **The rate limiter's behaviour across processes.** The limiter is per process. A multi-instance deployment needs edge rate limiting; see `KI-001` in [`known-issues.md`](../../engineering/known-issues.md). |
-| **The refresh-token absolute lifetime.** A test would have to wait out the lifetime or move the clock. The expiry check itself is covered by `an_expired_refresh_token_is_rejected`, which moves the row's `expires_at` instead. |
+| **The refresh-token absolute lifetime.** A test would have to wait out the lifetime or move the clock. The expiry check itself is covered by `an_expired_refresh_token_is_rejected`, which moves the row's `expires_at` instead. The *policy* — that a rotation does not extend the lifetime — is covered by `a_rotation_preserves_the_absolute_lifetime_of_the_session`, which reads both rows and asserts that the replacement inherits the `expires_at` of the session it replaces. |
 | **A password change.** There is no such endpoint in Phase 1. |
 | **Multi-factor authentication.** Out of scope. |
 ## 4. Conventions for a new test

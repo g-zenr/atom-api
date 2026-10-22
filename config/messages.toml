@@ -37,9 +37,6 @@ bad_request = "The request body is not valid JSON."
 # 400, when a path or query parameter cannot be parsed.
 malformed_parameter = "The request path or query string is malformed."
 
-# 400, when the request body is valid JSON but does not match the contract.
-body_mismatch = "The request body does not match the expected format."
-
 # 401, when a request needs a bearer token and does not carry a valid one.
 unauthorized = "Authentication is required. Provide a Bearer access token."
 
@@ -105,14 +102,11 @@ display_name_length = "must be between {} and {} characters long"
 # The value is empty after trimming.
 not_empty = "must not be empty"
 
-# The title is longer than the accepted maximum.
-title_too_long = "must be at most {} characters long"
-
-# The body is longer than the accepted maximum.
-content_too_long = "must be at most {} characters long"
-
-# The description is longer than the accepted maximum.
-description_too_long = "must be at most {} characters long"
+# The value is longer than the accepted maximum.
+#
+# One template for every bounded field: the name of the field is carried by
+# the violation itself, so the message does not have to repeat it.
+too_long = "must be at most {} characters long"
 
 [messages.resources]
 # 404, when the user does not exist.

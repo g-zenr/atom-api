@@ -10,6 +10,55 @@ use uuid::Uuid;
 use crate::error::AppResult;
 use crate::projects::models::Project;
 
+/// The page statement for a listing without a search term.
+///
+/// The ownership predicate is written out in the statement, not injected by a
+/// helper, so that a reviewer can check it at a glance (ADR-0005).
+const PAGE_WITHOUT_SEARCH: &str = r#"
+    SELECT id, user_id, name, description, created_at, updated_at
+    FROM projects
+    WHERE user_id = $1
+    ORDER BY created_at DESC, id DESC
+    LIMIT $2 OFFSET $3
+"#;
+
+/// The page statement for a listing with a search term.
+///
+/// The search clause is a static fragment: the term is a bound parameter and
+/// never reaches the SQL text. The clause is *not* guarded by
+/// `($2::text IS NULL OR name ILIKE ...)`, because a disjunction against a
+/// parameter hides the selectivity of the filter from the planner. The
+/// listing without a search term is the common case, and it is the one the
+/// planner can serve from the owner's own index.
+const PAGE_WITH_SEARCH: &str = r#"
+    SELECT id, user_id, name, description, created_at, updated_at
+    FROM projects
+    WHERE user_id = $1
+      AND (name ILIKE '%' || $2 || '%'
+           OR description ILIKE '%' || $2 || '%')
+    ORDER BY created_at DESC, id DESC
+    LIMIT $3 OFFSET $4
+"#;
+
+/// The count statement for a listing without a search term.
+const COUNT_WITHOUT_SEARCH: &str = r#"
+    SELECT COUNT(*)
+    FROM projects
+    WHERE user_id = $1
+"#;
+
+/// The count statement for a listing with a search term.
+///
+/// The filter is the same filter as in [`PAGE_WITH_SEARCH`], so that the
+/// reported total is the size of the set the page was taken from.
+const COUNT_WITH_SEARCH: &str = r#"
+    SELECT COUNT(*)
+    FROM projects
+    WHERE user_id = $1
+      AND (name ILIKE '%' || $2 || '%'
+           OR description ILIKE '%' || $2 || '%')
+"#;
+
 /// Persistence operations for projects.
 #[derive(Debug, Clone)]
 pub struct ProjectRepository {
@@ -65,6 +114,11 @@ impl ProjectRepository {
     }
 
     /// Lists the projects owned by `user_id`.
+    ///
+    /// The listing is two statements: the page and the count of the whole
+    /// filtered set. The statement that is used depends on whether a search
+    /// term is present, so that the listing without a term is served from
+    /// the owner's own index.
     pub async fn list_owned(
         &self,
         user_id: Uuid,
@@ -72,41 +126,40 @@ impl ProjectRepository {
         limit: i64,
         offset: i64,
     ) -> AppResult<(Vec<Project>, i64)> {
-        let search = search.map(str::trim).filter(|value| !value.is_empty());
+        let (items, total) = match search {
+            Some(term) => {
+                let items = sqlx::query_as::<_, Project>(PAGE_WITH_SEARCH)
+                    .bind(user_id)
+                    .bind(term)
+                    .bind(limit)
+                    .bind(offset)
+                    .fetch_all(&self.pool)
+                    .await?;
 
-        let items = sqlx::query_as::<_, Project>(
-            r#"
-            SELECT id, user_id, name, description, created_at, updated_at
-            FROM projects
-            WHERE user_id = $1
-              AND ($2::text IS NULL
-                   OR name ILIKE '%' || $2 || '%'
-                   OR description ILIKE '%' || $2 || '%')
-            ORDER BY created_at DESC, id DESC
-            LIMIT $3 OFFSET $4
-            "#,
-        )
-        .bind(user_id)
-        .bind(search)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&self.pool)
-        .await?;
+                let total = sqlx::query_scalar::<_, i64>(COUNT_WITH_SEARCH)
+                    .bind(user_id)
+                    .bind(term)
+                    .fetch_one(&self.pool)
+                    .await?;
 
-        let total = sqlx::query_scalar::<_, i64>(
-            r#"
-            SELECT COUNT(*)
-            FROM projects
-            WHERE user_id = $1
-              AND ($2::text IS NULL
-                   OR name ILIKE '%' || $2 || '%'
-                   OR description ILIKE '%' || $2 || '%')
-            "#,
-        )
-        .bind(user_id)
-        .bind(search)
-        .fetch_one(&self.pool)
-        .await?;
+                (items, total)
+            }
+            None => {
+                let items = sqlx::query_as::<_, Project>(PAGE_WITHOUT_SEARCH)
+                    .bind(user_id)
+                    .bind(limit)
+                    .bind(offset)
+                    .fetch_all(&self.pool)
+                    .await?;
+
+                let total = sqlx::query_scalar::<_, i64>(COUNT_WITHOUT_SEARCH)
+                    .bind(user_id)
+                    .fetch_one(&self.pool)
+                    .await?;
+
+                (items, total)
+            }
+        };
 
         Ok((items, total))
     }

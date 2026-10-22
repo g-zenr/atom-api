@@ -110,10 +110,10 @@ requirement [`../project-truth.md`](../project-truth.md) §13.5.
 `ConnectInfo<SocketAddr>` extension and deliberately never reads
 `X-Forwarded-For`, because the header is client-controlled unless a trusted
 proxy overwrites it. The requirement in
-[`../project-truth.md`](../project-truth.md) §9.11 is that the API "refuses to
-trust `X-Forwarded-For` unless a trusted proxy sets it" — the refusal is
-implemented, but the "unless a trusted proxy sets it" half is not: there is no
-mechanism to declare a trusted proxy.
+[`../project-truth.md`](../project-truth.md) §9.11 is that the API "never
+reads the `X-Forwarded-For` header, and there is no trusted-proxy
+declaration" — the refusal is implemented, but the second half is not: there
+is no mechanism to declare a trusted proxy.
 
 **Impact.** Behind a reverse proxy that does not terminate the connection,
 every request appears to come from the proxy, so the rate limit becomes a
@@ -464,6 +464,181 @@ change at run time — is `Q-12` in
 
 ---
 
+### KI-015 — The refresh rotation extended the absolute lifetime of a session
+
+**Status:** Closed (2026-10-22) · **Severity:** High
+
+**Description.** `AuthService::refresh` in
+[`../../src/auth/service.rs`](../../src/auth/service.rs) computed the expiry of
+the replacement session from the current time:
+`Utc::now() + refresh_token_ttl`. Every rotation therefore pushed the
+deadline out by a full refresh-token lifetime, so the absolute lifetime that
+[`../decisions/ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md)
+records — 14 days by default, measured from the first login — was not
+enforced at all. The session it replaced kept its own `expires_at`, but the
+session the client was handed did not.
+
+**Impact.** The absolute lifetime is the **only** bound on the usefulness of a
+stolen refresh token. With the deadline recomputed on every rotation, a
+thief who refreshes the stolen token keeps the session alive indefinitely, and
+the owner cannot end it by waiting: the session simply renews itself. The
+documented guarantee — "a stolen token is worthless after the lifetime" — was
+false, and the reuse detection did not help either, because the thief holds
+the current token and never presents a rotated one.
+
+**Workaround.** None available to an operator. The defect is in the code, not
+in the configuration, so no setting avoids it.
+
+**Remediation status.** Not started. The fix is to have the rotation inherit
+the `expires_at` of the presented session instead of recomputing it, so that
+the deadline is measured from the moment the session was created.
+
+**Resolution.** The replacement session now **inherits the original
+`expires_at`**. A rotation therefore preserves the absolute deadline: the
+absolute lifetime of a session is measured from its creation and is not
+extended by use. The property is recorded in
+[`../decisions/ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md)
+§2, analysed in [`../architecture/data-architecture.md`](../architecture/data-architecture.md)
+§7.1 and described in
+[`../database/schema.md`](../database/schema.md) §3. The idle timeout, the
+other half of the lifetime policy, is still open: `Q-03` in
+[`open-questions.md`](open-questions.md).
+
+**Related.** `Q-03` in [`open-questions.md`](open-questions.md);
+[`../decisions/ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md);
+[`../architecture/data-architecture.md`](../architecture/data-architecture.md)
+§7.1; requirement [`../project-truth.md`](../project-truth.md) §9.4.
+
+---
+
+### KI-016 — The configuration accepted a weak password policy and an unbounded clock skew
+
+**Status:** Closed (2026-10-22) · **Severity:** Medium
+
+**Description.** `validate_settings` in
+[`../../src/config/validation.rs`](../../src/config/validation.rs) refused a
+password minimum of zero and a maximum below the minimum, but it enforced **no
+floor** on `auth.password.min_length`. A deployment could therefore set a
+minimum of one character and turn the password policy into a formality. The
+same function applied no **upper bound** to `auth.clock_skew_seconds`: a
+deployment could set an allowance of an hour, and the access-token validator
+would then accept a token for an hour after it expired.
+
+**Impact.** Two security properties were configurable away. The password
+policy, which is the only thing that stands between a leaked credential list
+and a working account, could be reduced to a single character; and the
+expiry check on the access token, which is the short-lived half of the token
+design in
+[`../decisions/ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md),
+could be stretched by an order of magnitude.
+
+**Workaround.** None available to an operator beyond not setting the value:
+the default configuration is safe, and the defect is only reachable through a
+deliberate override.
+
+**Remediation status.** Not started. The fix is a floor on the password
+minimum and a ceiling on the clock-skew allowance, both enforced in
+`validate_settings`, with the numeric bounds as constants beside the rules.
+
+**Resolution.** `validate_settings` now refuses a password minimum below
+`MIN_PASSWORD_LENGTH` (twelve characters) and a clock-skew allowance above
+`MAX_CLOCK_SKEW_SECONDS` (300 seconds). The bounds are constants in
+[`../../src/config/validation.rs`](../../src/config/validation.rs), not
+settings, so a deployment can tighten the policy but not weaken it below the
+floor. The constraints are recorded in the reference table in
+[`../architecture/deployment.md`](../architecture/deployment.md) §1.3.
+
+**Related.** The Argon2 memory floor, which was already enforced;
+[`../architecture/deployment.md`](../architecture/deployment.md) §1.3.
+
+---
+
+### KI-017 — The configuration accepted a session prune grace shorter than the expired-token window needs
+
+**Status:** Closed (2026-10-22) · **Severity:** Medium
+
+**Description.** `validate_settings` refused a prune grace of zero, but it
+enforced no **minimum** on `app.sessions.prune_grace_seconds`. The grace is
+the window in which the row of an **expired** session is kept, so that a token
+that expired recently is still recognised as *expired* rather than as one that
+never existed. A deployment that set it to, say, one second would delete the
+evidence almost immediately.
+
+**Impact.** With a short grace, the row of a session that expired a moment
+ago is gone, and the token is answered as *invalid* rather than as *expired*.
+The client loses the distinction, and the message that reaches it no longer
+says what actually happened. The reuse detection is not affected: a revoked
+session is kept until its absolute deadline, which is the refresh-token
+lifetime, and the pruning task only ever deletes rows that are already past
+it.
+
+**Workaround.** None available to an operator. The defect is only reachable
+through a deliberate override; the default value of 86 400 seconds is safe.
+
+**Remediation status.** Not started. The fix is a minimum grace, enforced in
+`validate_settings`, with the numeric bound as a constant beside the rule.
+
+**Resolution.** `validate_settings` now refuses a prune grace below
+`MIN_PRUNE_GRACE_SECONDS`, one hour. The bound is a constant in
+[`../../src/config/validation.rs`](../../src/config/validation.rs), not a
+setting, so the grace may be lengthened but not shortened below it. The
+constraint is recorded in the reference table in
+[`../architecture/deployment.md`](../architecture/deployment.md) §1.3, and the
+reason the grace exists is recorded in
+[`../../config/app.toml`](../../config/app.toml).
+
+**Related.** The refresh-token expiry check, which depends on the row
+surviving; [`../architecture/deployment.md`](../architecture/deployment.md) §1.3.
+
+---
+
+### KI-018 — The configured body limit stops at an independent 4 MiB backstop
+
+**Status:** Closed · **Severity:** Low
+
+**Description.** `api::extract::Json` in
+[`../../src/api/extract.rs`](../../src/api/extract.rs) passes the constant
+`MAX_BODY_BYTES_BACKSTOP` — `4 * 1024 * 1024` bytes — to
+`axum::body::to_bytes`, in addition to the limit the router installs. The
+configured `app.limits.max_body_bytes` is therefore honoured only up to 4 MiB:
+**a body is refused when it exceeds either of the two limits**.
+
+The backstop and the ceiling were **introduced by the remediation recorded in
+[`change-log.md`](change-log.md) as `ATOM-CHANGE-20261022-003`**. Before it,
+the extractor passed `usize::MAX` and the configured limit was the only cap:
+a deployment that set `APP_MAX_BODY_BYTES` above 4 MiB was served exactly
+that limit. The finding that started this (`F-10` in
+[`../audit/audit-report.md`](../audit/audit-report.md)) was that the published
+API conventions described a 4 MiB backstop that the code did not have. The
+remediation chose to make the code match the published convention and to add
+the ceiling that makes the two agree.
+
+**Impact.** A deployment that had `max_body_bytes` above 4 MiB previously
+started and served that limit; it now **refuses to start**, with a message
+that names the bound. That is a deliberate tightening: the ceiling is what
+stops one request from pulling an unbounded body into memory. The default of
+1 MiB is unaffected.
+
+**Remediation.** The second of the two options was taken: the configuration
+validation now refuses a `max_body_bytes` above the ceiling of the body
+reader. The configuration therefore cannot promise more than the API
+delivers, and the operator is told the bound at start-up instead of finding
+out at request time.
+
+The ceiling lives in
+[`../../src/config/validation.rs`](../../src/config/validation.rs) as
+`MAX_BODY_BYTES_BACKSTOP`, next to the other floors, and the extractor reads
+it from the configuration module. The rule is covered by the configuration
+test `a_body_limit_above_the_reader_ceiling_is_refused`.
+
+**Related.** The review finding `F-03`, recorded in
+[`change-log.md`](change-log.md) under `ATOM-CHANGE-20261022-002`;
+[`../architecture/deployment.md`](../architecture/deployment.md) §4;
+[`../api/conventions.md`](../api/conventions.md) §9;
+[`../audit/audit-report.md`](../audit/audit-report.md) `F-10`.
+
+---
+
 ## Summary
 
 | ID | Title | Status | Severity |
@@ -482,3 +657,7 @@ change at run time — is `Q-12` in
 | `KI-012` | There is no account lockout and no breach detection | Open | Medium |
 | `KI-013` | Two documentation links do not resolve | Closed | Low |
 | `KI-014` | The configuration has no reload, no remote source and no visible merge rule | Open | Low |
+| `KI-015` | The refresh rotation extended the absolute lifetime of a session | Closed | High |
+| `KI-016` | The configuration accepted a weak password policy and an unbounded clock skew | Closed | Medium |
+| `KI-017` | The configuration accepted a session prune grace shorter than the expired-token window needs | Closed | Medium |
+| `KI-018` | The configured body limit stops at an independent 4 MiB backstop | Closed | Low |

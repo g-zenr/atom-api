@@ -101,7 +101,7 @@ Creates an account and returns the first token pair.
 | Field | Type | Required | Rules |
 | ----- | ---- | -------- | ----- |
 | `email` | string | yes | Trimmed and lower-cased. Must contain an `@`, a non-empty local part, and a domain that contains a `.` and does not start with one. At most 254 characters, the `MAX_EMAIL_LENGTH` constant. |
-| `password` | string | yes | The configured password policy: from `auth.password.min_length` to `auth.password.max_length` characters, 12 to 256 by default. At least one uppercase letter, one lowercase letter and one digit. |
+| `password` | string | yes | The configured password policy: from `auth.password.min_length` to `auth.password.max_length` characters, 12 to 256 by default. The minimum may be raised but not lowered below twelve characters. At least one uppercase letter, one lowercase letter and one digit. |
 | `display_name` | string | yes | Trimmed. 1 to 120 characters. |
 
 ### Response — `201 Created`
@@ -181,7 +181,9 @@ curl -i -X POST http://127.0.0.1:3000/api/v1/auth/login \
 ## 5. `POST /api/v1/auth/refresh`
 
 Rotates the token pair. The presented refresh token is revoked and replaced;
-the client must store the new one.
+the client must store the new one. The replacement **inherits the absolute
+deadline** of the session it replaces, so a rotation never extends the
+lifetime of a session.
 
 **Authentication:** none. The refresh token in the body is the credential.
 **Rate limited:** yes, by client IP.

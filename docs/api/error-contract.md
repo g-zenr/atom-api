@@ -69,9 +69,12 @@ There are exactly three sources of a `422`:
 
 | Source | Where | What the details look like |
 | ------ | ----- | ------------------------- |
-| A business rule in a service | `validate_email`, `validate_password`, `validate_display_name`, `validate_title`, `validate_content`, `validate_name`, `validate_description` | One violation per broken rule, naming the field: `email`, `password`, `display_name`, `title`, `content`, `name` or `description`. |
+| A business rule in a service | `validate_email`, `validate_password`, `validate_display_name`, `validate_title`, `validate_content`, `validate_name`, `validate_description`, `validate_search` | One violation per broken rule, naming the field: `email`, `password`, `display_name`, `title`, `content`, `name`, `description` or `search`. |
 | A body that parses but does not match the contract | The JSON extractor in `src/api/extract.rs` | A single violation for the field `body`, carrying the deserialiser's own description. |
 | A database `CHECK` constraint the application and the database disagree about | `UserRepository::insert` in `src/users/repository.rs`, on SQLSTATE `23514` | No field details. The message is `The request failed a database constraint.`, so that the database message — which can contain the failing row — never reaches the log. |
+
+`validate_search` is the one that can fire on a **list** endpoint: a search
+term longer than 200 characters is a `422` naming the field `search`.
 
 ## 3. Field-level validation details
 

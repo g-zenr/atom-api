@@ -50,9 +50,6 @@ pub struct Settings {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AppSettings {
-    /// The product name, used in the OpenAPI document and the start-up log.
-    #[serde(default = "default_app_name")]
-    pub name: String,
     /// The socket the HTTP server binds to.
     #[serde(default = "default_bind_addr")]
     pub bind_addr: SocketAddr,
@@ -88,6 +85,14 @@ pub struct RequestLimits {
         rename = "readiness_probe_timeout_seconds"
     )]
     pub readiness_probe_timeout: Duration,
+    /// How long in-flight requests may finish after the process is asked to
+    /// stop.
+    #[serde(
+        default = "default_shutdown_grace",
+        deserialize_with = "seconds",
+        rename = "shutdown_grace_seconds"
+    )]
+    pub shutdown_grace: Duration,
 }
 
 impl Default for RequestLimits {
@@ -96,6 +101,7 @@ impl Default for RequestLimits {
             max_body_bytes: default_max_body_bytes(),
             request_timeout: default_request_timeout(),
             readiness_probe_timeout: default_readiness_timeout(),
+            shutdown_grace: default_shutdown_grace(),
         }
     }
 }
@@ -163,7 +169,7 @@ pub struct CorsSettings {
 }
 
 /// The pagination settings.
-#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PaginationSettings {
     /// The page size used when a caller does not ask for one.
@@ -174,8 +180,19 @@ pub struct PaginationSettings {
     pub max_limit: i64,
 }
 
+// The derived `Default` would be zero, which no configuration may hold, so it
+// is written out to match the serde defaults.
+impl Default for PaginationSettings {
+    fn default() -> Self {
+        Self {
+            default_limit: default_page_size(),
+            max_limit: default_max_page_size(),
+        }
+    }
+}
+
 /// The rate-limit settings.
-#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RateLimitSettings {
     /// How many attempts one client may make per window.
@@ -188,6 +205,17 @@ pub struct RateLimitSettings {
         rename = "window_seconds"
     )]
     pub window: Duration,
+}
+
+// The derived `Default` would be zero, which no configuration may hold, so it
+// is written out to match the serde defaults.
+impl Default for RateLimitSettings {
+    fn default() -> Self {
+        Self {
+            max_requests: default_rate_limit_requests(),
+            window: default_rate_limit_window(),
+        }
+    }
 }
 
 /// Authentication settings.
@@ -340,10 +368,6 @@ impl std::fmt::Debug for DatabaseSettings {
     }
 }
 
-fn default_app_name() -> String {
-    "ATOM API".to_string()
-}
-
 fn default_bind_addr() -> SocketAddr {
     "127.0.0.1:3000"
         .parse()
@@ -372,6 +396,10 @@ fn default_request_timeout() -> Duration {
 
 fn default_readiness_timeout() -> Duration {
     Duration::from_secs(1)
+}
+
+fn default_shutdown_grace() -> Duration {
+    Duration::from_secs(10)
 }
 
 fn default_prune_interval() -> Duration {

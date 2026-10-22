@@ -7,4 +7,4 @@
 
 pub mod validation;
 
-pub use validation::{bounded_text, required_text};
+pub use validation::{bounded_text, field_error, required_text, validate_search};

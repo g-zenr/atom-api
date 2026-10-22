@@ -16,7 +16,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -48,10 +48,22 @@ pub(super) type EnvironmentSource = Arc<dyn Fn(&str) -> Option<String> + Send + 
 ///
 /// A value that is empty or only whitespace counts as unset.
 fn process_environment(key: &str) -> Option<String> {
-    std::env::var(key)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    normalise(std::env::var(key).ok()?)
+}
+
+/// Normalises a value read from the environment.
+///
+/// A value that is empty or only whitespace counts as unset. The rule is
+/// applied in one place, so that the test seam and the real environment
+/// cannot drift apart.
+fn normalise(value: String) -> Option<String> {
+    let trimmed = value.trim().to_string();
+
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
 }
 
 /// Loads the configuration for this process.
@@ -98,17 +110,9 @@ impl ConfigLoader {
         Self {
             directory,
             environment: Arc::new(move |key: &str| {
-                map.get(key)
-                    .map(|value| value.trim().to_string())
-                    .filter(|value| !value.is_empty())
+                map.get(key).and_then(|value| normalise(value.clone()))
             }),
         }
-    }
-
-    /// The directory the configuration files are read from, when one was
-    /// found.
-    pub fn directory(&self) -> Option<&Path> {
-        self.directory.as_deref()
     }
 
     /// Reads one environment variable.
@@ -287,6 +291,11 @@ impl ConfigLoader {
         if let Some(value) = self.variable("APP_READINESS_PROBE_TIMEOUT_SECONDS") {
             settings.app.limits.readiness_probe_timeout =
                 Duration::from_secs(parse_number("APP_READINESS_PROBE_TIMEOUT_SECONDS", &value)?);
+        }
+
+        if let Some(value) = self.variable("APP_SHUTDOWN_GRACE_SECONDS") {
+            settings.app.limits.shutdown_grace =
+                Duration::from_secs(parse_number("APP_SHUTDOWN_GRACE_SECONDS", &value)?);
         }
 
         if let Some(value) = self.variable("APP_SESSION_PRUNE_INTERVAL_SECONDS") {

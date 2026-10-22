@@ -17,10 +17,11 @@ use uuid::Uuid;
 use crate::config::PasswordPolicy;
 use crate::config::messages::{Messages, render};
 use crate::error::{AppError, AppResult, FieldViolation};
+use crate::helpers::field_error;
 use crate::users::dto::UserResponse;
 use crate::users::models::User;
 use crate::users::repository::UserRepository;
-use crate::utils::text::char_len;
+use crate::utils::text::{char_len, is_blank};
 
 /// The maximum length of an email address, in characters.
 ///
@@ -164,7 +165,7 @@ pub fn validate_display_name(display_name: &str, messages: &Messages) -> AppResu
     let trimmed = display_name.trim();
     let length = char_len(trimmed);
 
-    if !(MIN_DISPLAY_NAME_LENGTH..=MAX_DISPLAY_NAME_LENGTH).contains(&length) {
+    if is_blank(display_name) || length > MAX_DISPLAY_NAME_LENGTH {
         return Err(field_error(
             "display_name",
             render(
@@ -179,12 +180,6 @@ pub fn validate_display_name(display_name: &str, messages: &Messages) -> AppResu
     }
 
     Ok(trimmed.to_string())
-}
-
-/// Builds the validation error for one field.
-fn field_error(field: &str, message: String, messages: &Messages) -> AppError {
-    AppError::validation(vec![FieldViolation::new(field, message)])
-        .with_message(messages.general.validation_failed.clone())
 }
 
 /// User use cases.
@@ -258,6 +253,15 @@ impl UserService {
             .ok_or_else(|| AppError::NotFound(self.messages.resources.user_not_found.clone()))
     }
 
+    /// Loads a user by email address.
+    ///
+    /// The address has to be normalised first, because that is how it is
+    /// stored. A missing account is `None`, not an error: the caller decides
+    /// what a missing account means.
+    pub async fn find_user_by_email(&self, email: &str) -> AppResult<Option<User>> {
+        self.repository.find_by_email(email).await
+    }
+
     /// Returns the safe public representation of a user.
     pub async fn get_user_response(&self, id: Uuid) -> AppResult<UserResponse> {
         Ok(UserResponse::from(&self.get_user(id).await?))
@@ -267,13 +271,7 @@ impl UserService {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The real catalogue, so that a test fails when a template the code
-    /// relies on is renamed or removed.
-    fn messages() -> Messages {
-        Messages::from_toml(include_str!("../../config/messages.toml"))
-            .expect("the message catalogue parses")
-    }
+    use crate::config::messages::test_messages;
 
     #[test]
     fn emails_are_normalized() {
@@ -287,14 +285,14 @@ mod tests {
     #[test]
     fn valid_emails_are_accepted() {
         assert_eq!(
-            validate_email("Ada@Example.com", &messages()).unwrap(),
+            validate_email("Ada@Example.com", &test_messages()).unwrap(),
             "ada@example.com"
         );
     }
 
     #[test]
     fn invalid_emails_are_rejected() {
-        let messages = messages();
+        let messages = test_messages();
 
         for candidate in ["", "no-at-sign", "@example.com", "ada@", "ada@nodot"] {
             assert!(
@@ -306,7 +304,7 @@ mod tests {
 
     #[test]
     fn an_over_long_email_is_rejected() {
-        let messages = messages();
+        let messages = test_messages();
         let long = format!("{}@example.com", "a".repeat(MAX_EMAIL_LENGTH));
 
         let error = validate_email(&long, &messages).unwrap_err();
@@ -321,7 +319,7 @@ mod tests {
 
     #[test]
     fn weak_passwords_are_rejected_with_field_details() {
-        let messages = messages();
+        let messages = test_messages();
         let error = validate_password("short", &PasswordPolicy::default(), &messages).unwrap_err();
         let body = error.body();
 
@@ -335,7 +333,7 @@ mod tests {
 
     #[test]
     fn every_unmet_password_rule_is_reported_at_once() {
-        let messages = messages();
+        let messages = test_messages();
         let error = validate_password("short", &PasswordPolicy::default(), &messages).unwrap_err();
         let body = error.body();
 
@@ -345,7 +343,7 @@ mod tests {
 
     #[test]
     fn strong_passwords_are_accepted() {
-        let messages = messages();
+        let messages = test_messages();
         assert!(
             validate_password("Correct-Horse-42", &PasswordPolicy::default(), &messages).is_ok()
         );
@@ -353,7 +351,7 @@ mod tests {
 
     #[test]
     fn display_names_are_trimmed_and_length_checked() {
-        let messages = messages();
+        let messages = test_messages();
 
         assert_eq!(validate_display_name("  Ada  ", &messages).unwrap(), "Ada");
         assert!(validate_display_name("   ", &messages).is_err());
@@ -362,7 +360,7 @@ mod tests {
 
     #[test]
     fn the_display_name_keeps_its_own_message() {
-        let messages = messages();
+        let messages = test_messages();
         let error = validate_display_name("   ", &messages).unwrap_err();
         let body = error.body();
 

@@ -11,13 +11,20 @@ use crate::error::AppResult;
 use crate::state::AppState;
 use crate::users::dto::{RegisterRequest, UserResponse};
 
+/// The longest recorded user agent, in characters.
+///
+/// The header is client-controlled and is stored in the `user_agent` column of
+/// `refresh_sessions`, so it is truncated. It is not a setting: the value is
+/// a diagnostic, not a contract, and no deployment needs a longer one.
+const MAX_USER_AGENT_LENGTH: usize = 255;
+
 /// Builds the client metadata recorded with a session.
 fn meta(headers: &HeaderMap, peer: ClientIp) -> ClientMeta {
     ClientMeta {
         user_agent: headers
             .get(axum::http::header::USER_AGENT)
             .and_then(|value| value.to_str().ok())
-            .map(|value| value.chars().take(255).collect()),
+            .map(|value| value.chars().take(MAX_USER_AGENT_LENGTH).collect()),
         ip_address: peer.get().map(|ip| ip.to_string()),
     }
 }
@@ -49,10 +56,7 @@ pub async fn register(
 ) -> AppResult<(StatusCode, Json<AuthResponse>)> {
     enforce_rate_limit(&state, peer)?;
 
-    let response = state
-        .auth_service()
-        .register(payload, &meta(&headers, peer))
-        .await?;
+    let response = state.auth.register(payload, &meta(&headers, peer)).await?;
 
     Ok((StatusCode::CREATED, Json(response)))
 }
@@ -86,10 +90,7 @@ pub async fn login(
 ) -> AppResult<Json<AuthResponse>> {
     enforce_rate_limit(&state, peer)?;
 
-    let response = state
-        .auth_service()
-        .login(payload, &meta(&headers, peer))
-        .await?;
+    let response = state.auth.login(payload, &meta(&headers, peer)).await?;
 
     Ok(Json(response))
 }
@@ -124,7 +125,7 @@ pub async fn refresh(
     enforce_rate_limit(&state, peer)?;
 
     let response = state
-        .auth_service()
+        .auth
         .refresh(&payload.refresh_token, &meta(&headers, peer))
         .await?;
 
@@ -156,7 +157,7 @@ pub async fn logout(
     Json(payload): Json<LogoutRequest>,
 ) -> AppResult<StatusCode> {
     state
-        .auth_service()
+        .auth
         .logout(user.user_id, &payload.refresh_token)
         .await?;
 
@@ -181,6 +182,6 @@ pub async fn logout(
     )
 )]
 pub async fn me(State(state): State<AppState>, user: AuthUser) -> AppResult<Json<UserResponse>> {
-    let response = state.auth_service().current_user(user.user_id).await?;
+    let response = state.auth.current_user(user.user_id).await?;
     Ok(Json(response))
 }

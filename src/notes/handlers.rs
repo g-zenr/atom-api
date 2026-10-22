@@ -27,6 +27,7 @@ use crate::state::AppState;
         (status = 200, description = "The caller's notes.", body = crate::notes::dto::NotePage),
         (status = 400, description = "The request is malformed."),
         (status = 401, description = "Authentication is required.", body = crate::error::ErrorBody),
+        (status = 422, description = "The request failed validation.", body = crate::error::ErrorBody),
         (status = 500, description = "An unexpected failure occurred.", body = crate::error::ErrorBody),
 
     )

@@ -72,6 +72,7 @@ validators in `src/helpers/validation.rs`:
 | ---------------- | --------- | ------- |
 | `required_text` | Trims the value, rejects a value that is empty after trimming, and rejects a value over the maximum. | `validate_name` |
 | `bounded_text` | Keeps the value verbatim, and rejects a value over the maximum. | `validate_description` |
+| `validate_search` | Trims the search term and rejects a term over 200 characters. An empty term means "no filter" rather than an error. | `ProjectService::list` |
 
 The trimming behaviour is deliberately not uniform across the API: a title, a
 name and a display name are trimmed, while a body and a description are kept
@@ -158,7 +159,8 @@ GET /api/v1/projects?search=phase&limit=20&offset=0
   ├─ api::extract::Query<PaginationQuery>
   ├─ projects::handlers::list_projects
   │    └─ projects::service::ProjectService::list
-  │         ├─ pagination.effective_limit()          20 by default, capped at 100
+  │         ├─ pagination.effective_limit()          the configured bounds
+  │         │                                        20 by default, capped at 100
   │         ├─ pagination.effective_offset()         negative → 0
   │         └─ projects::repository::ProjectRepository::list_owned
   │              ├─ SELECT ... WHERE user_id = $1

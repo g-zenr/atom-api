@@ -39,7 +39,9 @@ task tests operate on.
 | `src/tasks/service.rs` | `titles_are_trimmed_and_required` | The title is trimmed and a blank title is rejected. |
 | `src/tasks/service.rs` | `status_and_priority_have_stable_wire_names` | `TaskStatus::InProgress` renders as `in_progress` and `TaskPriority::Urgent` renders as `urgent`. |
 | `src/tasks/service.rs` | `status_round_trips_through_serde` | A status serialises to `"in_progress"` and parses back to the same variant. |
-| `src/pagination.rs` | `limit_is_clamped_into_range` | A limit of 5 000 is clamped to 100. |
+| `src/pagination.rs` | `limit_is_clamped_into_range` | A limit of 5 000 is clamped to the configured maximum page size, 100 by default. |
+| `src/pagination.rs` | `the_configured_maximum_is_honoured` | A limit of 5 000 is clamped to the maximum the configuration names, not to a constant. |
+| `src/pagination.rs` | `the_configured_default_is_honoured` | A request without a limit falls back to the default the configuration names. |
 | `src/pagination.rs` | `non_positive_limit_falls_back_to_the_default` | A limit of 0 falls back to 20 and an offset of -3 falls back to 0. |
 | `src/pagination.rs` | `has_more_reflects_the_remaining_items` | `has_more` is true when items remain and false on the last page. |
 

@@ -28,7 +28,6 @@ pub mod validation;
 mod tests;
 
 use std::sync::Arc;
-use std::time::Duration;
 
 pub use loader::ConfigLoader;
 pub use messages::Messages;
@@ -38,6 +37,7 @@ pub use settings::{
     Settings,
 };
 pub use validation::ConfigError;
+pub use validation::MAX_BODY_BYTES_BACKSTOP;
 
 /// The fully resolved configuration.
 ///
@@ -129,10 +129,3 @@ impl Environment {
         }
     }
 }
-
-/// The default request timeout, in seconds.
-///
-/// This is the value in `config/app.toml`. It is repeated here only as the
-/// fallback for a router that was built without the request-settings
-/// extension, which cannot happen in the real application.
-pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);

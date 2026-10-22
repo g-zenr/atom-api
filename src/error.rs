@@ -174,6 +174,12 @@ impl AppError {
     ///
     /// The message comes from the catalogue; the code stays a compile-time
     /// constant.
+    ///
+    /// This applies to a **validation** error. On any other variant it is a
+    /// no-op: the other variants carry their own message, which is either a
+    /// catalogue entry or a fixed string that must never be replaced. A
+    /// caller that wants a different message for another variant has to
+    /// construct that variant.
     pub fn with_message(mut self, text: impl Into<String>) -> Self {
         if let Self::Validation { message, .. } = &mut self {
             *message = text.into();
@@ -224,10 +230,10 @@ impl AppError {
             | Self::Forbidden(message)
             | Self::NotFound(message)
             | Self::Conflict(message)
-            | Self::BadRequest(message) => (message.clone(), Vec::new()),
-            Self::PayloadTooLarge(message) => (message.clone(), Vec::new()),
-            Self::RateLimited { message, .. } => (message.clone(), Vec::new()),
-            Self::Timeout(message) => (message.clone(), Vec::new()),
+            | Self::BadRequest(message)
+            | Self::PayloadTooLarge(message)
+            | Self::RateLimited { message, .. }
+            | Self::Timeout(message) => (message.clone(), Vec::new()),
             // Internal and database details stay in the logs.
             Self::Database(_) | Self::Internal(_) => (
                 "The request could not be completed.".to_string(),

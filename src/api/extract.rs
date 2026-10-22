@@ -18,12 +18,15 @@
 
 use axum::RequestExt;
 use axum::extract::{FromRequest, FromRequestParts, Request};
+use axum::http::Extensions;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use std::sync::Arc;
 
 use crate::api::RequestContext;
+use crate::config::messages::Messages;
 use crate::error::{AppError, FieldViolation};
 
 /// A JSON request body.
@@ -52,15 +55,16 @@ where
     type Rejection = AppError;
 
     async fn from_request(req: Request, _state: &S) -> Result<Self, Self::Rejection> {
-        let messages = request_context(&req)?.messages.clone();
+        let messages = request_messages(req.extensions())?;
 
         // `into_limited_body` applies the limit the router installed with
         // `DefaultBodyLimit`, which is the configured `max_body_bytes`. The
-        // outer limit below is only a backstop: the wrapper has already
-        // enforced the real one.
+        // backstop below only bounds a body that reached the extractor
+        // without the layer installed, or one whose configured limit is
+        // larger than the backstop.
         let body = req.into_limited_body();
 
-        let bytes = axum::body::to_bytes(body, usize::MAX)
+        let bytes = axum::body::to_bytes(body, crate::config::MAX_BODY_BYTES_BACKSTOP)
             .await
             .map_err(|_| AppError::PayloadTooLarge(messages.general.payload_too_large.clone()))?;
 
@@ -94,11 +98,7 @@ where
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let messages = parts
-            .extensions
-            .get::<RequestContext>()
-            .map(|context| context.messages.clone())
-            .ok_or_else(|| AppError::Internal("the request context is missing".to_string()))?;
+        let messages = request_messages(&parts.extensions)?;
 
         match axum::extract::Path::<T>::from_request_parts(parts, state).await {
             Ok(value) => Ok(Path(value.0)),
@@ -124,11 +124,7 @@ where
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let messages = parts
-            .extensions
-            .get::<RequestContext>()
-            .map(|context| context.messages.clone())
-            .ok_or_else(|| AppError::Internal("the request context is missing".to_string()))?;
+        let messages = request_messages(&parts.extensions)?;
 
         match axum::extract::Query::<T>::from_request_parts(parts, state).await {
             Ok(value) => Ok(Query(value.0)),
@@ -142,11 +138,19 @@ where
     }
 }
 
-/// Reads the request context from the request extensions.
-fn request_context<B>(request: &Request<B>) -> Result<RequestContext, AppError> {
-    request
-        .extensions()
+/// Reads the message catalogue from the request extensions.
+///
+/// The three extractors reject through the same catalogue, so they read it
+/// through the same helper. A missing context is an internal error: the
+/// router installs it before any route runs.
+///
+/// # Errors
+///
+/// Returns [`AppError::Internal`] when the request carries no
+/// [`RequestContext`].
+fn request_messages(extensions: &Extensions) -> Result<Arc<Messages>, AppError> {
+    extensions
         .get::<RequestContext>()
-        .cloned()
+        .map(|context| context.messages.clone())
         .ok_or_else(|| AppError::Internal("the request context is missing".to_string()))
 }

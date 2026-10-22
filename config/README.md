@@ -78,14 +78,14 @@ file.
 
 | Key | Default | Environment variable | Meaning |
 | --- | ------- | -------------------- | ------- |
-| `app.name` | `ATOM API` | — | The product name, used in the OpenAPI document and the start-up log. |
 | `app.bind_addr` | `127.0.0.1:3000` | `APP_BIND_ADDR` | The socket the server binds to. Loopback by default, so a deployment that wants the API reachable has to say so. |
 | `app.log_filter` | `info` | `APP_LOG_FILTER` | The `tracing` filter directive. An invalid filter is a start-up error. |
-| `app.limits.max_body_bytes` | `1048576` | `APP_MAX_BODY_BYTES` | The largest accepted request body. |
+| `app.limits.max_body_bytes` | `1048576` | `APP_MAX_BODY_BYTES` | The largest accepted request body. It may not be raised above 4 MiB, the ceiling of the body reader: a larger value is refused at start-up. |
 | `app.limits.request_timeout_seconds` | `30` | `APP_REQUEST_TIMEOUT_SECONDS` | How long a request may take before it is abandoned with a `408`. |
 | `app.limits.readiness_probe_timeout_seconds` | `1` | `APP_READINESS_PROBE_TIMEOUT_SECONDS` | How long the readiness probe waits for the database. |
+| `app.limits.shutdown_grace_seconds` | `100` | `APP_SHUTDOWN_GRACE_SECONDS` | How long in-flight requests may finish after the process is asked to stop. A deployment behind a load balancer needs long enough for the balancer to take the instance out of rotation. |
 | `app.sessions.prune_interval_seconds` | `3600` | `APP_SESSION_PRUNE_INTERVAL_SECONDS` | How often expired refresh sessions are pruned. |
-| `app.sessions.prune_grace_seconds` | `86400` | `APP_SESSION_PRUNE_GRACE_SECONDS` | How long an expired session is kept. **This is a security window, not a tuning knob** — a revoked session has to survive long enough that a replayed token is still recognised as reuse (ADR-0003). |
+| `app.sessions.prune_grace_seconds` | `86400` | `APP_SESSION_PRUNE_GRACE_SECONDS` | How long an expired session row is kept before it is deleted. It may be raised, but not lowered below one hour. |
 
 ### `api.toml`
 
@@ -95,7 +95,7 @@ file.
 | `api.docs_enabled` | `true` | `APP_API_DOCS_ENABLED` | Whether the OpenAPI document and the API explorer are served. The production overlay turns them off. |
 | `api.cors.allowed_origins` | `[]` | `APP_CORS_ALLOWED_ORIGINS` | The origins allowed to make cross-origin requests. Empty disables CORS. A wildcard is refused at start-up. |
 | `api.pagination.default_limit` | `20` | — | The page size used when a caller does not ask for one. **Part of the published client convention**: changing it changes what a client receives. |
-| `api.pagination.max_limit` | `100` | — | The largest page a caller may ask for. Also part of the published client convention. |
+| `api.pagination.max_limit` | `100` | — | The largest page a caller may ask for. Also part of the published client convention, so raising it is a breaking change for a client. The value is applied: the list endpoints clamp to it. It may not exceed 1000 items. |
 | `api.rate_limit.max_requests` | `10` | `APP_AUTH_RATE_LIMIT_MAX_REQUESTS` | How many authentication attempts one client may make per window. |
 | `api.rate_limit.window_seconds` | `60` | `APP_AUTH_RATE_LIMIT_WINDOW_SECONDS` | The length of the rate-limit window. |
 
@@ -107,11 +107,11 @@ file.
 | `auth.refresh_token_ttl_seconds` | `1209600` | `APP_REFRESH_TOKEN_TTL_SECONDS` | The absolute lifetime of a refresh token. Must be longer than the access-token lifetime. |
 | `auth.issuer` | `atom-api` | `APP_JWT_ISSUER` | The `iss` claim, written into every token and required back from it. |
 | `auth.audience` | `atom-api` | `APP_JWT_AUDIENCE` | The `aud` claim. |
-| `auth.clock_skew_seconds` | `30` | `APP_ACCESS_TOKEN_CLOCK_SKEW_SECONDS` | The clock-skew allowance when validating an access token. A deployment whose hosts drift by more than this sees unexplained `401` responses. |
+| `auth.clock_skew_seconds` | `30` | `APP_ACCESS_TOKEN_CLOCK_SKEW_SECONDS` | The clock-skew allowance when validating an access token. It may be lowered, but not raised beyond five minutes: an unbounded allowance accepts a token long after it expired. |
 | `auth.argon2.memory_kib` | `19456` | `APP_ARGON2_MEMORY_KIB` | The Argon2id memory cost. It may be raised; it may not be lowered below 8192 KiB, which is a security floor rather than a setting. |
 | `auth.argon2.iterations` | `2` | `APP_ARGON2_ITERATIONS` | The Argon2id iteration count. |
 | `auth.argon2.parallelism` | `1` | `APP_ARGON2_PARALLELISM` | The Argon2id degree of parallelism. |
-| `auth.password.min_length` | `12` | — | The shortest accepted password. |
+| `auth.password.min_length` | `12` | — | The shortest accepted password. It may be raised, but not lowered below twelve characters: that is an accepted product requirement, not a deployment knob. |
 | `auth.password.max_length` | `256` | — | The longest accepted password. The maximum bounds the cost of hashing a very long password. |
 
 ### `database.toml`
@@ -168,21 +168,25 @@ them is an error, not a warning:
 - the two secrets are present, and the signing secret is at least 32 bytes;
 - in `production`, the documented placeholder secret is refused;
 - the request timeout, the readiness timeout and the prune interval are
-  positive, and the prune grace is positive;
-- the body limit is positive;
-- the pagination default is positive and the maximum is at least the default;
+  positive, the shutdown grace is positive, and the prune grace is at least
+  one hour;
+- the body limit is positive and at most 4 MiB, the ceiling of the body
+  reader;
+- the pagination default is positive and the maximum is at least the default
+  and at most 1000 items;
 - the rate limit is positive and its window is not zero;
 - the CORS allowlist contains no wildcard and every origin is a valid header
   value;
 - the pool size is positive and neither the acquire nor the connect timeout is
   zero;
-- the access-token lifetime is positive and the refresh-token lifetime is
-  strictly longer;
+- the access-token lifetime is positive and at most a day, and the
+  refresh-token lifetime is strictly longer and at most a year;
 - the issuer and the audience are not empty;
 - the Argon2 memory is at least 8192 KiB, and the iteration count and the
   degree of parallelism are at least one;
-- the password policy has a positive minimum and a maximum that is at least
-  the minimum.
+- the clock-skew allowance is at most five minutes;
+- the password policy has a minimum of at least twelve characters and a maximum
+  that is at least the minimum.
 
 ## 7. Adding a setting
 
@@ -205,3 +209,6 @@ them is an error, not a warning:
 5. Add a test in `src/config/tests.rs`: the default, the override, and the
    validation rule.
 6. Record the change in `docs/engineering/change-log.md`.
+7. Run `cargo run --bin atom-docs`. It compares the keys in the files with the
+   keys in the reference table, in both directions, so a key that is only in
+   one of the two is reported.

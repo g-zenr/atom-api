@@ -50,7 +50,7 @@ configured state.
 | 6 | Build the shared state | `AppState::new(config, pool)` | The process exits if the password hasher cannot be built. |
 | 7 | Spawn the session-pruning task | `tokio::spawn(prune_expired_sessions(state.clone()))` | — |
 | 8 | Bind the socket | `TcpListener::bind(config.app.bind_addr)` | The process exits. |
-| 9 | Serve | `axum::serve(listener, api::router(state))` | — |
+| 9 | Serve | `axum::serve(listener, api::router(state).into_make_service_with_connect_info::<std::net::SocketAddr>())` | — |
 
 The migrations are **embedded in the binary** by `sqlx::migrate!`, so a
 deployed instance never depends on files that sit next to it. The
@@ -58,6 +58,14 @@ configuration files are embedded the same way, so a deployment needs no
 configuration directory either; a directory found on disk is merged on top of
 the embedded copy. The operator's reference is
 [`deployment.md`](deployment.md) §1.
+
+The `into_make_service_with_connect_info` wrapper in the last step is not
+decoration. It is what puts the peer address of the connection into the
+request extensions, and the `ClientIp` extractor reads it from there. The
+authentication rate limiter is keyed by that address, so without the wrapper
+every request shares **one** global rate-limit bucket instead of one bucket
+per client. The call is shown in full because the difference is invisible in
+the router and decisive in the limiter.
 
 ### 2.2 Request handling
 
@@ -71,8 +79,11 @@ worker, and it is bounded by the password-length cap and the rate limit.
 ### 2.3 Shut-down
 
 `shutdown_signal()` resolves on Ctrl-C, or on `SIGTERM` on Unix. The server is
-then stopped with `axum::serve(…).with_graceful_shutdown(…)`, and the process
-waits a further 100 ms before exiting so that in-flight requests can finish.
+then stopped with `axum::serve(…).with_graceful_shutdown(…)`. The signal
+future resolves immediately, so the listener stops accepting at once and the
+server drains; `app.limits.shutdown_grace_seconds` (ten seconds by default)
+bounds that drain, and a request still in flight when it elapses is abandoned
+with a warning in the log.
 On Windows there is no `SIGTERM` handler; the Ctrl-C path is the only one.
 
 ### 2.4 Processes
@@ -98,7 +109,7 @@ the service.
 | `state` | `src/state.rs` | `AppState`: the shared, cheaply cloneable dependencies passed explicitly to handlers. |
 | `pagination` | `src/pagination.rs` | The shared `limit`/`offset` convention and the list envelope. |
 | `ratelimit` | `src/ratelimit.rs` | The in-process, fixed-window limiter used by the authentication endpoints. |
-| `telemetry` | `src/telemetry.rs` | Installs the tracing subscriber: human-readable in debug builds, JSON in release builds. |
+| `telemetry` | `src/telemetry.rs` | Installs the tracing subscriber: JSON when `APP_ENV` is `production`, human-readable otherwise. |
 | `health` | `src/health.rs` | `GET /health/live` and `GET /health/ready`. |
 | `atom-docs` | `src/bin/atom-docs.rs` | The documentation consistency checker. A development tool, not a service component. |
 
@@ -144,21 +155,28 @@ the service.
 | ------- | ------ | ------- |
 | Language | Rust, edition 2024, `rust-version = "1.85"` | stable, pinned by `rust-toolchain.toml` with the `rustfmt` and `clippy` components |
 | HTTP framework | `axum` | 0.8 |
-| HTTP middleware | `tower`, `tower-http` | 0.5, 0.6 |
+| HTTP middleware | `tower-http` | 0.6 |
 | Async runtime | `tokio` | 1 |
-| Database driver | `sqlx` (`runtime-tokio`, `tls-rustls`, `postgres`, `macros`, `migrate`, `uuid`, `chrono`, `json`) | 0.8 |
+| Database driver | `sqlx` (`runtime-tokio`, `tls-rustls`, `postgres`, `macros`, `migrate`, `uuid`, `chrono`) | 0.8 |
 | Database | PostgreSQL | 14 or newer, per the contributor guide; the local compose file runs `postgres:18-alpine` |
 | Serialization | `serde`, `serde_json` | 1 |
 | Configuration files | `toml` | 1 |
 | OpenAPI | `utoipa`, `utoipa-swagger-ui` (vendored assets) | 5, 9 |
 | Password hashing | `argon2` (Argon2id) | 0.5 |
 | Tokens | `jsonwebtoken` (HS256) | 9 |
-| Hashing | `sha2`, `hex`, `subtle` | 0.10, 0.4, 2 |
+| Hashing | `sha2` | 0.10 |
 | Randomness | `rand` | 0.9 |
 | Identifiers and time | `uuid` (v4), `chrono` | 1, 0.4 |
 | Errors | `thiserror` | 2 |
 | Observability | `tracing`, `tracing-subscriber` | 0.1, 0.3 |
 | Configuration | `dotenvy` | 0.15 |
+
+The table lists the **direct** dependencies, which are the crates the
+manifest declares. `tower` and `http-body-util` are dev-dependencies: the
+integration harness uses them to drive the router without binding a socket.
+The `subtle` and `hex` crates are not dependencies of the crate at all; `hex`
+was removed in the audit remediation and the refresh-token hash is now
+formatted with `format!("{hasher:x}")`.
 
 The crate is `atom-api`; the library is `atom_api`; the binaries are
 `atom-api` and `atom-docs`. The crate is marked `publish = false`, and the

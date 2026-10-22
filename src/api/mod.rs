@@ -38,6 +38,7 @@ use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetReques
 use tower_http::trace::TraceLayer;
 
 use crate::config::Config;
+use crate::config::RequestLimits;
 use crate::config::messages::Messages;
 use crate::error::AppError;
 use crate::health;
@@ -48,21 +49,17 @@ use crate::state::AppState;
 /// It is installed once, by the router, and read from the request extensions.
 /// The alternative - reading the environment or the configuration file per
 /// request - is what this type exists to prevent.
+///
+/// The limits it carries were resolved once, at router construction, from the
+/// configuration the process validated at start-up. A handler and the timeout
+/// middleware therefore read the same value, and neither can disagree with the
+/// other or with what was validated.
 #[derive(Debug, Clone)]
 pub struct RequestContext {
     /// The client-facing message catalogue.
     pub messages: Arc<Messages>,
     /// The request limits.
-    pub settings: RequestSettings,
-}
-
-/// The request limits that the layers enforce.
-#[derive(Debug, Clone, Copy)]
-pub struct RequestSettings {
-    /// The largest accepted request body, in bytes.
-    pub max_body_bytes: usize,
-    /// How long a request may take.
-    pub request_timeout: Duration,
+    pub limits: RequestLimits,
 }
 
 impl RequestContext {
@@ -70,10 +67,7 @@ impl RequestContext {
     pub fn new(config: &Config) -> Self {
         Self {
             messages: config.messages.clone(),
-            settings: RequestSettings {
-                max_body_bytes: config.app.limits.max_body_bytes,
-                request_timeout: config.app.limits.request_timeout,
-            },
+            limits: config.app.limits.clone(),
         }
     }
 }
@@ -100,10 +94,7 @@ pub fn router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn(timeout_middleware))
         .layer(axum::Extension(RequestContext::new(&config)))
         .layer(PropagateRequestIdLayer::new(x_request_id()))
-        .layer(SetRequestIdLayer::new(
-            axum::http::HeaderName::from_static("x-request-id"),
-            MakeRequestUuid,
-        ))
+        .layer(SetRequestIdLayer::new(x_request_id(), MakeRequestUuid))
         .layer(axum::extract::DefaultBodyLimit::max(
             config.app.limits.max_body_bytes,
         ))
@@ -121,27 +112,25 @@ pub fn router(state: AppState) -> Router {
 /// The timeout is reported through the standard error envelope, so a client
 /// that parses the envelope does not have to special-case this response.
 pub async fn timeout_middleware(request: Request, next: Next) -> Response {
-    let context = request.extensions().get::<RequestContext>().cloned();
-
-    let (timeout, messages) = match &context {
-        Some(context) => (
-            context.settings.request_timeout,
-            Some(context.messages.clone()),
-        ),
-        None => (crate::config::DEFAULT_REQUEST_TIMEOUT, None),
+    // The router installs the request context before this middleware runs,
+    // so a missing context is a wiring error rather than a client error.
+    let Some(context) = request.extensions().get::<RequestContext>().cloned() else {
+        return AppError::Internal("the request context is missing".to_string()).into_response();
     };
 
-    match tokio::time::timeout(timeout, next.run(request)).await {
+    match tokio::time::timeout(context.limits.request_timeout, next.run(request)).await {
         Ok(response) => response,
-        Err(_) => {
-            let message = messages
-                .as_ref()
-                .map(|messages| messages.general.timeout.clone())
-                .unwrap_or_else(|| "The request timed out.".to_string());
-            AppError::Timeout(message).into_response()
-        }
+        Err(_) => AppError::Timeout(context.messages.general.timeout.clone()).into_response(),
     }
 }
+
+/// The lifetime of the CORS preflight cache, in seconds.
+///
+/// It is a constant and not a setting: the value is a browser-side cache
+/// policy, it does not change what the API does with a request, and a
+/// deployment has no reason to tune it. The browser caps the lifetime anyway,
+/// so a larger value would buy nothing.
+const CORS_PREFLIGHT_MAX_AGE_SECONDS: u64 = 600;
 
 /// Builds the CORS layer from the configured allowlist.
 ///
@@ -183,7 +172,7 @@ fn cors_layer(config: &Config) -> Option<CorsLayer> {
                 axum::http::header::CONTENT_TYPE,
                 axum::http::header::ACCEPT,
             ])
-            .max_age(std::time::Duration::from_secs(600)),
+            .max_age(Duration::from_secs(CORS_PREFLIGHT_MAX_AGE_SECONDS)),
     )
 }
 

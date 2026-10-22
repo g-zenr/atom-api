@@ -21,9 +21,8 @@ expired-access-token test. The per-user session revocation capability was
 covered by `revoking_every_session_invalidates_the_refresh_tokens`.
 
 `docs/project-truth.md` §17 records the individual authentication areas as
-`Verified` and the rate limiter as `Implemented` with the note `no HTTP-level
-test yet`. That note is now obsolete; the rate limiter has an HTTP-level
-test. The per-area record is otherwise not contradicted.
+`Verified`, including the rate limiter. The per-area record is not
+contradicted.
 
 ## 2. Evidence, requirement by requirement
 
@@ -36,7 +35,7 @@ test. The per-area record is otherwise not contradicted.
 | `AUTH-R05` Reuse detection and mass revocation | Covered | `tests/auth_api.rs` — `reusing_a_rotated_refresh_token_revokes_every_session`. |
 | `AUTH-R06` Logout and per-user session revocation | Partly covered | `tests/auth_api.rs` — `logout_revokes_the_session`, `an_account_cannot_log_out_another_accounts_session` cover logout. The per-user mass revocation is implemented (`AuthService::revoke_all_sessions`) and is covered at the service level by `revoking_every_session_invalidates_the_refresh_tokens`; it has **no endpoint**. |
 | `AUTH-R07` The caller context comes only from the credential | Covered | `tests/auth_api.rs` — `protected_routes_reject_missing_and_invalid_credentials`. The `AuthUser` extractor is the only source of a `user_id`. |
-| `AUTH-R08` Rate limiting on the authentication endpoints | Covered | `src/ratelimit.rs` and `src/api/middleware.rs::enforce_rate_limit`; the three handlers call it. The only tests are the in-process unit tests `allows_up_to_the_limit_then_rejects`, `clients_are_tracked_independently` and `window_resets_after_the_configured_duration`.  Plus `the_authentication_endpoints_are_rate_limited` in `tests/auth_api.rs`, which drives the login endpoint past the limit and asserts `429` and the code `rate_limited`. |
+| `AUTH-R08` Rate limiting on the authentication endpoints | Covered | `src/ratelimit.rs` and `src/api/middleware.rs::enforce_rate_limit`; the three handlers call it. The in-process unit tests cover the limit, independent tracking, the window reset, and the amortised sweep: `allows_up_to_the_limit_then_rejects`, `clients_are_tracked_independently`, `window_resets_after_the_configured_duration`, `the_sweep_drops_the_clients_whose_window_has_elapsed`, `the_limit_holds_across_a_sweep` and `a_client_is_rejected_the_same_number_of_times_after_its_window`.  Plus `the_authentication_endpoints_are_rate_limited` in `tests/auth_api.rs`, which drives the login endpoint past the limit and asserts `429` and the code `rate_limited`. |
 | `AUTH-R09` A safe public user representation | Covered | `tests/auth_api.rs` — `registration_returns_a_token_pair_and_a_safe_user` and `the_current_user_endpoint_returns_the_caller` both assert the absence of `password_hash`. |
 
 Supporting evidence that is not tied to one requirement:
@@ -85,7 +84,10 @@ recorded as `Q-08` in
 - The rate limiter is per process; a multi-instance deployment needs edge
   rate limiting.
 - The client IP comes from the connection; `X-Forwarded-For` is never read.
-- Refresh tokens have no idle timeout, only an absolute lifetime.
+- Refresh tokens have no idle timeout, only an absolute lifetime. A rotation
+  preserves that deadline, so the absolute lifetime is measured from the
+  creation of the session. The idle timeout is still open: `Q-03` in
+  [`open-questions.md`](../../engineering/open-questions.md).
 - Access tokens cannot be revoked before they expire.
 
 These are recorded in [`specification.md`](specification.md) §9 and in

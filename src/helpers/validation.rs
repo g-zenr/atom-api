@@ -18,12 +18,12 @@
 
 use crate::config::messages::{Messages, render};
 use crate::error::{AppError, AppResult, FieldViolation};
-use crate::utils::text::char_len;
+use crate::utils::text::{char_len, is_blank};
 
 /// A trimmed value that must not be empty and must not be longer than `max`.
 ///
 /// `too_long` is the template for the "too long" message, for example
-/// `&messages.validation.title_too_long`.
+/// `&messages.validation.too_long`.
 ///
 /// # Errors
 ///
@@ -36,15 +36,15 @@ pub fn required_text(
     too_long: &str,
     messages: &Messages,
 ) -> AppResult<String> {
-    let trimmed = value.trim();
-
-    if trimmed.is_empty() {
+    if is_blank(value) {
         return Err(field_error(
             field,
             messages.validation.not_empty.clone(),
             messages,
         ));
     }
+
+    let trimmed = value.trim();
 
     if char_len(trimmed) > max {
         return Err(field_error(
@@ -82,27 +82,59 @@ pub fn bounded_text(
 }
 
 /// Builds the validation error for one field.
-fn field_error(field: &str, message: String, messages: &Messages) -> AppError {
+///
+/// Every feature module reports a rejected field the same way: one field
+/// violation in the details and the shared `validation_failed` message. The
+/// helper is public so that a module which validates something the shared
+/// validators do not cover reports it in the same shape.
+pub fn field_error(field: &str, message: String, messages: &Messages) -> AppError {
     AppError::validation(vec![FieldViolation::new(field, message)])
         .with_message(messages.general.validation_failed.clone())
+}
+
+/// The longest accepted search term, in characters.
+///
+/// A search term is not stored, so it has no database constraint to mirror.
+/// The bound is what keeps one request from making PostgreSQL tokenise an
+/// arbitrarily long string. Every other request input has a bound, so this
+/// one has one too.
+pub const MAX_SEARCH_LENGTH: usize = 200;
+
+/// Validates a search term.
+///
+/// The term is trimmed, and a term that is empty after trimming means "no
+/// filter" rather than an error: the repository already treats it that way.
+///
+/// # Errors
+///
+/// Returns [`AppError`] with a field violation when the term is longer than
+/// [`MAX_SEARCH_LENGTH`].
+pub fn validate_search(term: &str, messages: &Messages) -> AppResult<String> {
+    let trimmed = term.trim();
+
+    if char_len(trimmed) > MAX_SEARCH_LENGTH {
+        return Err(field_error(
+            "search",
+            render(
+                &messages.validation.too_long,
+                &[MAX_SEARCH_LENGTH.to_string()],
+            ),
+            messages,
+        ));
+    }
+
+    Ok(trimmed.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::messages::Messages;
-
-    /// The shipped catalogue, so that the tests exercise the same templates
-    /// the application serves.
-    fn messages() -> Messages {
-        Messages::from_toml(include_str!("../../config/messages.toml"))
-            .expect("the message catalogue parses")
-    }
+    use crate::config::messages::test_messages;
 
     #[test]
     fn required_text_trims_and_rejects_an_empty_value() {
-        let messages = messages();
-        let too_long = messages.validation.title_too_long.clone();
+        let messages = test_messages();
+        let too_long = messages.validation.too_long.clone();
 
         assert_eq!(
             required_text("title", "  hello  ", 200, &too_long, &messages).unwrap(),
@@ -115,8 +147,8 @@ mod tests {
 
     #[test]
     fn required_text_rejects_a_value_over_the_maximum() {
-        let messages = messages();
-        let too_long = messages.validation.title_too_long.clone();
+        let messages = test_messages();
+        let too_long = messages.validation.too_long.clone();
 
         let error =
             required_text("title", &"x".repeat(201), 200, &too_long, &messages).unwrap_err();
@@ -129,13 +161,36 @@ mod tests {
 
     #[test]
     fn bounded_text_keeps_the_value_verbatim() {
-        let messages = messages();
-        let too_long = messages.validation.description_too_long.clone();
+        let messages = test_messages();
+        let too_long = messages.validation.too_long.clone();
 
         assert_eq!(
             bounded_text("description", "  spaced  ", 100, &too_long, &messages).unwrap(),
             "  spaced  "
         );
         assert!(bounded_text("description", &"x".repeat(101), 100, &too_long, &messages).is_err());
+    }
+
+    #[test]
+    fn a_search_term_is_trimmed_and_bounded() {
+        let messages = test_messages();
+
+        assert_eq!(validate_search("  hello  ", &messages).unwrap(), "hello");
+        assert_eq!(validate_search("   ", &messages).unwrap(), "");
+
+        // A term at the bound is accepted.
+        assert!(
+            validate_search(&"x".repeat(MAX_SEARCH_LENGTH), &messages).is_ok(),
+            "a term at the bound must be accepted"
+        );
+
+        // One character more is refused, with the field named.
+        let error = validate_search(&"x".repeat(MAX_SEARCH_LENGTH + 1), &messages).unwrap_err();
+        let body = error.body();
+        assert_eq!(body.error.details[0].field, "search");
+        assert_eq!(
+            body.error.details[0].message,
+            format!("must be at most {MAX_SEARCH_LENGTH} characters long")
+        );
     }
 }

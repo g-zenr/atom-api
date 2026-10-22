@@ -44,7 +44,9 @@ atom/api/
 │   ├── auth/               # authentication and token lifecycle
 │   ├── users/ notes/ projects/ tasks/
 │   ├── config/             # settings, loader, validation, message catalogue
-│   ├── error.rs state.rs pagination.rs ratelimit.rs health.rs
+│   ├── helpers/            # the shared text validators
+│   ├── utils/              # the generic text helpers
+│   ├── error.rs state.rs pagination.rs ratelimit.rs telemetry.rs health.rs
 ├── tests/                  # HTTP-level integration tests
 └── docs/                   # the project knowledge base
 ```
