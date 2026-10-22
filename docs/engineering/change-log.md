@@ -42,6 +42,104 @@ define the target state. The requirements live in
 
 ## Entries
 
+### ATOM-CHANGE-20261022-008 - The Git workflow, the pull-request standard and the release path
+
+**Date:** 2026-10-22 (UTC)
+**Type:** Process and repository configuration
+**Author:** The ATOM engineering team
+**Status:** Complete
+
+#### Summary
+
+The repository is now published to `https://github.com/g-zenr/atom-api`, and the
+workflow around it is written down: a two-branch model (`develop` for
+integration, `master` for production), a branch and commit standard, a
+pull-request template, issue templates, and the DEV to UAT to PROD promotion
+process. The existing CI workflow was corrected in three ways that mattered.
+
+No application behaviour changed. No migration, no schema change, no API
+contract change.
+
+#### Reason
+
+Three things were wrong or missing, and each had a concrete consequence:
+
+1. **The CI trigger named a branch that does not exist.** `.github/workflows/ci.yml`
+   ran on `push: branches: [main]`, while the repository's branch is `master`.
+   A push could never have started it. The gates were therefore enforced only by
+   whoever remembered to run them, which is how the remediation for this very
+   release reached a review with a blocking defect in it.
+2. **`KI-005` was recorded as closed** on the strength of a workflow file that
+   had never executed. That is the failure mode the project's own verification
+   policy exists to prevent, so it is corrected here rather than quietly left.
+3. **There was no written workflow at all.** Branch naming appeared only as
+   `feature/<description>` in `CONTRIBUTING.md`, which contradicted the
+   conventional-commit types the log already used, and nothing stated which
+   branch a pull request targets.
+
+#### What changed
+
+| Area | Change |
+| ---- | ------ |
+| CI | The workflow triggers on `master` and `develop`, not the non-existent `main`. The strict documentation check was added: only the non-strict `atom-docs` ran, so a broken cross-reference passed. `continue-on-error` was removed from the OpenCode job, which is now enforcing. A `concurrency` group cancels superseded runs. |
+| Pull requests | `.github/pull_request_template.md` added, with the six real gates, an explicit "not verified" field, a migration-impact block and a reviewer checklist. |
+| Issues | `.github/ISSUE_TEMPLATE/bug_report.md` and `feature_request.md` added. The feature template states that a roadmap item is not agreed scope. |
+| `CONTRIBUTING.md` | The branch rule now points at `develop` and at the full type list; `feature/` became the `feat/` family. The pull-request step names its base branch. The commit conventions gained `perf:` and `security:` and the rule that a commit must compile. |
+| New documents | [`git-workflow.md`](git-workflow.md) - the branch model, naming, gates, review and merge strategy. [`release-and-promotion.md`](release-and-promotion.md) - the DEV/UAT/PROD gates, what is verified and recorded at each, and an explicit table of the infrastructure that does not exist. |
+| Index | Both documents added to [`../README.md`](../README.md) §3. |
+| `KI-005` | Corrected: the gate exists but has never been observed running, so it is `Implemented`, not `Verified`, and the entry says so. |
+| `implementation-status.md`, `system-overview.md` | The same correction, and the branch name. |
+
+#### Requirements and decisions referenced
+
+| Reference | Subject |
+| --------- | ------- |
+| [`../project-truth.md`](../project-truth.md) §13.6 | The quality gates that the pipeline enforces. |
+| [`../testing/verification-policy.md`](../testing/verification-policy.md) | A check that did not run is not reported as passing. |
+| [`../decisions/ADR-0006-configuration-source-of-truth.md`](../decisions/ADR-0006-configuration-source-of-truth.md) | Why the environments differ only in secrets and the overlay. |
+| [`git-workflow.md`](git-workflow.md) | The process this entry establishes. |
+| [`release-and-promotion.md`](release-and-promotion.md) | The promotion path this entry establishes. |
+
+#### Compatibility impact
+
+None for a client and none for the database. The change is repository
+configuration and documentation.
+
+#### Security implications
+
+Two positive ones. The strict documentation check and the enforcing OpenCode job
+are now real gates rather than advisory ones, and the production branch is
+documented as receiving release merges only, which is what makes a protected
+`master` meaningful when protection is configured. The repository contains no
+secret: the CI signing secret is a fixed, obviously-fake placeholder used only
+against a disposable database inside the runner.
+
+#### What this entry does **not** claim
+
+- **No deployment infrastructure exists.** There is no container image, no
+  orchestrator manifest, no UAT or PROD instance. The promotion stages are
+  described as gates that are applied by hand. `KI-006` and
+  [`implementation-status.md`](implementation-status.md) record this, and
+  [`release-and-promotion.md`](release-and-promotion.md) §6 repeats it in a
+  table so that the document cannot be mistaken for a description of working
+  automation.
+- **The CI workflow has not been observed passing on a runner.** It is written,
+  and it is correct as far as inspection shows, but `KI-005` is not closed on
+  the strength of that. It closes when a run is seen to pass.
+
+#### Checks and results
+
+| Command | Result |
+| ------- | ------ |
+| `cargo fmt --all -- --check` | **Passed.** Exit code 0. |
+| `cargo clippy --all-targets --all-features -- -D warnings` | **Passed.** Exit code 0. |
+| `cargo test --all-targets` | **Passed.** 177 tests, 0 failed. |
+| `cargo run --bin atom-docs` | **Passed.** `OK (0 warning(s))`. |
+| `cargo run --bin atom-docs -- --strict` | **Passed.** `OK (0 warning(s))`. |
+| `scripts/validate-opencode.ps1` | **Passed.** 0 warning(s). |
+
+---
+
 ### ATOM-CHANGE-20261022-007 - The remaining code findings, and the backlog that accounts for all of them
 
 **Date:** 2026-10-22 (UTC)

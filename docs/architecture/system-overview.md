@@ -145,7 +145,7 @@ the service.
 | `docker-compose.yml` for a **local PostgreSQL only** | Implemented. It brings up `postgres:18-alpine` and creates the disposable `atom_test` database. It does **not** build an application image. |
 | A background task that prunes the expired refresh sessions | Implemented. It runs every hour by default and deletes the sessions that expired more than a day ago; both the interval and the grace period come from the configuration. |
 | A container image for the API | **Not implemented.** |
-| A CI pipeline | Implemented. `.github/workflows/ci.yml` runs the formatting check, the linter with warnings denied, the whole test suite against a real PostgreSQL, the release build and the documentation check, on every push to `main` and on every pull request. |
+| A CI pipeline | Implemented. `.github/workflows/ci.yml` runs the formatting check, the linter with warnings denied, the whole test suite against a real PostgreSQL, the release build and the documentation check, on every push and pull request to `master` or `develop`. It has not yet been observed running on a GitHub runner. |
 | A release process | **Not implemented.** |
 | An orchestrator manifest (systemd unit, Kubernetes manifest) | **Not implemented.** |
 

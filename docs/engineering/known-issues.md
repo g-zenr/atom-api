@@ -176,9 +176,15 @@ record the output, as described in
 
 **Resolution.** [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
 runs the formatting check, the lint, the test suite, a release build, the
-documentation check and the OpenCode configuration check on every push and
-pull request. The workflow has not yet run on a GitHub runner, because the
-repository has not been published.
+documentation check in both modes and the OpenCode configuration check on every
+push and pull request to `master` or `develop`.
+
+**Verification status.** The repository is published, and the workflow now names
+the branches that actually exist. Its trigger previously named `main`, which was
+never the branch in use, so a push could not have started it. The workflow has
+**still not been observed on a GitHub runner**; it becomes `Verified` when a run
+has been seen to pass. Until then this entry records a workflow that exists and
+is believed correct, not one that has run.
 
 **Related.** Requirement [`../project-truth.md`](../project-truth.md) §13.6;
 `KI-004`; `KI-006`.
