@@ -81,7 +81,8 @@ Three things were wrong or missing, and each had a concrete consequence:
 
 | Area | Change |
 | ---- | ------ |
-| CI | The workflow triggers on `master` and `develop`, not the non-existent `main`. The strict documentation check was added: only the non-strict `atom-docs` ran, so a broken cross-reference passed. `continue-on-error` was removed from the OpenCode job, which is now enforcing. A `concurrency` group cancels superseded runs. |
+| CI | The workflow triggers on `master` and `develop`, not the non-existent `main`. The strict documentation check was added: only the non-strict `atom-docs` ran, so a broken cross-reference passed. `continue-on-error` was removed from the OpenCode job. A `concurrency` group cancels superseded runs. |
+| Script modes | All five files under `scripts/` were committed with mode `100644`, so `./scripts/validate-opencode.sh` failed with `Permission denied` (exit 126) on Linux. The three shell scripts are now `100755`, and the workflow names the interpreter (`bash ./scripts/…`) so a checkout that loses the mode cannot disable the check again. |
 | Pull requests | `.github/pull_request_template.md` added, with the six real gates, an explicit "not verified" field, a migration-impact block and a reviewer checklist. |
 | Issues | `.github/ISSUE_TEMPLATE/bug_report.md` and `feature_request.md` added. The feature template states that a roadmap item is not agreed scope. |
 | `CONTRIBUTING.md` | The branch rule now points at `develop` and at the full type list; `feature/` became the `feat/` family. The pull-request step names its base branch. The commit conventions gained `perf:` and `security:` and the rule that a commit must compile. |
@@ -89,6 +90,25 @@ Three things were wrong or missing, and each had a concrete consequence:
 | Index | Both documents added to [`../README.md`](../README.md) §3. |
 | `KI-005` | Corrected: the gate exists but has never been observed running, so it is `Implemented`, not `Verified`, and the entry says so. |
 | `implementation-status.md`, `system-overview.md` | The same correction, and the branch name. |
+
+#### What the first CI run found
+
+The first pull request merged nothing, but it did run for the first time, and it
+found a defect that had been invisible since the workflow was written:
+
+**The OpenCode validation job had never executed its script.** It invoked
+`./scripts/validate-opencode.sh` as a program, but every file under `scripts/`
+was committed with mode `100644`, so the runner answered `Permission denied` and
+the step exited `126`. With `continue-on-error: true`, the job reported success
+anyway. Removing that flag is what surfaced it.
+
+This is the concrete argument for the change: a gate that cannot fail is not a
+gate, and the project had believed for its whole life that this one was checking
+something.
+
+The quality-gate job itself passed on the first run, in 4m15s, on the
+remediation pull request — so the formatting, lint, test, release-build and
+documentation steps are now observed working on a runner rather than assumed.
 
 #### Requirements and decisions referenced
 

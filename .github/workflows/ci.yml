@@ -135,4 +135,11 @@ jobs:
 
       - name: Validate the configuration
         # The model check is skipped: CI has no provider credentials.
-        run: ./scripts/validate-opencode.sh --skip-model-check
+        #
+        # Invoked through `bash` rather than as `./scripts/...`. The script was
+        # committed with mode 100644, so a direct invocation failed with
+        # "Permission denied" (exit 126) on every run. `continue-on-error: true`
+        # hid that for the whole life of the workflow. The executable bit is now
+        # set too, but naming the interpreter means a checkout that loses the
+        # mode cannot silently disable the check again.
+        run: bash ./scripts/validate-opencode.sh --skip-model-check
