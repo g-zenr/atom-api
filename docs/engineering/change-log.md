@@ -110,6 +110,25 @@ The quality-gate job itself passed on the first run, in 4m15s, on the
 remediation pull request — so the formatting, lint, test, release-build and
 documentation steps are now observed working on a runner rather than assumed.
 
+**A second defect followed.** With the script executable, it ran and reported
+every agent as missing. The agents carry no `model:` of their own; they inherit
+the default from `opencode.jsonc`, which names a provider a hosted runner has no
+credentials for. Agent discovery therefore cannot succeed there, and neither can
+the model check.
+
+The validator gained `--skip-agent-discovery`, so a runner can skip exactly the
+checks that need a provider while still enforcing the rest. The skip is printed
+as a **warning**, never as a pass, so the output cannot be misread as "the
+agents were checked". CI now runs:
+
+```text
+bash ./scripts/validate-opencode.sh --skip-model-check --skip-agent-discovery
+```
+
+which in CI still enforces that the configuration parses, that the expected
+sources are loaded, and that the committed configuration contains no credential.
+The agent wiring remains a **local** gate, which holds a provider by definition.
+
 #### Requirements and decisions referenced
 
 | Reference | Subject |

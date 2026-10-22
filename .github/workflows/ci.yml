@@ -134,12 +134,15 @@ jobs:
         run: npm install -g "@opencode/cli@2"
 
       - name: Validate the configuration
-        # The model check is skipped: CI has no provider credentials.
+        # The model and agent checks need provider credentials, which a hosted
+        # runner does not have: the agents inherit the default model, so without
+        # a provider every one of them would report as missing. Those two checks
+        # are skipped and the skip is printed as a warning. What still runs here
+        # and is enforcing: the configuration parses, the sources are the ones
+        # expected, and the committed configuration contains no credential.
         #
         # Invoked through `bash` rather than as `./scripts/...`. The script was
         # committed with mode 100644, so a direct invocation failed with
-        # "Permission denied" (exit 126) on every run. `continue-on-error: true`
-        # hid that for the whole life of the workflow. The executable bit is now
-        # set too, but naming the interpreter means a checkout that loses the
-        # mode cannot silently disable the check again.
-        run: bash ./scripts/validate-opencode.sh --skip-model-check
+        # "Permission denied" (exit 126) on every run, and `continue-on-error`
+        # hid that for the whole life of the workflow.
+        run: bash ./scripts/validate-opencode.sh --skip-model-check --skip-agent-discovery
