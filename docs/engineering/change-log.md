@@ -162,9 +162,9 @@ against a disposable database inside the runner.
   [`release-and-promotion.md`](release-and-promotion.md) §6 repeats it in a
   table so that the document cannot be mistaken for a description of working
   automation.
-- **The CI workflow has not been observed passing on a runner.** It is written,
-  and it is correct as far as inspection shows, but `KI-005` is not closed on
-  the strength of that. It closes when a run is seen to pass.
+- **Branch protection is not configured.** The two-branch model is a convention
+  the pipeline enforces; it is not a GitHub rule that prevents a direct push to
+  `master`. Configuring that is a repository-settings change and was not made.
 
 #### Checks and results
 
@@ -176,6 +176,7 @@ against a disposable database inside the runner.
 | `cargo run --bin atom-docs` | **Passed.** `OK (0 warning(s))`. |
 | `cargo run --bin atom-docs -- --strict` | **Passed.** `OK (0 warning(s))`. |
 | `scripts/validate-opencode.ps1` | **Passed.** 0 warning(s). |
+| GitHub Actions, `pull_request` | **Passed.** Run [`39761383251`](https://github.com/g-zenr/atom-api/actions/runs/39761383251) on the remediation branch, 4m15s; run [`39765107169`](https://github.com/g-zenr/atom-api/actions/runs/39765107169) on this branch, 1m25s. Both jobs green. |
 
 ---
 
