@@ -1,7 +1,7 @@
 # ATOM change log
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-23
 > **Owner:** maintained by the `docs` agent
 
 The chronological record of substantial changes to the ATOM backend, newest
@@ -41,6 +41,186 @@ define the target state. The requirements live in
 5. Run the three quality gates and record their real output.
 
 ## Entries
+
+### ATOM-CHANGE-20261023-001 - The default OpenCode model, and a validator hint that pointed at nothing
+
+**Date:** 2026-10-23 (UTC)
+**Type:** Process and repository configuration
+**Author:** The ATOM engineering team - the orchestrator with the `devops` and
+`docs` subagents
+**Status:** Complete
+
+#### Summary
+
+The committed default model in `opencode.jsonc` is now
+`opencode-go/deepseek-v4.1-flash`, because the previous default,
+`opencode-go/minimax-m3.1-flash-free`, is no longer listed by `opencode models`.
+The ten agents carry no `model:` of their own, so all of them inherit the new
+default, and `.opencode/opencode.jsonc.example` follows it. A dead documentation
+reference in the PowerShell validator's failure hint was corrected at the same
+time. No application behaviour, API contract, schema or migration changed; the
+one consequence a contributor feels is that running the agent team now costs
+money.
+
+#### Reason
+
+The repository shipped a configuration that failed its own validator.
+
+`opencode models` no longer lists `opencode-go/minimax-m3.1-flash-free`; the
+closest entries are `opencode-go/minimax-m3.1-flash` and
+`opencode-go/minimax-m3`. The committed configuration therefore failed the
+validator's model-availability check, so every contributor who ran
+`& ./scripts/validate-opencode.ps1` saw a red gate that the repository caused
+and their own change did not. A gate that is red for everyone is a gate that
+teaches people to ignore it, which is the failure mode
+`ATOM-CHANGE-20261022-008` recorded for the CI job before its
+`continue-on-error` flag was removed.
+
+CI was not affected, because the workflow runs the validator with
+`--skip-model-check --skip-agent-discovery`: a hosted runner holds no provider
+credentials, so those two checks cannot succeed there and are printed as
+warnings rather than as a pass.
+
+#### What changed
+
+| Area | Change |
+| ---- | ------ |
+| `opencode.jsonc` | The default `model` is `opencode-go/deepseek-v4.1-flash`. The comment block above the setting now records that the model is metered ($0.15 per million input tokens and $0.60 per million output tokens, per the catalogue), that the previous default had dropped out of the catalogue, and exactly what was and was not observed about tool calling and delegation. |
+| The agent team | Unchanged, and deliberately so: none of the ten agents carries a `model:` of its own, so all of them inherit the default and none of them needs an edit when it changes. |
+| `.opencode/opencode.jsonc.example` | Follows the new default, so the override a contributor copies cannot start from the stale model. |
+| `scripts/validate-opencode.ps1` | The model-check failure hint named `docs/contributing.md`, which does not exist. It now prints `docs/contributing-opencode.md`, matching the `.sh` sibling, so the advice it gives can actually be followed. |
+| `docs/contributing-opencode.md`, `CONTRIBUTING.md` | Both state the new default, the metered pricing, the warning that the catalogue changes, the past-tense note that the old default disappeared from it, and the precise scope of what has been observed. |
+
+#### Affected features and files
+
+| Feature | Area | Files |
+| ------- | ---- | ----- |
+| Foundation | The delivery toolchain | `opencode.jsonc`, `.opencode/opencode.jsonc.example`, `scripts/validate-opencode.ps1` |
+| Foundation | The contributor documentation | [`../contributing-opencode.md`](../contributing-opencode.md), [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) |
+| Foundation | The engineering record | [`change-log.md`](change-log.md) |
+
+#### Requirements and decisions referenced
+
+| Reference | Subject |
+| --------- | ------- |
+| [`../../AGENTS.md`](../../AGENTS.md) §7 | Never silently fall back to a different model; report an unavailable or rate-limited model instead of routing around it. |
+| [`../testing/verification-policy.md`](../testing/verification-policy.md) §4 | A check that did not run is reported as not run, never as passing. |
+| [`../contributing-opencode.md`](../contributing-opencode.md) | The defaults, the override ladder and the validator, as a contributor meets them. |
+| [`../decisions/README.md`](../decisions/README.md) §2.1 | A tuned default is recorded in the change log rather than in an ADR; this entry is that record. The same row sends an *application* default to [`../architecture/deployment.md`](../architecture/deployment.md) §1.3, which covers the settings in `config/` — a surface this change does not touch. |
+| [`../../opencode.jsonc`](../../opencode.jsonc) | The committed setting this entry changes. |
+
+`../project-truth.md` says nothing about the OpenCode agent configuration or the
+default model: no section and no requirement identifier names a model or a
+provider. Its §13 governs the quality gates and the evidence discipline, and
+those are cited through the verification policy above. This entry therefore
+satisfies no product requirement; it repairs the delivery toolchain.
+
+#### Architectural impact
+
+None. No module, boundary, invariant, request lifecycle or schema is touched,
+which is why the change is confined to two configuration files, one shell
+script and two documents: none of them can reach the application.
+
+#### Compatibility impact
+
+None for an API client and none for the database. One contributor-facing
+default changed: a clone now runs the agent team on a metered model rather than
+a free one, so a session costs money where it previously cost nothing. That is a
+change to what the development tooling costs, not to what the product does.
+
+#### Security implications
+
+None. No credential, endpoint or permission rule was added, removed or
+weakened, and the validator's secret scan passes over the committed files
+unchanged. The committed configuration still names no provider credential, so
+nothing in the repository can spend money by itself; the spend falls on the
+account a contributor is signed in to.
+
+#### Checks and results
+
+| Command | Result |
+| ------- | ------ |
+| `opencode models` (before) | **The previous default was absent.** `opencode-go/minimax-m3.1-flash-free` is not in the catalogue; the closest entries are `opencode-go/minimax-m3.1-flash` and `opencode-go/minimax-m3`. |
+| `opencode models` (after) | `opencode-go/deepseek-v4.1-flash` is present. |
+| `& ./scripts/validate-opencode.ps1` (before) | **Failed.** `FAIL the configured model is not in the catalog: opencode-go/minimax-m3.1-flash-free`; `FAILED: 1 check(s) failed.` Every other check passed. |
+| `& ./scripts/validate-opencode.ps1` (after) | **Passed.** `PASSED: all checks completed (0 warning(s)).` — agent discovery for all ten agents, the read-only enforcement of `code-reviewer` and `quality-gate`, `OK   model offered by the catalog: opencode-go/deepseek-v4.1-flash`, the configuration parse and the secret scan. |
+| `opencode debug config` (after) | Resolves `"providerID": "opencode-go"` and `"model": "deepseek-v4.1-flash"`. |
+| `cargo run --quiet --bin atom-docs` (after) | **Passed.** `atom-docs: OK (0 warning(s))`. |
+| `cargo fmt --all -- --check` | **Passed.** Exit code 0, no output. |
+| `cargo clippy --all-targets --all-features -- -D warnings` | **Passed.** Exit code 0, no warnings and no errors; the profile finished in 7.26 s. |
+| `$env:TEST_DATABASE_URL = "postgres://atom:atom@127.0.0.1:5432/atom_test"; cargo test --all-targets` | **Passed.** Exit code 0. 177 passed, 0 failed, 0 ignored: `src/lib.rs` 111, `src/main.rs` 0, `src/bin/atom-docs.rs` 0, `tests/auth_api.rs` 29, `tests/notes_api.rs` 12, `tests/projects_tasks_api.rs` 25. |
+
+The three code gates ran because the policy requires them on every change, not
+because this change is in their reach: none of them can observe a committed
+configuration file or a document, and no Rust source changed.
+
+`pwsh` is not installed on the reference machine, so the validator was invoked
+from Windows PowerShell 5.1 as `& ./scripts/validate-opencode.ps1`. It is the
+same script file either way; only the interpreter differs.
+
+#### Manual verification
+
+The orchestration session that made the change ran on the new default, under
+OpenCode v2.0.27. In that session the orchestrator called tools and launched two
+subagents, a `devops` specialist and a `docs` specialist; both completed and
+returned results. That observation is what the two contributor documents now
+say, and it is a session-level observation rather than a test.
+
+Two things were **not** observed, and are not claimed: the model that the
+subagent sessions resolved for themselves, and a full feature delivery run
+end-to-end on the new default. A failed subagent launch is still to be reported,
+never routed around.
+
+#### Review findings
+
+No independent review has been performed on this change set. It was checked by
+the configuration validator and the documentation checker, which is not a
+review. See [`review-log.md`](review-log.md).
+
+#### Documentation
+
+[`../contributing-opencode.md`](../contributing-opencode.md) §2, §3 and §4 and
+[`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) §6 now describe the new
+default, its price, the catalogue warning and the evidence for it. §4 of the
+first document also stopped implying that metered use was something a
+contributor opts into, which the new default made untrue. The default and the
+override ladder are otherwise unchanged.
+
+#### Limitations
+
+- **No application behaviour, API contract, schema or migration changed**, so
+  the suite that just passed exercises an application this change did not
+  alter; no check above exercises the change itself.
+- **The new default is metered.** Running the agent team now costs money where
+  the previous default was free. The trade was deliberate: the free model is no
+  longer offered by the catalogue.
+- **The subagent-side model resolution was not recorded.** Only the
+  orchestrator session's tool calling and delegation were observed; a subagent
+  could in principle resolve a different model, and nothing here demonstrates
+  otherwise.
+- **No end-to-end feature delivery has been run on the new default**, so the
+  team's behaviour across a full workflow is unproven.
+- **The pricing is a catalogue listing, not a contractual figure.** It can
+  change without a repository change, and nothing in the repository notices
+  when it does.
+- **[`../project-truth.md`](../project-truth.md) §8 requires that the build not
+  depend on a hosted or paid service.** That still holds: `cargo build` and the
+  three gates remain local. The agent team is a development tool rather than
+  part of the build, and it now requires a paid provider account for whoever
+  runs it.
+
+#### Links
+
+- [`../contributing-opencode.md`](../contributing-opencode.md) - the defaults,
+  the override ladder and the validator.
+- [`../../opencode.jsonc`](../../opencode.jsonc) - the setting, and the comment
+  block that explains it.
+- [`../testing/verification-policy.md`](../testing/verification-policy.md) §4 -
+  what a results table may claim, and what it may not.
+- `ATOM-CHANGE-20261022-008` above - the CI job that was green for the same
+  reason: a gate that could not fail.
+
+---
 
 ### ATOM-CHANGE-20261022-008 - The Git workflow, the pull-request standard and the release path
 
