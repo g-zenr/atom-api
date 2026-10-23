@@ -204,7 +204,7 @@ if ($opencode -and -not $SkipModelCheck) {
         } else {
             Write-Fail "the configured model is not in the catalog: $model"
             Write-Host '    Run `opencode models` to see what your account can use.'
-            Write-Host '    Override the model in .opencode/opencode.jsonc — see docs/contributing.md.'
+            Write-Host '    Override the model in .opencode/opencode.jsonc — see docs/contributing-opencode.md.'
         }
     }
 }
