@@ -42,6 +42,10 @@ Out of scope for Phase 2, and not to be pre-wired:
   outbound model, which the constraints exclude.
 - Outbound calls to a hosted or paid service, including AI providers.
 - Team membership, sharing, multi-tenancy. The product is single-owner.
+- **n8n automation.** It is a later integration, not part of the API runtime: a
+  separate Node service that calls the API, never the reverse, and never inside
+  the data path of a private record. It is `Proposed` in
+  [the roadmap](../../../roadmap.md), not Phase 2 scope.
 - Everything in [the roadmap](../../../roadmap.md) that is still `Proposed`.
 - Compile-time SQLx verification (`KI-004`) and account lockout (`KI-012`).
 
@@ -147,10 +151,11 @@ depend on the extension.
 
 ### The design
 
-1. An `Embedder` trait with three implementations: `Candle` (pure-Rust
-   inference over a local model file), `Deterministic` (hash-based, used by
-   every test, no network), `Disabled`. **No second language runtime**: no
-   Python, no Node, no Go, and no external model server such as Ollama.
+1. An `Embedder` trait with three implementations: `Burn` (the owner's chosen
+   pure-Rust framework, CPU backend by default, weights loaded from a local
+   file), `Deterministic` (hash-based, used by every test, no network),
+   `Disabled`. **No second language runtime**: no Python, no Node, no Go, and no
+   external model server such as Ollama.
 2. Embeddings stored as `REAL[]`.
 3. Search is **hybrid**: the existing lexical search narrows the owner's rows to
    a bounded candidate set, then cosine similarity re-ranks them in Rust. No
@@ -163,6 +168,12 @@ depend on the extension.
 6. Evaluation: 15 fixture queries with expected notes, run with the
    deterministic embedder (proves the plumbing); one recorded manual quality run
    with the real model.
+7. Burn is the framework decision (owner, 2026-10-24). Day 4 opens with a spike
+   that loads a small sentence-embedding model, measures latency and memory on
+   this machine, and records the numbers **before** any endpoint depends on it.
+   If the spike fails, ML ships as `Disabled` and lexical search is the
+   behaviour. It is not replaced with a service, and it is not replaced with
+   another language.
 
 Endpoints: `POST /notes/search` (lexical or semantic), `POST
 /job-applications/{id}/match`, `POST /ml/reindex` (idempotent, owner-scoped).
