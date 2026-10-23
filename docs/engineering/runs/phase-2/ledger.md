@@ -63,7 +63,7 @@ below. Every chain that adds a table extends it in the same chain.
 
 | Item | Wave | State | Commit | Notes |
 | ---- | ---- | ----- | ------ | ----- |
-| D0 | Close Phase 1 | **in progress — other session** | — | Observed 02:58–03:11 writing the `docs` feature, `tests/shutdown.rs`, `Dockerfile`, `.github/workflows/container.yml`. Not verified by the orchestrator. |
+| D0 | Close Phase 1 | **partially done** | `71600cb` | PR #5 merged the `docs` feature, the container image, the shutdown test, `020` and `027`. Remaining: `F-23` (021), `F-49` (023), the fate of `docs/audit/handoff.md`, and the `config/README.md` line-ending dirt. |
 | D1 | Product intake | pending | — | Documents only. Blocks D2. Specifies the seeder in `docs/database/seeding.md`. |
 | D2.S1 | Seeder foundation | pending | — | `atom-seed` for users, notes, projects and tasks. Guards, determinism, `--reset`, tests, docs. No new dependency. |
 | D2.R1 | Reimbursements — schema and types | pending | — | |
@@ -102,6 +102,11 @@ Only commands actually run, with their real result.
 | 2026-10-24 03:09 | `psql -c "create extension vector"` as `atom` | `permission denied` — must be superuser |
 | 2026-10-24 03:09 | `pg_available_extensions` | `vector 0.8.1`, `pg_trgm 1.6`, `pgcrypto 1.4`, `unaccent 1.1` |
 | 2026-10-24 03:11 | `docker --version`, `gh auth status`, `pg_isready` | 29.2.1; logged in as `g-zenr`; accepting connections |
+
+| 2026-10-24 03:58 | `git log --oneline` | PR #5 merged as `71600cb`: the `docs` feature, the container image, the shutdown test, `020`, `027`. `develop` was two run-folder commits ahead of origin. |
+| 2026-10-24 03:53 | `cargo run --bin atom-docs` | exit 0, 0 warnings; `--strict` exit 0, 0 warnings |
+| 2026-10-24 03:52 | `python` UTF-8 check of the run folder | valid, 0 replacement characters |
+| 2026-10-24 03:52 | disk cleanup | removed incremental, PDB and release artifacts: 1.3 GB free to 9.27 GB |
 
 ---
 
