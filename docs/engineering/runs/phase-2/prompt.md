@@ -76,7 +76,9 @@ Follow AGENTS.md. The rules this run will be tempted to break:
   seven places in one change (file, typed field, loader, validation,
   .env.example, deployment reference, tests).
 - A public contract change means OpenAPI, docs/api/ and the feature documents.
-- ML is local only. No outbound call to a hosted or paid service. Ever.
+- ML is local only and **Rust only**. No outbound call to a hosted or paid
+  service, and no second language runtime: no Python, no Node, no Go, no
+  external model server such as Ollama. Model weights are local files.
 - The seeder is destructive. It refuses production, refuses a database whose
   name lacks dev/local/test, refuses a database that holds foreign rows, and
   never prints the connection string or a hash.

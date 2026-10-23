@@ -30,6 +30,12 @@ The roadmap items remain `Proposed` until then.
 
 In scope: the six capabilities above, and the hardening of the existing API.
 
+**The application stack stays Rust**: Axum, Tokio, SQLx, PostgreSQL. No second
+language runtime is added for any feature, including machine learning. Model
+weights are local files read by the Rust process, not a service. PowerShell
+scripts, `gh`, Docker and the OpenCode agent tooling are developer tooling, not
+application stack, and are unaffected by this rule.
+
 Out of scope for Phase 2, and not to be pre-wired:
 
 - Text generation of any kind (cover letters, summaries). It requires an
@@ -141,17 +147,19 @@ depend on the extension.
 
 ### The design
 
-1. An `Embedder` trait with three implementations: `Ollama` (localhost only),
-   `Deterministic` (hash-based, used by every test, no network), `Disabled`.
+1. An `Embedder` trait with three implementations: `Candle` (pure-Rust
+   inference over a local model file), `Deterministic` (hash-based, used by
+   every test, no network), `Disabled`. **No second language runtime**: no
+   Python, no Node, no Go, and no external model server such as Ollama.
 2. Embeddings stored as `REAL[]`.
 3. Search is **hybrid**: the existing lexical search narrows the owner's rows to
    a bounded candidate set, then cosine similarity re-ranks them in Rust. No
    extension, bounded memory, honest about being a reranker.
-4. Configuration: `ml.enabled` (default `false`), `ml.provider`, `ml.base_url`,
-   `ml.model`, `ml.dimension`, `ml.timeout_seconds`, `ml.candidate_limit` — all
-   seven places in one change, per `AGENTS.md` §4.11.
-5. Degradation is tested: ML off or the provider down returns lexical results
-   with `200`, never `500`.
+4. Configuration: `ml.enabled` (default `false`), `ml.backend`, `ml.model_path`,
+   `ml.dimension`, `ml.timeout_seconds`, `ml.candidate_limit` — all seven places
+   in one change, per `AGENTS.md` §4.11.
+5. Degradation is tested: ML off, or the model file missing, returns lexical
+   results with `200`, never `500`.
 6. Evaluation: 15 fixture queries with expected notes, run with the
    deterministic embedder (proves the plumbing); one recorded manual quality run
    with the real model.

@@ -22,6 +22,7 @@ plan and the prompt where they conflict; they do not change `AGENTS.md`.
 | O3 | Range: **as far as it gets**, through Day 5. | Chains that do not fit are parked with evidence. Quality gates are not traded for distance. |
 | O4 | Disk cleanup authorised. | Build artifacts and unused Docker images may be deleted. Current free space after cleanup: see Evidence. |
 | O5 | The concurrent session was **not** identified by the owner. | The runner never kills it. It waits for ten quiet minutes, and aborts if the folder is still busy after sixty. |
+| O6 | **Tech stack: Rust only.** The owner does not want another language runtime. | ML inference must be pure Rust (candle or equivalent) behind a feature flag. No Ollama, no Python sidecar, no external model server. Model weights are local files, not a service. PowerShell, `gh` and Docker remain developer tooling. |
 
 ---
 
