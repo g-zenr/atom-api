@@ -25,9 +25,6 @@
     How long to wait for a concurrent session to finish before giving up.
     Default 60.
 
-.PARAMETER DayTimeoutHours
-    Hard limit for one day. Default 10.
-
 .PARAMETER DryRun
     Extract the briefs, print the commands, run nothing.
 
@@ -43,7 +40,6 @@ param(
     [int]$ToDay = 5,
     [int]$QuietMinutes = 10,
     [int]$MaxWaitMinutes = 60,
-    [double]$DayTimeoutHours = 10,
     [switch]$NoRetry,
     [switch]$DryRun
 )
@@ -213,26 +209,23 @@ foreach ($day in $FromDay..$ToDay) {
         $attempt++
         $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
         $outFile = Join-Path $LogDir ("day-{0}-attempt-{1}-{2}.out.log" -f $day, $attempt, $stamp)
-        $errFile = Join-Path $LogDir ("day-{0}-attempt-{1}-{2}.err.log" -f $day, $attempt, $stamp)
 
         Write-Log ("day {0}: attempt {1} starting" -f $day, $attempt)
 
-        $process = Start-Process -FilePath 'opencode' -ArgumentList $argumentLine `
-            -WorkingDirectory $Root -NoNewWindow -PassThru `
-            -RedirectStandardOutput $outFile -RedirectStandardError $errFile
-
-        $timeoutMs = [int]($DayTimeoutHours * 3600 * 1000)
-        $exited = $process.WaitForExit($timeoutMs)
-
-        if (-not $exited) {
-            Write-Log ("day {0}: timed out after {1} hours; killing" -f $day, $DayTimeoutHours)
-            try { $process.Kill() } catch { }
-            $dayResult = 'timeout'
-        }
-        else {
-            $code = $process.ExitCode
+        try {
+            Push-Location $Root
+            & opencode run --standalone --agent orchestrator --auto --format default --title $title $message *> $outFile
+            $code = $LASTEXITCODE
             Write-Log ("day {0}: exited with {1}" -f $day, $code)
             $dayResult = if ($code -eq 0) { 'exit 0' } else { "exit $code" }
+        }
+        catch {
+            Add-Content -Path $outFile -Value ("launcher error: " + $_.Exception.Message) -Encoding utf8
+            Write-Log ("day {0}: launcher error: {1}" -f $day, $_.Exception.Message)
+            $dayResult = 'launcher error'
+        }
+        finally {
+            Pop-Location
         }
 
         $ledgerUtc = (Get-Item $Ledger).LastWriteTimeUtc

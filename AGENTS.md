@@ -151,13 +151,17 @@ These are not negotiable and are not stylistic preferences.
     | --------- | ---------- | ------------ |
     | [The Rust Style Guide](https://doc.rust-lang.org/style-guide/) | the official formatting, naming and documentation conventions; `rustfmt` enforces most of it | a style question is not settled by `rustfmt` |
     | [Google's Rust Style Guide](https://google.github.io/styleguide/rustguide.html) | API design, ownership, error reporting, naming; ignore its `[chrome]`, `[fuchsia]` and `google3` rules, which are Google-internal | designing a public type, trait or function signature |
-    | [rust-skills](https://github.com/leonardomso/rust-skills) | 265 focused rules across 26 categories: ownership, errors, async, serde, testing, observability; MIT | reviewing Rust for idiom, or when `clippy` is silent but the code feels wrong |
+    | [rust-skills](https://github.com/leonardomso/rust-skills) — installed at `.opencode/skills/rust-skills/` | 265 focused rules across 26 categories: ownership, errors, async, serde, testing, observability; MIT | reviewing Rust for idiom, or when `clippy` is silent but the code feels wrong |
     | [Burn](https://burn.dev/docs/burn/) | the chosen ML framework, v0.22: `Module`, `Tensor`, backends, `store` | any task touching `src/ml/` |
 
     For Burn specifically: use the **`flex`** backend (pure Rust, CPU) in
     Phase 2. Do not add `wgpu`, `cuda` or `tch` without a measurement that
     justifies it. Store weights with `store`/SafeTensors, never a bespoke
     format.
+
+    The installed rust-skills copy is pinned to the upstream commit recorded in
+    `.opencode/skills/rust-skills/SOURCE.md`. Refresh it deliberately, as its
+    own change, never automatically in the middle of a task.
 
 ---
 
