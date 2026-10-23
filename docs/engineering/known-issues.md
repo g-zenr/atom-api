@@ -202,28 +202,29 @@ warning rather than a silent pass.
 
 ### KI-006 — There is no container image for the API
 
-**Status:** Open · **Severity:** Low
+**Status:** Closed · **Severity:** Low · **Closed:** 2026-10-24
 
-**Description.** [`../../docker-compose.yml`](../../docker-compose.yml) brings
-up PostgreSQL for local development and for the test suite. It states in its
-own header that it "does NOT build an application image". The API runs from
-the source tree with `cargo run`.
+**Description.** [`../../docker-compose.yml`](../../docker-compose.yml) brought up
+PostgreSQL for local development and for the test suite, and stated in its own
+header that it does "NOT build an application image". The API ran from the source
+tree with `cargo run`, so a deployment was defined by the source tree and the
+toolchain rather than by an artifact.
 
-**Impact.** There is no reproducible deployment artefact. A deployment is
-defined by the source tree and the toolchain, which is a larger and less
-pinned surface than an image.
+**Resolution.** `Dockerfile` at the repository root builds the image: a
+two-stage build, base images pinned by tag and digest, `--locked`, no toolchain in
+the runtime stage, and an unprivileged UID 10001.
+[`../../.github/workflows/container.yml`](../../.github/workflows/container.yml)
+builds it on every pull request that touches an input of the build and on every
+push to `master` or `develop`, then verifies the properties above rather than
+trusting the build. The image is never pushed: publishing is a release decision.
 
-**Workaround.** Build the release binary with `cargo build --release` and run
-it with the environment configuration in place.
+**Verification.** The workflow runs on GitHub-hosted runners, which have a Docker
+daemon; it has not been executed locally, because the development machine has the
+Docker CLI but no running daemon. That is recorded in the change log rather than
+implied by a green tick somewhere else.
 
-**Remediation status.** Not started. The pipeline in
-[`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) builds a release
-binary, but it does not build an image. The deployment artefact is still the
-binary, the configuration files in [`../../config/`](../../config/) and the
-environment variables.
-
-**Related.** Requirement [`../project-truth.md`](../project-truth.md) §3;
-`KI-005`.
+**Related.** `KI-005`, [`../architecture/deployment.md`](../architecture/deployment.md)
+§5.1a.
 
 ### KI-007 — The refresh token is returned in the response body
 
@@ -678,3 +679,39 @@ test `a_body_limit_above_the_reader_ceiling_is_refused`.
 | `KI-016` | The configuration accepted a weak password policy and an unbounded clock skew | Closed | Medium |
 | `KI-017` | The configuration accepted a session prune grace shorter than the expired-token window needs | Closed | Medium |
 | `KI-018` | The configured body limit stops at an independent 4 MiB backstop | Closed | Low |
+| `KI-019` | The shutdown drain has a test that has not run on a unix host | Closed | Low |
+
+### KI-019 — The shutdown drain had a test that had not run on a unix host
+
+**Status:** Closed · **Severity:** Low · **Closed:** 2026-10-24
+
+**Description.** The independent review (`ATOM-REVIEW-20261022-003`) recorded that
+the shutdown drain was "verified by reading the code and by compilation, not by a
+signal test". Two tests were written in
+[`../../tests/shutdown.rs`](../../tests/shutdown.rs) to close that: one proves the
+signal future resolves immediately instead of sleeping the grace away, the other
+proves the drain is bounded when an in-flight request cannot finish.
+
+**The gap at the time.** They had not been executed on a unix host. The
+development machine is Windows, the file is `#![cfg(unix)]`, and both routes to a
+Linux runtime failed — the Docker daemon stopped mid-pull, and a cross-compilation
+check could not link for want of `x86_64-linux-gnu-gcc`.
+
+**Resolution.** CI executed them on `ubuntu` in run
+[`40011694171`](https://github.com/g-zenr/atom-api/actions/runs/40011694171):
+
+```text
+Running tests/shutdown.rs
+WARN atom_api: the shutdown grace elapsed with requests still in flight grace_seconds=2
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+The warning is the evidence that matters. It is the bounded-drain test reaching
+its deadline with a request still in flight — the behaviour that could not be
+observed on Windows, and the exact path the review found unverified. The
+unix-only suite is therefore **181 tests**, and the shutdown behaviour is
+`Verified`.
+
+**Related.** [`../../tests/shutdown.rs`](../../tests/shutdown.rs),
+[`../testing/strategy.md`](../testing/strategy.md) §1.4,
+`ATOM-REVIEW-20261022-003`.

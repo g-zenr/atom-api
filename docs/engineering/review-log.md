@@ -1,7 +1,7 @@
 # ATOM review log
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-24
 > **Owner:** maintained by the `docs` agent
 
 The record of independent reviews of changes to the ATOM backend: what was
@@ -202,6 +202,24 @@ called a value copy "not a copy".
 Ctrl-C event to a background process on Windows is not something this
 environment can do, so the drain bound is verified by reading the code and by
 compilation, not by a signal test. That is stated rather than implied.
+
+**Follow-up, 2026-10-24 — partially closed.** Two tests now exist in
+[`../../tests/shutdown.rs`](../../tests/shutdown.rs): one proves the signal
+future resolves immediately instead of sleeping the grace away, the other proves
+the drain is bounded when an in-flight request cannot finish. Together they
+distinguish the corrected ordering from the original, which slept inside the
+signal future and then drained without a bound.
+
+**Closed by CI, not by assertion.** The file is `#![cfg(unix)]` and the
+development machine is Windows, so the tests were written but could not be run
+there; `KI-019` recorded that gap rather than letting the test's presence imply a
+pass. CI run
+[`40011694171`](https://github.com/g-zenr/atom-api/actions/runs/40011694171) then
+executed them on `ubuntu`: `test result: ok. 2 passed; 0 failed` for
+`tests/shutdown.rs`, with the bounded-drain test logging
+`the shutdown grace elapsed with requests still in flight grace_seconds=2` — the
+deadline being reached with a request in flight, which is exactly the behaviour
+this review could not observe. The finding is closed.
 
 ---
 

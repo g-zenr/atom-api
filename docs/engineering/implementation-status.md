@@ -63,13 +63,16 @@ A feature is never `Verified` because the code exists or compiles.
 | Contract tests against the OpenAPI document | `Implemented` | The document is generated from the handlers in [`../../src/api/routes.rs`](../../src/api/routes.rs), so it cannot list a route that does not exist. **No test asserts its content.** | 2026-10-21 |
 | The disposable test database guard | `Verified` | [`../../tests/common/mod.rs`](../../tests/common/mod.rs) refuses to start unless the database name contains `test` | 2026-10-22 |
 | CI pipeline | `Implemented` | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) - formatting, linting, the test suite, a release build, the documentation check and the OpenCode configuration check. | 2026-10-22 |
-| Container image | `Proposed` | Nothing exists. [`../../docker-compose.yml`](../../docker-compose.yml) provides PostgreSQL for local development only. | — |
+| Container image | `Implemented` | [`../../Dockerfile`](../../Dockerfile) builds a two-stage image: pinned base images, `--locked`, no toolchain in the runtime stage, unprivileged UID 10001, no secret inside. [`../../.github/workflows/container.yml`](../../.github/workflows/container.yml) builds and verifies it on every relevant change. **Verified** in run [`40011694239`](https://github.com/g-zenr/atom-api/actions/runs/40011694239): `Config.User=10001:10001`, `uid=10001(atom)`, no `cargo` or `rustc` in the runtime stage, no missing shared library, and the binary exits 1 with `required environment variable DATABASE_URL is missing or empty`, which is the evidence that nothing was baked in. | 2026-10-24 |
 | Compile-time SQLx verification | `Proposed` | Queries are checked at run time. The workflow is documented, not enabled. | — |
 | Edge rate limiting | `Proposed` | The requirement in [`../project-truth.md`](../project-truth.md) §9.10 applies to a production deployment. | — |
 | Everything in the roadmap | `Proposed` | By design. See [`../roadmap.md`](../roadmap.md). | — |
 
-The last full run of the test suite was on 2026-10-22: **177 tests passed**
-(111 unit, 29 authentication, 12 notes, 25 projects and tasks), 0 failed. The
+The last full run of the test suite was on 2026-10-24: **181 tests pass on
+CI's `ubuntu` runner** (111 unit, 29 authentication, 2 explorer, 12 notes,
+25 projects and tasks, 2 shutdown), 0 failed, in run
+[`40011694171`](https://github.com/g-zenr/atom-api/actions/runs/40011694171).
+A Windows host runs 179, because the two shutdown tests are unix-only. The
 run covers the current tree, after the audit remediation recorded in
 [`change-log.md`](change-log.md) under `ATOM-CHANGE-20261022-003`: the
 configuration module contributes 50 unit tests in
@@ -94,7 +97,7 @@ the accepted scope rather than as an anonymous backlog.
 | # | Missing | Requirement it serves | Why it is not done yet | Recorded as |
 | - | ------- | ---------------------- | ---------------------- | ----------- |
 | 1 | A CI pipeline that runs the three gates on every change | [`../project-truth.md`](../project-truth.md) §13.6, and the open-source contribution goal in §3 | **Verified.** [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) runs the gates on every push and pull request. It has been observed passing on GitHub-hosted runners, on runs `39761383251` and `39765107169`, and it found two real defects in its own first executions. | `KI-005` in [`known-issues.md`](known-issues.md), Closed |
-| 2 | A container image for the API | The deployment story in [`../architecture/deployment.md`](../architecture/deployment.md) | [`../../docker-compose.yml`](../../docker-compose.yml) provides PostgreSQL for local development only and explicitly does not build an application image. | `KI-006` in [`known-issues.md`](known-issues.md) |
+| 2 | ~~A container image for the API~~ | The deployment story in [`../architecture/deployment.md`](../architecture/deployment.md) | **Done.** `Dockerfile` and `.github/workflows/container.yml`; see the feature table above and `KI-006`. | `KI-006` in [`known-issues.md`](known-issues.md), Closed |
 | 3 | Compile-time SQLx verification (`cargo sqlx prepare` plus a CI check) | [`../project-truth.md`](../project-truth.md) §12 and the reproducibility requirement | It would make the build depend on a live database, which conflicts with the constraint that the build must not require a hosted or paid service. | `KI-004` in [`known-issues.md`](known-issues.md) |
 | 4 | Edge rate limiting in front of the API | [`../project-truth.md`](../project-truth.md) §9.10 | The in-process limiter is a defence-in-depth control. Edge limiting is a deployment concern. | `KI-001` in [`known-issues.md`](known-issues.md) |
 | 5 | A proxy-aware client address for the rate-limit key | [`../project-truth.md`](../project-truth.md) §9.11 | The server installs the connection information, so the limiter is keyed by the peer address. There is still no way to declare a trusted proxy, so behind a proxy every caller shares the proxy's address. | `KI-003` in [`known-issues.md`](known-issues.md) |

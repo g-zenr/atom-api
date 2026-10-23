@@ -2,7 +2,9 @@
 
 **Date:** 2026-10-22
 **Source:** [`audit-report.md`](audit-report.md) — five independent audits
-**Statuses:** `pending`, `in progress`, `blocked`, `fixed`, `verified`, `deferred`
+**Statuses:** `pending`, `in progress`, `blocked`, `fixed`, `verified`,
+`reviewed` (investigated, measured, and deliberately not changed — the record
+says why), `deferred` (not investigated yet, or waiting on a prerequisite)
 
 Every finding `F-01` … `F-83` and every retained item `R-01` … `R-11` has a
 disposition below. A task is only `verified` when its acceptance criteria are
@@ -57,9 +59,9 @@ met **and** the verification has been run and recorded.
 | `F-41` | `with_message` silently did nothing | 014 | verified | orchestrator |
 | `F-42` | The token tests repeated the lifetime four times | 014 | verified | orchestrator |
 | `F-43` | The unit-test inventory had wrong counts | 012 | verified | docs agent |
-| `F-44` | 10.73 MiB of Swagger assets in a disabled route | 022 | deferred | orchestrator |
-| `F-45` | `/auth/me` ran the identical lookup twice | 020 | deferred | — |
-| `F-46` | The auth lookup over-fetched and discarded a DTO | 020 | deferred | — |
+| `F-44` | 10.73 MiB of Swagger assets in a disabled route | 022 | verified | rust-backend |
+| `F-45` | `/auth/me` ran the identical lookup twice | 020 | reviewed | auth-security |
+| `F-46` | The auth lookup over-fetched and discarded a DTO | 020 | reviewed | auth-security |
 | `F-47` | The note-search predicate may not use the GIN index | 017 | verified | efficiency agent |
 | `F-48` | The list conversion cloned the whole page | 017 | verified | efficiency agent |
 | `F-49` | The list handlers parsed the query string twice | 023 | deferred | orchestrator |
@@ -408,17 +410,56 @@ with 12 notes tests and 25 projects/tasks tests.
 
 ## 3. Deferred
 
-### ATOM-TASK-20261022-020 — Serve the profile from the lookup the extractor made
+### ATOM-TASK-20261022-020 — The authenticated lookup, reviewed
 
-**Findings:** `F-45`, `F-46` · **Priority:** 6 · **Severity:** Low · **Complexity:** medium
-**Status:** deferred
-**Problem.** Every authenticated request loads the user row and builds a full
-`UserResponse` that is thrown away except for the id and the address; the
-profile endpoint loads the same row a second time.
-**Why deferred.** The change reaches the authentication boundary, and the
-benefit — one `SELECT` per request on a personal API — is small. It wants its
-own change with its own review of the boundary.
-**Regression risk.** The account-status check must still run on every request.
+**Findings:** `F-45`, `F-46` · **Priority:** 6 · **Severity:** Low
+**Owner:** auth-security · **Status:** reviewed — **no code change**
+
+**What was measured.** With SQLx's own query logger enabled in a temporary
+integration test (no production code touched, the test removed afterwards), one
+authenticated `GET /api/v1/notes` runs exactly **one** statement on the
+authentication path, and it is a primary-key lookup:
+
+```sql
+SELECT id, email, password_hash, display_name, is_active, created_at, updated_at
+FROM users WHERE id = $1
+```
+
+Seven columns are fetched; `password_hash`, `display_name`, `created_at` and
+`updated_at` are discarded. `F-46` is therefore confirmed.
+
+`GET /api/v1/auth/me` runs that identical statement **twice** in one request —
+once in the extractor, once in the handler. `F-45` is therefore confirmed too.
+
+**Why it was not changed.** The findings pull in opposite directions. The only
+way to make `/auth/me` a single query is for the extractor to load the full row
+on *every* request and carry it forward, which is exactly the over-fetch `F-46`
+reports. A route-aware extractor would be worse coupling than the second query.
+
+The remaining option — narrowing the projection to `id, email, is_active` — is
+the honest fix for `F-46`, and it is deliberately not taken here: it touches
+three files across the authentication boundary (`src/users/repository.rs`,
+`src/users/dto.rs`, the extractor), and its benefit is replacing a seven-column
+primary-key fetch with a three-column primary-key fetch, on a personal API where
+that lookup is not the dominant cost of anything. The change is small but it is
+a boundary change, and the boundary review concluded the benefit does not
+justify it today.
+
+**If it is taken later**, the minimal correct version is recorded here so nobody
+has to re-derive it: add `UserRepository::find_auth_by_id` selecting
+`id, email, is_active`; add `AuthenticatedUser { id, email }` beside the other
+DTOs; have `authenticate_bearer` return it after the `is_active` check (the
+middleware compiles unchanged because it reads only `.id` and `.email`); leave
+`/auth/me`'s second read in place. That fixes `F-46` without touching `F-45`.
+
+**What the measurement does not prove.** The elapsed times the logger emitted
+were not used as evidence: it was a debug build, a cold statement on a local
+PostgreSQL, so the numbers are not representative of anything. The statement
+sequence is the evidence; the timing is not.
+
+**Documentation.** The sequence is now stated in
+[`../features/authentication/architecture.md`](../features/authentication/architecture.md)
+§10 so that the next reviewer does not read it as an oversight.
 
 ### ATOM-TASK-20261022-021 — Make the OpenAPI document and the route table agree by construction
 
@@ -433,25 +474,56 @@ half-applied constant is worse than the duplication.
 
 ### ATOM-TASK-20261022-022 — Stop embedding the Swagger bundle in a build that serves no docs
 
-**Findings:** `F-44` · **Priority:** 6 · **Severity:** Low · **Complexity:** medium
-**Status:** deferred
-**Problem.** 10.73 MiB of Swagger UI assets are embedded in the binary because
-`utoipa-swagger-ui` is an unconditional dependency, while the production
-overlay sets `api.docs_enabled = false`. The route is not mounted, but the
-assets are still linked.
-**What was measured.** The audit proposed dropping the `vendored` feature. That
-was tried and **rejected on measurement**: with `vendored` removed the build
-script downloads the same bundle from GitHub at compile time and `rust-embed`
-embeds it anyway — the embedded dist is 10.73 MiB in both builds. The change
-cost reproducibility and offline builds and saved nothing, so it was reverted.
-**Why deferred.** The only way to remove the assets is to make the dependency
-optional behind a Cargo feature and gate `routes::swagger_ui` and the merge in
-`api::router` on it. That changes the public API of a published module and adds
-a build combination that must be tested. It is a real change, not a one-line
-one, and the binary size is a deployment preference rather than a defect.
-**Acceptance criteria when taken:** a `docs` feature off by default in release,
-the route and its `OpenAPI` document gated on it, the release binary measured
-before and after, and both build combinations covered by the gates.
+**Findings:** `F-44` · **Priority:** 6 · **Severity:** Low
+**Owner:** rust-backend · **Status:** verified
+
+**Correction.** `utoipa-swagger-ui` is an optional dependency behind a `docs`
+Cargo feature, **on by default** so that `cargo test` and `cargo run` keep the
+explorer. `routes::swagger_ui` and its import are gated on the feature; the call
+site in `api::router` goes through a pair of `cfg`-selected `mount_docs` helpers,
+which keeps `router()` free of `cfg` attributes.
+
+A build without the feature that has `api.docs_enabled = true` does **not** 404
+silently: it logs one warning at router construction naming the feature, the two
+paths that will 404, and how to build with it. A silent 404 and a warning that
+explains itself are different operator experiences.
+
+`vendored` stays. Removing it was measured and rejected earlier: the build
+script then downloads the same bundle and embeds it anyway.
+
+**Measured.** Two real release builds of this tree, `strip = "symbols"`, thin
+LTO, `codegen-units = 1`:
+
+| Build | Bytes | MiB |
+| ----- | ----- | --- |
+| default features (docs on) | 20,370,432 | 19.43 |
+| `--no-default-features` | 7,760,896 | 7.40 |
+| **removed** | **12,609,536** | **12.03 (62%)** |
+
+`SwaggerUIBundle` is present in the first binary at offset 7,626,840 and **absent**
+from the second, checked by searching the bytes rather than trusting the size.
+
+**Runtime, both binaries.** With the feature on and `APP_API_DOCS_ENABLED=true`:
+`/api/v1/docs` → 303 to `/api/v1/docs/` → 200, `swagger-ui.css` → 200,
+`/api/v1/openapi.json` → 200. With `--no-default-features` and the same setting:
+those three → 404 with the standard envelope, `/health/live` → 200, an
+authenticated path → 401, and the warning appeared exactly once after
+`ATOM API is listening`.
+
+**Acceptance criteria, and one deliberate deviation.** "The docs feature is off
+by default in release" is met by the **release build command** rather than by
+the Cargo default, because the default has to stay on for `cargo test`. CI now
+checks `cargo check --no-default-features --all-targets --locked` and builds the
+release profile with `--no-default-features`.
+
+**Documentation.** `docs/architecture/deployment.md` §5.1 states the build
+command and the two sizes, and production checklist item 13 states that the build
+and the setting must agree. `docs/architecture/module-boundaries.md` marks
+`routes::swagger_ui` as feature-gated.
+
+**Known gap.** No HTTP test covers `/api/v1/docs`; the route was verified by a
+manual runtime check against both binaries. That gap is recorded rather than
+implied.
 
 ### ATOM-TASK-20261022-023 — Parse the list query string once
 
@@ -467,17 +539,27 @@ removes is one deserialisation of a short, already-parsed query string, which is
 not measurable next to the database round trip. Trading a documented OpenAPI
 output for an unmeasurable gain is the wrong direction.
 
-### ATOM-TASK-20261022-027 — Compare the settings *values* in the checker
+### ATOM-TASK-20261024-001 — Check the second operator reference table
 
-**Findings:** `R-13` · **Priority:** 8 · **Severity:** Low · **Complexity:** medium
-**Status:** deferred
-**Problem.** The checker compares the **names** of the settings, not their
-values, and does not read the second reference table in `config/README.md`.
-**Why deferred.** The normalisation is the hard part: the reference writes
-`1048576` (1 MiB) where the file writes `1048576`. A comparison that is too
-naive produces false failures, and a false failure in the gate is worse than a
-missing check. The wording in `docs/README.md` §5 was narrowed instead, so the
-gate does not claim more than it does.
+**Findings:** `R-13` (the half that is safe to automate) · **Priority:** 8
+**Severity:** Low · **Owner:** orchestrator · **Status:** verified
+**Problem.** The project keeps two operator reference tables, one in
+`docs/architecture/deployment.md` and one in `config/README.md`. Only the first
+was machine-checked, so the second could drift out of agreement in silence —
+and a reader who starts in `config/` would trust the table that had drifted.
+**Correction.** `check_settings_reference` in `src/bin/atom-docs.rs` now extracts
+the settings named in **both** tables and compares each with the keys the four
+configuration files actually define, in both directions. Names only.
+**Evidence that the check bites.** Deleting the
+`app.limits.shutdown_grace_seconds` row from `config/README.md` makes the checker
+fail with `does not document the setting app.limits.shutdown_grace_seconds`
+(exit 1); restoring the row returns it to `OK (0 warning(s))`. The file was
+restored byte-for-byte.
+**What is still deferred.** Comparing the **values**, not the names. The
+reference writes `1 MiB` where the file writes `1048576`, and a normalisation
+that is too naive produces false failures. A false failure in the gate is worse
+than a check that is narrower than it could be, so that half stays deferred and
+the wording in `docs/README.md` §5 stays narrowed accordingly.
 
 ---
 

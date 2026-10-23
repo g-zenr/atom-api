@@ -265,6 +265,22 @@ The wider system context is in
 
 ## 10. Limitations of this design
 
+- **The authenticated lookup over-fetches, and `/auth/me` repeats it.** Every
+  authenticated request runs exactly one statement on the authentication path:
+  a primary-key lookup of the user row. It fetches all seven columns, but only
+  `id`, `email` and `is_active` are used — `password_hash`, `display_name`,
+  `created_at` and `updated_at` are discarded. `GET /auth/me` then runs the same
+  statement a second time to build the profile.
+
+  Both facts were **measured** with SQLx's query logger, not inferred, and both
+  were reviewed as findings `F-45` and `F-46`. They were deliberately left as
+  they are: the two findings pull in opposite directions, because making
+  `/auth/me` a single query means loading the full row on every request, which
+  is the over-fetch `F-46` reports. A narrowed projection would fix `F-46`
+  alone, and remains available — the exact change is recorded in
+  [`../../audit/remediation-backlog.md`](../../audit/remediation-backlog.md)
+  under `ATOM-TASK-20261022-020`. This is a measured, deliberate trade-off, not
+  an oversight.
 - **The dummy hash is derived from the configured cost parameters.**
   `PasswordHasher::new` computes it once with the same `Argon2Params` the
   real hashes use, so verifying against it costs exactly what verifying

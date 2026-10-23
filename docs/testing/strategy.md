@@ -63,13 +63,55 @@ the real response. They are the only layer that can prove a SQL predicate, a
 database constraint or a `ON DELETE CASCADE` behaves as documented, and they
 are the layer that proves the HTTP contract.
 
-**Current size:** 66 integration tests in 3 files.
+**Current size:** 70 integration tests in 5 files on a unix host, and 68 on
+Windows: the two tests in `tests/shutdown.rs` are unix-only, because they deliver
+a real signal. The suite's size therefore depends on the platform, and CI reports
+the unix figure — 181 when the unit tests are counted. Counted on 2026-10-24.
 
 | File | Tests | Covers |
 | ---- | ----- | ------ |
-| [`../../tests/auth_api.rs`](../../tests/auth_api.rs) | 28 | Registration, normalization, duplicate registration, the password policy, login, the generic failure, refresh rotation, the inherited absolute lifetime, refresh reuse, logout, credential enforcement, `/auth/me`, cross-account session revocation. |
-| [`../../tests/notes_api.rs`](../../tests/notes_api.rs) | 9 | Note CRUD, cross-account invisibility, the listing scope, search, an over-long search term, archiving, an empty title, pagination, a malformed identifier. |
-| [`../../tests/projects_tasks_api.rs`](../../tests/projects_tasks_api.rs) | 19 | Project CRUD, cross-account invisibility, task creation and listing, the completion timestamp, filtering, task isolation through a foreign project, task creation in a foreign project, the project delete cascade, an unknown task status. |
+| [`../../tests/auth_api.rs`](../../tests/auth_api.rs) | 29 | Registration, normalization, duplicate registration, the password policy, login, the generic failure, refresh rotation, the inherited absolute lifetime, the expired session that cannot be extended by a rotation, refresh reuse, logout, credential enforcement, `/auth/me`, cross-account session revocation, the authentication rate limit. |
+| [`../../tests/notes_api.rs`](../../tests/notes_api.rs) | 12 | Note CRUD, cross-account invisibility, the listing scope, search, an over-long search term, archiving, an empty title, pagination, the configured page bounds, the reported filtered total, an offset past the end, a malformed identifier. |
+| [`../../tests/projects_tasks_api.rs`](../../tests/projects_tasks_api.rs) | 25 | Project CRUD, cross-account invisibility, task creation and listing, the completion timestamp, filtering, task isolation through a foreign project, task creation in a foreign project, the project delete cascade, an unknown task status, manual ordering, pagination and the configured page bounds on both listings, an empty page versus a missing project, the reported filtered totals, a request that exceeds the timeout. |
+| [`../../tests/docs_route.rs`](../../tests/docs_route.rs) | 2 | The API explorer and one of its assets are served when the `docs` feature is on, and the OpenAPI document carries the configured title. The whole file is gated on the feature, so it compiles to nothing in a `--no-default-features` build. |
+| [`../../tests/shutdown.rs`](../../tests/shutdown.rs) | 2 (unix only) | A real `SIGTERM` stops the process without waiting the grace away first, and the drain is bounded when an in-flight request cannot finish. See §1.4. |
+
+### 1.4 Process layer
+
+One file drives the real binary as a child process, because some behaviour only
+exists outside the router.
+
+[`../../tests/shutdown.rs`](../../tests/shutdown.rs) spawns `atom-api` on a
+reserved ephemeral port, waits for `GET /health/ready` to answer `200`, then sends
+a real `SIGTERM` with `kill -TERM`. It asserts two things that a unit test of the
+drain cannot:
+
+| Test | What it distinguishes |
+| ---- | --------------------- |
+| `a_signal_stops_the_process_without_waiting_for_the_grace` | With an 8 s grace and nothing in flight, the process must exit within 4 s. The **original** implementation slept the grace *inside* the signal future before draining, so it would take ~8 s and fail. This is the regression the review found. |
+| `the_drain_is_bounded_when_an_in_flight_request_cannot_finish` | With a 2 s grace and a request that never completes, the process is still alive 500 ms after the signal — proving the request is genuinely being drained rather than dropped — and has exited by the deadline plus a margin. Removing the `select!` bound makes the request end only at the 30 s request timeout, outside the window. |
+
+Constraints that follow from this design:
+
+- **unix only.** The file is `#![cfg(unix)]`; on Windows it compiles to nothing and
+  `cargo test` reports `0 tests`. A Windows host therefore does **not** prove the
+  behaviour, and this file must not be read as if it did.
+- **It needs `TEST_DATABASE_URL`**, and skips with a printed reason when the
+  variable is unset, rather than failing on a machine that has no database.
+- It reuses the harness's database-name guard instead of copying it, so a test run
+  still cannot point at a non-test database.
+
+**Verification status.** Both tests pass on `ubuntu`. CI run
+[`40011694171`](https://github.com/g-zenr/atom-api/actions/runs/40011694171)
+reports `2 passed` for `tests/shutdown.rs`, and the bounded-drain test logs the
+warning that proves it reached its deadline with a request still in flight:
+
+```text
+WARN atom_api: the shutdown grace elapsed with requests still in flight grace_seconds=2
+```
+
+They were written on a Windows machine, where the file compiles to nothing, so
+CI was the first execution. `KI-019` records that history and is closed.
 
 ### 1.3 Contract
 

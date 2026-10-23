@@ -93,7 +93,7 @@ file.
 | Key | Default | Environment variable | Constraint |
 | --- | ------- | -------------------- | ---------- |
 | `api.title` | `ATOM API` | — | The title of the OpenAPI document. |
-| `api.docs_enabled` | `true` | `APP_API_DOCS_ENABLED` | A boolean: `true`, `false`, `1`, `0`, `yes`, `no`, `on` or `off`. The production overlay turns the document and the explorer off. |
+| `api.docs_enabled` | `true` | `APP_API_DOCS_ENABLED` | A boolean: `true`, `false`, `1`, `0`, `yes`, `no`, `on` or `off`. The production overlay turns the document and the explorer off. A `--no-default-features` build cannot serve them at all, whatever this value says; see 5.1. |
 | `api.cors.allowed_origins` | `[]` | `APP_CORS_ALLOWED_ORIGINS` | A comma-separated list. Empty disables CORS. A wildcard is refused, and every entry must be a valid header value. The variable overrides the file, so a non-empty value in a `.env` enables CORS; see §5.2. |
 | `api.pagination.default_limit` | `20` | — | Must be positive. **Part of the published client convention**: changing it changes what a client receives, so it is a breaking change for a client. |
 | `api.pagination.max_limit` | `100` | — | Must be at least the default limit and at most 1000 items. Also part of the published client convention, and therefore a breaking change for a client. |
@@ -374,7 +374,7 @@ The API does not enforce most of these itself. They are operator obligations.
 | 10 | **Set `APP_CORS_ALLOWED_ORIGINS` to the real origins, or leave it empty.** | The committed default in `config/api.toml` is an empty list, which disables CORS, and the template in [`.env.example`](../../.env.example) ships an empty value too. The environment layer wins over the file layer, so any non-empty value in a `.env` **enables** CORS for those origins. A `*` entry aborts the process. |
 | 11 | **Keep `APP_LOG_FILTER` at `info` or higher in production.** | A `debug` filter logs every rejected request, including the reason. |
 | 12 | **Raise the Argon2 cost for the deployment.** | The defaults are a floor, not a tuned value for the target hardware. |
-| 13 | **Decide whether the API explorer is served.** | `config/environments/production.toml` sets `api.docs_enabled` to `false`. Set `APP_API_DOCS_ENABLED=true` only if the deployment wants the OpenAPI document and the explorer. |
+| 13 | **Decide whether the API explorer is served.** | `config/environments/production.toml` sets `api.docs_enabled` to `false`. Set `APP_API_DOCS_ENABLED=true` only if the deployment wants the OpenAPI document and the explorer. **The build and the setting must agree:** a `--no-default-features` build cannot serve them at all, because the route and its assets are not compiled in. Against such a binary `APP_API_DOCS_ENABLED=true` logs one warning at start-up and `/api/v1/docs` returns `404`. |
 | 14 | **Size the pool, the timeouts and the body limit for the deployment.** | The production overlay sets `database.max_connections` to 20 and the request timeout to 30 s. The base files hold the body limit (1 MiB) and the acquire and connect timeouts. Keep the body limit at or below 4 MiB: a larger setting is refused at start-up, because the extractor applies an independent 4 MiB backstop. See §4. |
 | 15 | **Keep the session prune grace at its default, or raise it — never shorten it below the floor.** | `app.sessions.prune_grace_seconds` is the window in which the row of an expired session is kept, so that a token that expired recently is still recognised as *expired*. The floor is one hour. |
 | 16 | **Set the clock-skew allowance to what the hosts actually need.** | `APP_ACCESS_TOKEN_CLOCK_SKEW_SECONDS` is 30 s by default. Hosts that drift by more than that see unexplained `401` responses. |
@@ -387,13 +387,62 @@ environment variable, because the environment variables are the last layer.
 
 ### 5.1 The release process
 
-**There is no release process yet.** The quality gates run in CI
-(`.github/workflows/ci.yml`) on every push to `main` and on every pull
-request, but there is no container image, no versioning of the artifact and no
-deployment manifest, so a rollout is still a manual step. The migration policy
+**There is no automated release process yet.** The quality gates run in CI
+(`.github/workflows/ci.yml`) on every push and pull request to `master` or
+`develop`, but there is no versioning of the artifact and no deployment
+manifest, so a rollout is still a manual step. The migration policy
 in [`../database/migration-policy.md`](../database/migration-policy.md) §5
 describes the intended rollback rule — forward-fix, never edit — and it is the
 constraint a future release process must honour.
+
+**What to build.** The deployable artifact is built **without** the
+documentation feature:
+
+```text
+cargo build --release --no-default-features
+```
+
+The `docs` Cargo feature is on by default and carries the Swagger UI asset
+bundle — 10.73 MiB embedded by `rust-embed`. Without it the binary is
+**7.40 MiB instead of 19.43 MiB** of the same code, measured on this tree. A
+deployment that wants the API explorer at `/api/v1/docs` builds with the default
+features instead and accepts the larger binary.
+
+### 5.1a The container image
+
+`Dockerfile` at the repository root builds the deployable artifact. It is a
+two-stage build: `rust:1.99.1-slim-bookworm` compiles the release binary from the
+committed lockfile with `--locked`, and `debian:bookworm-slim` carries the binary
+and a CA bundle and nothing else. Both base images are pinned by tag **and** by
+digest, because a floating tag would make the image unreproducible even with a
+committed `Cargo.lock`.
+
+```text
+docker build --tag atom-api:local .
+docker run --rm -p 3000:3000 \
+  -e DATABASE_URL='postgres://…' \
+  -e APP_JWT_SECRET='…' \
+  atom-api:local
+```
+
+Four properties the image has, each of which someone will be tempted to undo:
+
+| Property | Why it is deliberate |
+| -------- | -------------------- |
+| The process runs as **UID 10001**, never root | A container escape from a root process is a host compromise; from an unprivileged one it is not. |
+| `migrations/` is **not** copied in | The migrations are embedded by `sqlx::migrate!` and applied at start-up, before the socket binds. A second copy in the image would be a second source of truth, and an entrypoint that migrated would need a database client the image does not ship. |
+| `config/` is **not** copied in | The configuration is embedded at compile time with `include_str!`. A deployment overrides a setting with an environment variable or `ATOM_CONFIG_DIR`, never with a file baked into the image. |
+| **No secret is in the image** | `DATABASE_URL` and `APP_JWT_SECRET` are runtime environment variables. No `ENV` sets one, no build argument carries one, and `.dockerignore` keeps `.env*` out of the build context. A build argument would not help: it is visible in the image history. |
+
+The image is built **without** the `docs` feature (see *What to build* above), so
+the container is the 7.40 MiB artifact rather than the 19.43 MiB one.
+
+`.github/workflows/container.yml` builds the image and then **verifies** it: the
+declared user is not root, `id` reports `uid=10001`, `cargo` and `rustc` are
+absent from the runtime stage, `ldd` reports no missing shared library, and the
+binary exits non-zero when started without `DATABASE_URL` — which is the evidence
+that no configuration or secret was compiled in. The workflow never logs in to a
+registry and never pushes: publishing an image is a release decision.
 
 ### 5.2 The precedence an operator must remember
 

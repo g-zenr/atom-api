@@ -104,8 +104,18 @@ jobs:
       - name: Test
         run: cargo test --all-targets --locked
 
+      - name: Check the build without the documentation feature
+        # The Swagger UI bundle is 10.73 MiB of embedded assets and a deployment
+        # that serves no documentation must not carry it. The `docs` feature is
+        # on by default, so this step is the one that proves the other half of
+        # the matrix still compiles on its own.
+        run: cargo check --no-default-features --all-targets --locked
+
       - name: Build the release profile
-        run: cargo build --release --locked
+        # Without the documentation feature, because this is the artifact that
+        # would be deployed. A deployment that wants the explorer builds with
+        # the default features instead.
+        run: cargo build --release --no-default-features --locked
 
       - name: Check the documentation tree
         run: cargo run --quiet --bin atom-docs
