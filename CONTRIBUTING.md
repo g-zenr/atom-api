@@ -175,12 +175,18 @@ precedence over the committed file:
 }
 ```
 
-The default is `opencode-go/minimax-m3.1-flash-free`, a free-tier model that
-was verified to work with tool calling and delegation. If your account does
-not offer it, pick another model from `opencode models` and put it in your
-local override. The full override ladder — including the global
-`~/.config/opencode/opencode.jsonc` option and the one-off
-`opencode run --model ...` option — is in
+The default is `opencode-go/deepseek-v4.1-flash`, a **metered** OpenCode Go
+model — the catalogue prices it at $0.15 per million input tokens and $0.60 per
+million output tokens, so it is not a free tier. `opencode models` lists it, and
+tool calling and subagent delegation were observed working on it in the
+orchestrator session on 2026-10-23 under OpenCode v2.0.27. No full feature
+delivery has been run end-to-end on it, and the model the subagent sessions
+resolved for themselves was not recorded; a failed subagent launch is reported,
+not routed around. The model in the example above is illustrative rather than a
+recommendation: if your account does not offer the default, pick another model
+from `opencode models` and put it in your local override. The full override
+ladder — including the global `~/.config/opencode/opencode.jsonc` option and the
+one-off `opencode run --model ...` option — is in
 [`docs/contributing-opencode.md`](docs/contributing-opencode.md).
 
 ## 7. Commit and pull request conventions

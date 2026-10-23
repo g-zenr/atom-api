@@ -1,7 +1,7 @@
 # Using OpenCode in ATOM
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-23
 > **Owner:** maintained by the `docs` agent
 
 This guide is for contributors who want to drive the ATOM backend with
@@ -36,7 +36,8 @@ configuration, which OpenCode reads from its own credentials store.
 
 - **OpenCode v2** (v2.0.27 was the version this configuration was built and
   verified against).
-- A provider account. The default model is served by **OpenCode Go**.
+- A provider account. The default model is served by **OpenCode Go**; it is a
+  **metered** model, so running the team spends money against that account.
 
 ```bash
 opencode --version
@@ -49,13 +50,29 @@ opencode models                 # list the models your account can use
 The committed default is:
 
 ```jsonc
-"model": "opencode-go/minimax-m3.1-flash-free"
+"model": "opencode-go/deepseek-v4.1-flash"
 ```
 
-It was verified against OpenCode v2.0.27 to answer, to call tools and to
-launch subagents. It is a **free tier** model, but free tiers have rate
-limits and the catalogue changes; check `opencode models` before assuming it
-is still available to your account.
+It is a **metered** OpenCode Go model, not a free tier: the catalogue prices it
+at $0.15 per million input tokens and $0.60 per million output tokens. It is
+listed by `opencode models`, served by the OpenCode Go provider, and the
+catalogue also lists `low`, `high` and `max` variants of it.
+
+Tool calling and subagent delegation were observed working on this model in the
+orchestrator session on 2026-10-23, under OpenCode v2.0.27: that session called
+tools and launched two subagents, a `devops` specialist and a `docs` specialist,
+and both completed and returned results. Two things were **not** recorded, and
+are therefore not claimed here: the model that the subagent sessions resolved
+for themselves, and a full feature delivery run end-to-end on this default. The
+standing rule still holds: if a subagent fails to launch, report it, and never
+route around it silently.
+
+The catalogue changes, so run `opencode models` before assuming that a model is
+available to your account. That is not a hypothetical warning: the previously
+committed default, `opencode-go/minimax-m3.1-flash-free`, was a free-tier model
+verified against OpenCode v2.0.27 to answer, call tools and launch subagents,
+and it dropped out of the catalogue; the validator's model-availability check
+then failed because it was no longer listed.
 
 ### The override ladder
 
@@ -72,9 +89,11 @@ every other contributor.
 }
 ```
 
-The file is git-ignored. `.opencode/opencode.jsonc` takes precedence over the
-committed `opencode.jsonc` in the same directory — this was verified against
-the installed CLI with `opencode debug config`.
+The model in that example is illustrative, not a recommendation: use whatever
+`opencode models` offers your account. The file is git-ignored.
+`.opencode/opencode.jsonc` takes precedence over the committed
+`opencode.jsonc` in the same directory — this was verified against the
+installed CLI with `opencode debug config`.
 
 **2. Machine-wide override.** In `~/.config/opencode/opencode.jsonc`:
 
@@ -100,10 +119,12 @@ current session and does not rewrite any configuration file.
 
 ### Switching to a paid provider
 
-If you want to use a metered provider, set it in your own override file (or
-the global one) and make sure your account is signed in. The committed
-configuration deliberately does **not** configure any provider endpoint or
-credential, so it cannot spend your money by itself.
+The committed default is itself metered, so running the team already costs
+money against whichever provider account you are signed in to. To use a
+different one, set it in your own override file (or the global one) and make
+sure that account is signed in. The committed configuration deliberately does
+**not** configure any provider endpoint or credential, so the cost falls on the
+account you are signed in to, never on a credential held in the repository.
 
 The committed configuration also does not deny any provider: choosing a
 paid model is a deliberate act, and the agents are instructed to report it
