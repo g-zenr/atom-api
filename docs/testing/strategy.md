@@ -64,9 +64,9 @@ database constraint or a `ON DELETE CASCADE` behaves as documented, and they
 are the layer that proves the HTTP contract.
 
 **Current size:** 70 integration tests in 5 files on a unix host, and 68 on
-Windows: the two tests in `tests/shutdown.rs` are unix-only, because they
-deliver a real signal. The suite's size therefore depends on the platform, and
-CI reports the unix figure. Counted on 2026-10-24.
+Windows: the two tests in `tests/shutdown.rs` are unix-only, because they deliver
+a real signal. The suite's size therefore depends on the platform, and CI reports
+the unix figure — 181 when the unit tests are counted. Counted on 2026-10-24.
 
 | File | Tests | Covers |
 | ---- | ----- | ------ |
@@ -101,12 +101,17 @@ Constraints that follow from this design:
 - It reuses the harness's database-name guard instead of copying it, so a test run
   still cannot point at a non-test database.
 
-**Verification status.** The two tests were written and their unix path compiles
-and lints clean, but they have **not been executed on a unix host** as of
-2026-10-24: the development machine is Windows with no Linux runtime and no
-running Docker daemon. CI runs them on `ubuntu`; `KI-016` records the gap and
-closes when a run is observed. This paragraph exists so that nobody reads the
-test's presence as evidence that it passed.
+**Verification status.** Both tests pass on `ubuntu`. CI run
+[`40011694171`](https://github.com/g-zenr/atom-api/actions/runs/40011694171)
+reports `2 passed` for `tests/shutdown.rs`, and the bounded-drain test logs the
+warning that proves it reached its deadline with a request still in flight:
+
+```text
+WARN atom_api: the shutdown grace elapsed with requests still in flight grace_seconds=2
+```
+
+They were written on a Windows machine, where the file compiles to nothing, so
+CI was the first execution. `KI-019` records that history and is closed.
 
 ### 1.3 Contract
 

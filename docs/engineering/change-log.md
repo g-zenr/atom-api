@@ -48,7 +48,7 @@ define the target state. The requirements live in
 **Type:** Fix, performance and process
 **Author:** The ATOM engineering team - the orchestrator with the `rust-backend`,
 `auth-security`, `devops` and `test-engineer` subagents.
-**Status:** Complete, with two items explicitly not verified
+**Status:** Complete
 
 #### Summary
 
@@ -127,15 +127,20 @@ Two tests in `tests/shutdown.rs` spawn the real binary, wait for
   and exits by the deadline plus a margin. Removing the `select!` bound makes the
   request end only at the 30 s request timeout.
 
-**They have not been executed on a unix host.** This machine is Windows, the file
-is `#![cfg(unix)]`, and both attempts to obtain a Linux runtime failed — the
-Docker daemon stopped mid-pull and a cross-compilation check could not link
-because `x86_64-linux-gnu-gcc` is absent. What *was* verified is recorded in
-`KI-019`: the unix path compiles and lints clean under `-D warnings` in a scratch
-copy with the gates neutralised (which caught a real unused-binding defect), and
-the in-flight premise was confirmed against the real binary with an
-`Expect: 100-continue` request. CI on `ubuntu` is where these two tests actually
-run; `KI-019` closes when a run reports `2 passed`.
+**They cannot run on the machine that wrote them.** It is Windows, the file is
+`#![cfg(unix)]`, and both attempts to obtain a Linux runtime failed — the Docker
+daemon stopped mid-pull and a cross-compilation check could not link because
+`x86_64-linux-gnu-gcc` is absent. So `KI-019` recorded the gap rather than letting
+a test's presence imply a pass, and CI became the first execution.
+
+It passed. Run
+[`40011694171`](https://github.com/g-zenr/atom-api/actions/runs/40011694171)
+reports `test result: ok. 2 passed; 0 failed` for `tests/shutdown.rs`, and the
+bounded-drain test logs
+`the shutdown grace elapsed with requests still in flight grace_seconds=2` — the
+deadline being reached with a request still in flight, which is precisely the
+behaviour that could not be observed on Windows and the exact path the review
+found unverified. `KI-019` is closed.
 
 #### `F-45`, `F-46` — reviewed, deliberately not changed
 
@@ -184,13 +189,16 @@ build command changed, and the container image uses it.
 | `cargo fmt --all -- --check` | **Passed.** |
 | `cargo clippy --all-targets --all-features -- -D warnings` | **Passed.** |
 | `cargo check --no-default-features --all-targets` | **Passed.** |
-| `cargo test --all-targets` | **Passed.** 179 on Windows: 111 unit, 29 auth, 2 explorer, 12 notes, 25 projects and tasks. `tests/shutdown.rs` reports 0 there; unix reports 181. |
+| `cargo test --all-targets` | **Passed.** 181 on CI's `ubuntu`, in run [`40011694171`](https://github.com/g-zenr/atom-api/actions/runs/40011694171): 111 unit, 29 auth, 2 explorer, 12 notes, 25 projects and tasks, 2 shutdown. 179 on Windows, where the two shutdown tests are `#[cfg(unix)]`. |
+| `container.yml`, run [`40011694239`](https://github.com/g-zenr/atom-api/actions/runs/40011694239) | **Passed.** The image builds and the verification steps confirm `Config.User=10001:10001`, `uid=10001(atom)`, no `cargo`/`rustc`, no missing shared library, and a non-zero exit with `DATABASE_URL` named. |
 | `cargo run --bin atom-docs` | **Passed.** `OK (0 warning(s))`. |
 | `cargo run --bin atom-docs -- --strict` | **Passed.** `OK (0 warning(s))`. |
 | Two release builds and both binaries exercised over HTTP | **Passed**, figures above. |
 
-**Not verified:** the container image build (no Docker daemon here; CI verifies
-it), and the two shutdown tests on unix (`KI-019`).
+**Verified by CI, on the first run that could exercise them:** the container image
+build and its verification steps, and the two shutdown tests on `ubuntu`. Neither
+could be run on the development machine, and both were recorded as unverified
+until a run proved otherwise rather than assumed green.
 
 #### Requirements and decisions referenced
 

@@ -679,42 +679,38 @@ test `a_body_limit_above_the_reader_ceiling_is_refused`.
 | `KI-016` | The configuration accepted a weak password policy and an unbounded clock skew | Closed | Medium |
 | `KI-017` | The configuration accepted a session prune grace shorter than the expired-token window needs | Closed | Medium |
 | `KI-018` | The configured body limit stops at an independent 4 MiB backstop | Closed | Low |
-| `KI-019` | The shutdown drain has a test that has not run on a unix host | Open | Low |
+| `KI-019` | The shutdown drain has a test that has not run on a unix host | Closed | Low |
 
-### KI-019 - The shutdown drain has a test that has not run on a unix host
+### KI-019 — The shutdown drain had a test that had not run on a unix host
 
-**Status:** Open · **Severity:** Low
+**Status:** Closed · **Severity:** Low · **Closed:** 2026-10-24
 
-**Description.** The independent review
-(`ATOM-REVIEW-20261022-003`) recorded that the shutdown drain was "verified by
-reading the code and by compilation, not by a signal test". Two tests now exist
-in [`../../tests/shutdown.rs`](../../tests/shutdown.rs): one proves the signal
-future resolves immediately instead of sleeping the grace away, the other proves
-the drain is bounded when an in-flight request cannot finish. Together they
-distinguish the corrected implementation from the original, which slept inside the
-signal future and then drained without a bound.
+**Description.** The independent review (`ATOM-REVIEW-20261022-003`) recorded that
+the shutdown drain was "verified by reading the code and by compilation, not by a
+signal test". Two tests were written in
+[`../../tests/shutdown.rs`](../../tests/shutdown.rs) to close that: one proves the
+signal future resolves immediately instead of sleeping the grace away, the other
+proves the drain is bounded when an in-flight request cannot finish.
 
-**The gap.** They have **not been executed on a unix host**. The development
-machine is Windows, the file is `#![cfg(unix)]`, so `cargo test` there reports
-`0 tests`. An attempt to obtain a Linux runtime failed: the Docker daemon stopped
-mid-pull, and a cross-compilation check could not link because
-`x86_64-linux-gnu-gcc` is not installed.
+**The gap at the time.** They had not been executed on a unix host. The
+development machine is Windows, the file is `#![cfg(unix)]`, and both routes to a
+Linux runtime failed — the Docker daemon stopped mid-pull, and a cross-compilation
+check could not link for want of `x86_64-linux-gnu-gcc`.
 
-**What was verified instead, and labelled as partial in
-[`../testing/strategy.md`](../testing/strategy.md) §1.4:**
+**Resolution.** CI executed them on `ubuntu` in run
+[`40011694171`](https://github.com/g-zenr/atom-api/actions/runs/40011694171):
 
-- the unix path compiles and lints clean under `-D warnings`, checked by copying
-  the file into a scratch target with the `cfg` gates neutralised. That check
-  found a real defect — an unused binding that would have failed the Linux lint —
-  which was fixed;
-- the premise that a request can be held in flight was confirmed against the real
-  binary: a `POST` with `Content-Length` and `Expect: 100-continue` and no body
-  returns `100 Continue` while the process stays alive.
+```text
+Running tests/shutdown.rs
+WARN atom_api: the shutdown grace elapsed with requests still in flight grace_seconds=2
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
 
-**Resolution.** CI runs the suite on `ubuntu`, where these two tests execute.
-This entry closes when a run is observed reporting `2 passed` for
-`tests/shutdown.rs`. Until then the behaviour is *Implemented and covered by an
-unexecuted test*, not `Verified`.
+The warning is the evidence that matters. It is the bounded-drain test reaching
+its deadline with a request still in flight — the behaviour that could not be
+observed on Windows, and the exact path the review found unverified. The
+unix-only suite is therefore **181 tests**, and the shutdown behaviour is
+`Verified`.
 
 **Related.** [`../../tests/shutdown.rs`](../../tests/shutdown.rs),
 [`../testing/strategy.md`](../testing/strategy.md) §1.4,
