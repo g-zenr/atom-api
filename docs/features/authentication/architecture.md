@@ -69,7 +69,7 @@ Nothing in the request body, query string or path can override it.
 | `authenticate_bearer(token)` | Validates an access token and returns the user. |
 
 `AuthService` is built once in `AppState::new` and shared behind an `Arc`.
-It holds the `UserService`, the `UserRepository`, the
+It holds the `UserService`, the
 `RefreshSessionRepository`, the `TokenService`, the `PasswordHasher`, the
 message catalogue and the refresh-token lifetime. The timing-equalisation hash
 belongs to the `PasswordHasher`: it is a hash of an unguessable value, computed
@@ -101,6 +101,7 @@ code and, where it matters, by a database constraint.
 | 3 | A password is never stored in plaintext and never leaves the process. | `PasswordHasher::hash` produces a PHC-formatted Argon2id string; the plain password is never bound to a query, logged or returned. |
 | 4 | A refresh token is never stored in recoverable form. | `hash_refresh_token` (SHA-256, hex) is the only value written to `token_hash`. The unique index `refresh_sessions_token_hash_unique_idx` prevents a duplicate. |
 | 5 | A refresh token is used at most once. | `refresh` claims the presented session with an atomic update and inserts a replacement in the same call; `replaced_by_session_id` records the link. A claim that matches no row is treated as a reuse. |
+| 5a | A rotation does not extend the absolute lifetime of a session. | The replacement session inherits the `expires_at` of the session it replaces, so the deadline is measured from the creation of the session. The property is recorded in [`../../decisions/ADR-0003-auth-token-design.md`](../../decisions/ADR-0003-auth-token-design.md) §2 and analysed in [`../../architecture/data-architecture.md`](../../architecture/data-architecture.md) §7.1. |
 | 6 | Presenting a revoked refresh token destroys every session of that user. | `refresh` calls `revoke_all_for_user` before returning the error, both for a token that is already revoked and for a concurrent rotation that lost the claim. |
 | 7 | A caller can only revoke its own session. | `logout` compares `session.user_id` with the authenticated `user_id` and returns `403` on a mismatch. |
 | 8 | The `Authorization` header is the only source of identity. | The `AuthUser` extractor; no other extractor reads an identity from the request. |
@@ -211,6 +212,7 @@ POST /api/v1/auth/refresh
        ├─ !is_usable_at(now)        → 401 (expired)
        ├─ UserRepository::find_by_id → missing → 401
        ├─ !user.is_active           → revoke_all_for_user → 403
+       ├─ the replacement session inherits the presented session's expires_at
        ├─ RefreshSessionRepository::insert            the replacement session
        ├─ RefreshSessionRepository::claim(id, user_id, new_session_id)
        │    the claim is atomic; a claim that matches no row means the token
@@ -276,7 +278,10 @@ The wider system context is in
   crash between them leaves the old session valid, so the next refresh with
   it succeeds and the rotation is retried; it does not create a reusable
   token, because the claim refuses to match a session that is already
-  revoked.
+  revoked. The ordering fails safe by design, which is why it is not wrapped
+  in a transaction; see
+  [`../../architecture/data-architecture.md`](../../architecture/data-architecture.md)
+  §7.
 - **The rate limiter fails open on a poisoned lock.** `RateLimiter::check`
   recovers the inner value of a poisoned mutex instead of panicking. This
   favours availability over strict enforcement.

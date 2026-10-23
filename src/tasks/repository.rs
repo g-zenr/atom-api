@@ -117,6 +117,11 @@ impl TaskRepository {
     }
 
     /// Lists the tasks of a project owned by `user_id`.
+    ///
+    /// `None` means the project does not exist, or is not owned by the
+    /// caller. The empty result and the missing project are told apart by a
+    /// follow-up statement, so that the two cases can be answered
+    /// differently; the difference is observable.
     pub async fn list_for_project(
         &self,
         user_id: Uuid,
@@ -148,19 +153,36 @@ impl TaskRepository {
         .await?;
 
         if rows.is_empty() {
-            // Distinguish "no tasks" from "no such project" with a follow-up
-            // ownership probe.
-            let exists = sqlx::query_scalar::<_, bool>(
-                "SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND user_id = $2)",
+            // The empty page raises two questions: does the project exist,
+            // and how many tasks match the filter. One statement answers
+            // both, so that the empty case costs two round trips instead of
+            // three. The distinction between "no such project" and "a
+            // project with no tasks" is observable, so it is preserved
+            // exactly.
+            let (exists, total) = sqlx::query_as::<_, (bool, i64)>(
+                r#"
+                SELECT
+                    EXISTS(SELECT 1 FROM projects WHERE id = $1 AND user_id = $2),
+                    (SELECT COUNT(*)
+                     FROM tasks t
+                     JOIN projects p ON p.id = t.project_id
+                     WHERE p.id = $1 AND p.user_id = $2
+                       AND ($3::task_status IS NULL OR t.status = $3)
+                       AND ($4::task_priority IS NULL OR t.priority = $4))
+                "#,
             )
             .bind(project_id)
             .bind(user_id)
+            .bind(filters.status)
+            .bind(filters.priority)
             .fetch_one(&self.pool)
             .await?;
 
             if !exists {
                 return Ok(None);
             }
+
+            return Ok(Some((rows, total)));
         }
 
         let total = sqlx::query_scalar::<_, i64>(

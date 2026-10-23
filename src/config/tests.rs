@@ -96,6 +96,10 @@ fn the_base_configuration_carries_the_documented_defaults() {
         config.app.limits.readiness_probe_timeout,
         std::time::Duration::from_secs(1)
     );
+    assert_eq!(
+        config.app.limits.shutdown_grace,
+        std::time::Duration::from_secs(10)
+    );
     assert_eq!(config.api.pagination.default_limit, 20);
     assert_eq!(config.api.pagination.max_limit, 100);
     assert_eq!(config.api.rate_limit.max_requests, 10);
@@ -150,7 +154,6 @@ fn the_catalogue_is_loaded_and_complete() {
             "general.malformed_parameter",
             &messages.general.malformed_parameter,
         ),
-        ("general.body_mismatch", &messages.general.body_mismatch),
         ("general.unauthorized", &messages.general.unauthorized),
         ("general.route_not_found", &messages.general.route_not_found),
         (
@@ -216,18 +219,7 @@ fn the_catalogue_is_loaded_and_complete() {
             &messages.validation.display_name_length,
         ),
         ("validation.not_empty", &messages.validation.not_empty),
-        (
-            "validation.title_too_long",
-            &messages.validation.title_too_long,
-        ),
-        (
-            "validation.content_too_long",
-            &messages.validation.content_too_long,
-        ),
-        (
-            "validation.description_too_long",
-            &messages.validation.description_too_long,
-        ),
+        ("validation.too_long", &messages.validation.too_long),
         (
             "resources.user_not_found",
             &messages.resources.user_not_found,
@@ -253,14 +245,11 @@ fn the_catalogue_is_loaded_and_complete() {
 fn a_message_template_renders_its_placeholders() {
     let config = Config::defaults().expect("the base configuration must be valid");
 
-    let rendered = render(
-        &config.messages.validation.title_too_long,
-        &["200".to_string()],
-    );
+    let rendered = render(&config.messages.validation.too_long, &["200".to_string()]);
     assert_eq!(rendered, "must be at most 200 characters long");
 
     // A placeholder with no argument stays visible instead of vanishing.
-    let rendered = render(&config.messages.validation.title_too_long, &[]);
+    let rendered = render(&config.messages.validation.too_long, &[]);
     assert_eq!(rendered, "must be at most {} characters long");
 }
 
@@ -273,6 +262,19 @@ fn an_environment_variable_overrides_the_file() {
     assert_eq!(config.app.limits.max_body_bytes, 2048);
     // The values that were not overridden keep the file value.
     assert_eq!(config.api.pagination.default_limit, 20);
+}
+
+#[test]
+fn the_shutdown_grace_can_be_set_from_the_environment() {
+    let config = loader_with_secrets(&[("APP_SHUTDOWN_GRACE_SECONDS", "25")])
+        .load()
+        .expect("the configuration must be valid");
+
+    assert_eq!(
+        config.app.limits.shutdown_grace,
+        std::time::Duration::from_secs(25),
+        "the environment must override the value in the file"
+    );
 }
 
 #[test]
@@ -322,7 +324,7 @@ fn a_file_on_disk_overrides_the_embedded_copy() {
     let directory = temporary_directory();
     fs::write(
         directory.join("app.toml"),
-        "[app]\nname = \"ATOM on disk\"\n",
+        "[app]\nbind_addr = \"127.0.0.2:9999\"\n",
     )
     .expect("the file must be writable");
 
@@ -336,7 +338,7 @@ fn a_file_on_disk_overrides_the_embedded_copy() {
 
     let config = loader.load().expect("the configuration must be valid");
     // The key the file mentions takes the file's value.
-    assert_eq!(config.app.name, "ATOM on disk");
+    assert_eq!(config.app.bind_addr.to_string(), "127.0.0.2:9999");
     // The keys the file does not mention keep the embedded value.
     assert_eq!(config.app.limits.max_body_bytes, 1024 * 1024);
     // The environment overlay still wins over the base layer, including over an
@@ -629,4 +631,237 @@ fn the_configuration_directory_must_exist_when_it_is_named() {
         .expect_err("a named directory that does not exist is an error");
 
     assert_invalid(error, CONFIG_DIR_VAR);
+}
+
+/// Asserts that an environment variable is refused by a validation rule.
+///
+/// The variable is the one an operator would set; the key is the setting the
+/// rule is about, which is what the operator has to look up in the reference
+/// table.
+fn assert_variable_is_refused(variable: &str, value: &str, expected_key: &str) {
+    let error = loader_with_secrets(&[(variable, value)])
+        .load()
+        .expect_err("the configuration must be refused");
+
+    assert_invalid(error, expected_key);
+}
+
+/// Asserts that a configuration file is refused by a validation rule.
+///
+/// The file is merged on top of the embedded base, so it only has to name the
+/// keys it wants to change. It is used for the settings that have no
+/// environment override, because an empty environment variable counts as
+/// unset.
+fn assert_file_is_refused(file: &str, contents: &str, expected_key: &str) {
+    let directory = temporary_directory();
+    fs::write(directory.join(file), contents).expect("the file must be writable");
+
+    let loader = loader_with_files(
+        &directory,
+        &[
+            ("DATABASE_URL", TEST_DATABASE_URL),
+            ("APP_JWT_SECRET", TEST_SECRET),
+        ],
+    );
+
+    let error = loader
+        .load()
+        .expect_err("the configuration must be refused");
+    assert_invalid(error, expected_key);
+
+    remove_directory(&directory);
+}
+
+#[test]
+fn a_body_limit_of_zero_is_refused() {
+    assert_variable_is_refused("APP_MAX_BODY_BYTES", "0", "app.limits.max_body_bytes");
+}
+
+#[test]
+fn a_body_limit_above_the_reader_ceiling_is_refused() {
+    // The reader has a hard ceiling. A configured limit above it would
+    // promise more than the API delivers, so it is refused at start-up.
+    assert_variable_is_refused(
+        "APP_MAX_BODY_BYTES",
+        &(crate::config::MAX_BODY_BYTES_BACKSTOP + 1).to_string(),
+        "app.limits.max_body_bytes",
+    );
+}
+
+#[test]
+fn a_request_timeout_of_zero_is_refused() {
+    assert_variable_is_refused(
+        "APP_REQUEST_TIMEOUT_SECONDS",
+        "0",
+        "app.limits.request_timeout",
+    );
+}
+
+#[test]
+fn a_readiness_timeout_of_zero_is_refused() {
+    assert_variable_is_refused(
+        "APP_READINESS_PROBE_TIMEOUT_SECONDS",
+        "0",
+        "app.limits.readiness_probe_timeout",
+    );
+}
+
+#[test]
+fn a_shutdown_grace_of_zero_is_refused() {
+    assert_variable_is_refused(
+        "APP_SHUTDOWN_GRACE_SECONDS",
+        "0",
+        "app.limits.shutdown_grace",
+    );
+}
+
+#[test]
+fn a_prune_interval_of_zero_is_refused() {
+    assert_variable_is_refused(
+        "APP_SESSION_PRUNE_INTERVAL_SECONDS",
+        "0",
+        "app.sessions.prune_interval",
+    );
+}
+
+#[test]
+fn a_prune_grace_below_the_floor_is_refused() {
+    assert_variable_is_refused(
+        "APP_SESSION_PRUNE_GRACE_SECONDS",
+        "60",
+        "app.sessions.prune_grace",
+    );
+}
+
+#[test]
+fn a_page_size_of_zero_is_refused() {
+    assert_file_is_refused(
+        "api.toml",
+        "[api.pagination]\ndefault_limit = 0\n",
+        "api.pagination.default_limit",
+    );
+}
+
+#[test]
+fn a_page_maximum_of_zero_is_refused() {
+    assert_file_is_refused(
+        "api.toml",
+        "[api.pagination]\nmax_limit = 0\n",
+        "api.pagination.max_limit",
+    );
+}
+
+#[test]
+fn a_page_maximum_beyond_the_ceiling_is_refused() {
+    // The limit is what stops one request from pulling an arbitrary slice of
+    // a table out of the database, so it is bounded.
+    assert_file_is_refused(
+        "api.toml",
+        "[api.pagination]\nmax_limit = 100000\n",
+        "api.pagination.max_limit",
+    );
+}
+
+#[test]
+fn a_rate_limit_window_of_zero_is_refused() {
+    assert_variable_is_refused(
+        "APP_AUTH_RATE_LIMIT_WINDOW_SECONDS",
+        "0",
+        "api.rate_limit.window",
+    );
+}
+
+#[test]
+fn a_cors_origin_that_is_not_a_valid_header_is_refused() {
+    // A control character cannot appear in a header value, so the origin could
+    // never be used in a CORS response. It is not whitespace, so the
+    // comma-separated parser does not trim it away.
+    assert_variable_is_refused(
+        "APP_CORS_ALLOWED_ORIGINS",
+        "https://example.com\u{7f}",
+        "api.cors.allowed_origins",
+    );
+}
+
+#[test]
+fn a_pool_size_of_zero_is_refused() {
+    assert_variable_is_refused("DATABASE_MAX_CONNECTIONS", "0", "database.max_connections");
+}
+
+#[test]
+fn an_acquire_timeout_of_zero_is_refused() {
+    assert_variable_is_refused(
+        "DATABASE_ACQUIRE_TIMEOUT_SECS",
+        "0",
+        "database.acquire_timeout",
+    );
+}
+
+#[test]
+fn a_connect_timeout_of_zero_is_refused() {
+    assert_variable_is_refused(
+        "DATABASE_CONNECT_TIMEOUT_SECS",
+        "0",
+        "database.connect_timeout",
+    );
+}
+
+#[test]
+fn an_access_token_lifetime_of_zero_is_refused() {
+    assert_variable_is_refused("APP_ACCESS_TOKEN_TTL_SECONDS", "0", "auth.access_token_ttl");
+}
+
+#[test]
+fn an_access_token_lifetime_beyond_the_bound_is_refused() {
+    assert_variable_is_refused(
+        "APP_ACCESS_TOKEN_TTL_SECONDS",
+        "100000",
+        "auth.access_token_ttl",
+    );
+}
+
+#[test]
+fn a_refresh_token_lifetime_beyond_the_bound_is_refused() {
+    assert_variable_is_refused(
+        "APP_REFRESH_TOKEN_TTL_SECONDS",
+        "40000000",
+        "auth.refresh_token_ttl",
+    );
+}
+
+#[test]
+fn a_clock_skew_beyond_the_bound_is_refused() {
+    assert_variable_is_refused(
+        "APP_ACCESS_TOKEN_CLOCK_SKEW_SECONDS",
+        "100000",
+        "auth.clock_skew",
+    );
+}
+
+#[test]
+fn an_empty_audience_is_refused() {
+    assert_file_is_refused("auth.toml", "[auth]\naudience = \"\"\n", "auth.audience");
+}
+
+#[test]
+fn a_zero_argon2_parallelism_is_refused() {
+    assert_variable_is_refused("APP_ARGON2_PARALLELISM", "0", "auth.argon2.parallelism");
+}
+
+#[test]
+fn a_password_minimum_below_the_floor_is_refused() {
+    assert_file_is_refused(
+        "auth.toml",
+        "[auth.password]\nmin_length = 4\n",
+        "auth.password.min_length",
+    );
+}
+
+#[test]
+fn a_password_maximum_below_the_minimum_is_refused() {
+    assert_file_is_refused(
+        "auth.toml",
+        "[auth.password]\nmin_length = 12\nmax_length = 8\n",
+        "auth.password.max_length",
+    );
 }

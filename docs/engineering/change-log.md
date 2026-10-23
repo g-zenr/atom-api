@@ -42,6 +42,735 @@ define the target state. The requirements live in
 
 ## Entries
 
+### ATOM-CHANGE-20261022-008 - The Git workflow, the pull-request standard and the release path
+
+**Date:** 2026-10-22 (UTC)
+**Type:** Process and repository configuration
+**Author:** The ATOM engineering team
+**Status:** Complete
+
+#### Summary
+
+The repository is now published to `https://github.com/g-zenr/atom-api`, and the
+workflow around it is written down: a two-branch model (`develop` for
+integration, `master` for production), a branch and commit standard, a
+pull-request template, issue templates, and the DEV to UAT to PROD promotion
+process. The existing CI workflow was corrected in three ways that mattered.
+
+No application behaviour changed. No migration, no schema change, no API
+contract change.
+
+#### Reason
+
+Three things were wrong or missing, and each had a concrete consequence:
+
+1. **The CI trigger named a branch that does not exist.** `.github/workflows/ci.yml`
+   ran on `push: branches: [main]`, while the repository's branch is `master`.
+   A push could never have started it. The gates were therefore enforced only by
+   whoever remembered to run them, which is how the remediation for this very
+   release reached a review with a blocking defect in it.
+2. **`KI-005` was recorded as closed** on the strength of a workflow file that
+   had never executed. That is the failure mode the project's own verification
+   policy exists to prevent, so it is corrected here rather than quietly left.
+3. **There was no written workflow at all.** Branch naming appeared only as
+   `feature/<description>` in `CONTRIBUTING.md`, which contradicted the
+   conventional-commit types the log already used, and nothing stated which
+   branch a pull request targets.
+
+#### What changed
+
+| Area | Change |
+| ---- | ------ |
+| CI | The workflow triggers on `master` and `develop`, not the non-existent `main`. The strict documentation check was added: only the non-strict `atom-docs` ran, so a broken cross-reference passed. `continue-on-error` was removed from the OpenCode job. A `concurrency` group cancels superseded runs. |
+| Script modes | All five files under `scripts/` were committed with mode `100644`, so `./scripts/validate-opencode.sh` failed with `Permission denied` (exit 126) on Linux. The three shell scripts are now `100755`, and the workflow names the interpreter (`bash ./scripts/…`) so a checkout that loses the mode cannot disable the check again. |
+| Pull requests | `.github/pull_request_template.md` added, with the six real gates, an explicit "not verified" field, a migration-impact block and a reviewer checklist. |
+| Issues | `.github/ISSUE_TEMPLATE/bug_report.md` and `feature_request.md` added. The feature template states that a roadmap item is not agreed scope. |
+| `CONTRIBUTING.md` | The branch rule now points at `develop` and at the full type list; `feature/` became the `feat/` family. The pull-request step names its base branch. The commit conventions gained `perf:` and `security:` and the rule that a commit must compile. |
+| New documents | [`git-workflow.md`](git-workflow.md) - the branch model, naming, gates, review and merge strategy. [`release-and-promotion.md`](release-and-promotion.md) - the DEV/UAT/PROD gates, what is verified and recorded at each, and an explicit table of the infrastructure that does not exist. |
+| Index | Both documents added to [`../README.md`](../README.md) §3. |
+| `KI-005` | Corrected: the gate exists but has never been observed running, so it is `Implemented`, not `Verified`, and the entry says so. |
+| `implementation-status.md`, `system-overview.md` | The same correction, and the branch name. |
+
+#### What the first CI run found
+
+The first pull request merged nothing, but it did run for the first time, and it
+found a defect that had been invisible since the workflow was written:
+
+**The OpenCode validation job had never executed its script.** It invoked
+`./scripts/validate-opencode.sh` as a program, but every file under `scripts/`
+was committed with mode `100644`, so the runner answered `Permission denied` and
+the step exited `126`. With `continue-on-error: true`, the job reported success
+anyway. Removing that flag is what surfaced it.
+
+This is the concrete argument for the change: a gate that cannot fail is not a
+gate, and the project had believed for its whole life that this one was checking
+something.
+
+The quality-gate job itself passed on the first run, in 4m15s, on the
+remediation pull request — so the formatting, lint, test, release-build and
+documentation steps are now observed working on a runner rather than assumed.
+
+**A second defect followed.** With the script executable, it ran and reported
+every agent as missing. The agents carry no `model:` of their own; they inherit
+the default from `opencode.jsonc`, which names a provider a hosted runner has no
+credentials for. Agent discovery therefore cannot succeed there, and neither can
+the model check.
+
+The validator gained `--skip-agent-discovery`, so a runner can skip exactly the
+checks that need a provider while still enforcing the rest. The skip is printed
+as a **warning**, never as a pass, so the output cannot be misread as "the
+agents were checked". CI now runs:
+
+```text
+bash ./scripts/validate-opencode.sh --skip-model-check --skip-agent-discovery
+```
+
+which in CI still enforces that the configuration parses, that the expected
+sources are loaded, and that the committed configuration contains no credential.
+The agent wiring remains a **local** gate, which holds a provider by definition.
+
+#### Requirements and decisions referenced
+
+| Reference | Subject |
+| --------- | ------- |
+| [`../project-truth.md`](../project-truth.md) §13.6 | The quality gates that the pipeline enforces. |
+| [`../testing/verification-policy.md`](../testing/verification-policy.md) | A check that did not run is not reported as passing. |
+| [`../decisions/ADR-0006-configuration-source-of-truth.md`](../decisions/ADR-0006-configuration-source-of-truth.md) | Why the environments differ only in secrets and the overlay. |
+| [`git-workflow.md`](git-workflow.md) | The process this entry establishes. |
+| [`release-and-promotion.md`](release-and-promotion.md) | The promotion path this entry establishes. |
+
+#### Compatibility impact
+
+None for a client and none for the database. The change is repository
+configuration and documentation.
+
+#### Security implications
+
+Two positive ones. The strict documentation check and the enforcing OpenCode job
+are now real gates rather than advisory ones, and the production branch is
+documented as receiving release merges only, which is what makes a protected
+`master` meaningful when protection is configured. The repository contains no
+secret: the CI signing secret is a fixed, obviously-fake placeholder used only
+against a disposable database inside the runner.
+
+#### What this entry does **not** claim
+
+- **No deployment infrastructure exists.** There is no container image, no
+  orchestrator manifest, no UAT or PROD instance. The promotion stages are
+  described as gates that are applied by hand. `KI-006` and
+  [`implementation-status.md`](implementation-status.md) record this, and
+  [`release-and-promotion.md`](release-and-promotion.md) §6 repeats it in a
+  table so that the document cannot be mistaken for a description of working
+  automation.
+- **Branch protection is not configured.** The two-branch model is a convention
+  the pipeline enforces; it is not a GitHub rule that prevents a direct push to
+  `master`. Configuring that is a repository-settings change and was not made.
+
+#### Checks and results
+
+| Command | Result |
+| ------- | ------ |
+| `cargo fmt --all -- --check` | **Passed.** Exit code 0. |
+| `cargo clippy --all-targets --all-features -- -D warnings` | **Passed.** Exit code 0. |
+| `cargo test --all-targets` | **Passed.** 177 tests, 0 failed. |
+| `cargo run --bin atom-docs` | **Passed.** `OK (0 warning(s))`. |
+| `cargo run --bin atom-docs -- --strict` | **Passed.** `OK (0 warning(s))`. |
+| `scripts/validate-opencode.ps1` | **Passed.** 0 warning(s). |
+| GitHub Actions, `pull_request` | **Passed.** Run [`39761383251`](https://github.com/g-zenr/atom-api/actions/runs/39761383251) on the remediation branch, 4m15s; run [`39765107169`](https://github.com/g-zenr/atom-api/actions/runs/39765107169) on this branch, 1m25s. Both jobs green. |
+
+---
+
+### ATOM-CHANGE-20261022-007 - The remaining code findings, and the backlog that accounts for all of them
+
+**Date:** 2026-10-22 (UTC)
+**Type:** Fix
+**Author:** The ATOM engineering team - the orchestrator with the `general`
+(efficiency) subagent
+**Status:** Complete
+
+#### Summary
+
+The audit findings that the earlier passes had not actioned are now closed:
+the twenty-one code findings of `ATOM-TASK-20261022-014`, the two diagnostic
+leaks of `ATOM-TASK-20261022-015`, the repository layout of
+`ATOM-TASK-20261022-016`, and the five efficiency findings of
+`ATOM-TASK-20261022-017` that a measurement supported. One setting was added,
+because a hard-coded value turned out to be a deployment knob. The backlog was
+rewritten so that every one of the eighty-three findings carries a
+disposition.
+
+#### Reason
+
+The backlog was the weakest part of the earlier work: thirty-nine of the
+eighty-three findings had **no task at all**, so their disposition existed
+only in the audit report. The work was largely done, but it was not
+*recorded*, and an unrecorded disposition is not a disposition.
+
+#### Measured efficiency
+
+The audit stated its efficiency findings as **hypotheses**. Each was measured
+before it was accepted, on PostgreSQL 18 against a disposable database holding
+20 000 notes for one owner, with `ANALYZE` run and
+`plan_cache_mode = force_generic_plan` so that the plan shown is the one a
+prepared statement actually uses.
+
+| Finding | Before | After | Change |
+| ------- | ------ | ----- | ------ |
+| `F-47` the note-search page | 10.80 ms, 819 buffers, 19 000 rows discarded by a filter | 0.85 ms, 21 buffers, `BitmapAnd` of the owner index and the GIN index | **12.7× faster** |
+| `F-83` the note-search count | 9.93 ms, 812 buffers | 1.33 ms, 278 buffers | **7.5× faster** |
+| `F-48` the listing without a search term | 0.066 ms, 8 buffers | 0.032 ms, 5 buffers | small, and reported as small |
+| `F-51` the rate-limiter sweep | one visit per tracked client per request | at most one sweep per window; an entry lives at most two windows | bounded, and now amortised |
+| `F-50` an empty task list | three round trips | two | the `404`-versus-empty-page distinction preserved |
+
+The search change is what the split statements buy: with the clause guarded by
+`($3::text IS NULL OR …)` the planner under a generic plan could not use the
+GIN index as a qual and scanned the owner's whole active set instead. Three
+tests pin the rate limiter's boundedness, and the empty-task-list distinction
+has its own test.
+
+**One audit proposal was rejected on measurement.** `F-44` suggested dropping
+the `vendored` feature from `utoipa-swagger-ui` to remove 10.73 MiB of Swagger
+assets. The build was tried both ways: without `vendored` the build script
+downloads the same bundle at compile time and `rust-embed` embeds it anyway, so
+the embedded dist is 10.73 MiB either way. The change only cost reproducible,
+offline builds. It was reverted and the finding is deferred with the reason.
+
+#### What changed
+
+| Area | Change |
+| ---- | ------ |
+| Diagnostics | The start-up path reports the error kind and the SQLSTATE and never the driver message, the connection string or a row. The test harness reports the database **name** in its refusal, never the configured URL; the separate "variable is unset" panic still shows the documented local sample URL, which is a placeholder and not a credential. |
+| Configuration | `app.limits.shutdown_grace_seconds` was added: the drain was a hard-coded `sleep(100 ms)` inside the shutdown future, which meant the listener kept accepting for 100 ms and then drained **unbounded**. It is now a ceiling of 10 s on the drain, applied after the listener stops. It follows the established procedure - file, typed field, environment override, validation rule, template, reference table, and tests for the default, the override and the rejected value. |
+| The request path | The timeout middleware requires the request context, which the router always installs, so the duplicated timeout string and the fallback timeout constant are gone. |
+| Observability | The log format follows the **environment** rather than the build profile, and `telemetry::init` returns an error instead of falling back to `info`, which is what the configuration contract promises. |
+| The token | The subject claim is a `Uuid` rather than a `String`. The wire format is unchanged, and a malformed subject is now a type error at the trust boundary. |
+| The configuration module | `validate_settings` is split into one function per settings group, in a fixed order, so that a configuration that breaks several rules is always reported by the same one. The loader normalises an environment value in one place. |
+| The surface | `auth_service()` is gone: the services are reached through their field, as the other three already were. `AppState::sessions()`, `AppState::tokens`, `AppState::passwords`, `ConfigLoader::directory()`, `RateLimiter::reset()` and `Messages::from_toml`'s public visibility are gone. |
+| ADR-0002 | The decision is unchanged. An **Amendment** section records the dependency changes made since it was accepted, because the crate list is a consequence of the decision and not the decision itself. |
+| The backlog | [`../audit/remediation-backlog.md`](../audit/remediation-backlog.md) now gives every finding a task, a status, an owner and a verification evidence, and records the eleven retained items. |
+
+#### Requirements and decisions referenced
+
+| Reference | Subject |
+| --------- | ------- |
+| [`../decisions/ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md) | The absolute refresh lifetime, which the rotation preserves. |
+| [`../decisions/ADR-0005-ownership-enforced-in-sql.md`](../decisions/ADR-0005-ownership-enforced-in-sql.md) | The ownership predicates, which were checked and deliberately left as they are. |
+| [`../decisions/ADR-0006-configuration-source-of-truth.md`](../decisions/ADR-0006-configuration-source-of-truth.md) | The configuration layers and the rule that a setting has exactly one home. |
+| [`../project-truth.md`](../project-truth.md) §13 | The password policy, whose twelve-character minimum is a floor. |
+
+#### Compatibility impact
+
+None for a client. The `search` bound, the page maximum, the body limit and
+the configuration floors were introduced by the earlier entry in this series
+and are unchanged here. The access-token wire format is unchanged: the subject
+claim serialises as the same hyphenated string it always was.
+
+**One operational behaviour changed deliberately.** Shutdown used to sleep
+100 ms *before* the graceful drain even began, so the listener accepted new
+connections during that window and the drain that followed had no bound at
+all. The listener now stops on the signal and `app.limits.shutdown_grace_seconds`
+(10 s by default) bounds the drain. A deployment that wants a shorter ceiling
+sets it; a deployment that relied on the old timing never had a drain, only a
+delay.
+
+#### Security implications
+
+Two diagnostic paths that could print a connection string or a driver message
+now cannot. The start-up failure reports the error kind and the SQLSTATE, the
+same rule the request path already applied in `src/error.rs`, and the test
+harness reports a database name instead of a URL. No control was removed or
+weakened.
+
+#### Checks and results
+
+| Command | Result |
+| ------- | ------ |
+| `cargo fmt --all -- --check` | **Passed.** Exit code 0. |
+| `cargo clippy --all-targets --all-features -- -D warnings` | **Passed.** Exit code 0, no warning. |
+| `cargo test --all-targets` | **Passed.** 176 tests: 110 unit, 29 authentication, 12 notes, 25 projects and tasks. 0 failed. |
+| `cargo run --bin atom-docs` | **Passed.** `atom-docs: OK (0 warning(s))`. |
+| `cargo run --bin atom-docs -- --strict` | **Passed.** `atom-docs: OK (0 warning(s))`. |
+| `scripts/validate-opencode.ps1` | **Passed.** `PASSED: all checks completed (0 warning(s)).` |
+
+#### Documentation
+
+The documents changed by this entry are listed under *Affected features and
+files*. The backlog was rewritten and is the record of the dispositions.
+
+---
+
+### ATOM-CHANGE-20261022-006 - The remaining documentation findings, resolved
+
+**Date:** 2026-10-22 (UTC)
+**Type:** Documentation
+**Author:** The ATOM engineering team - the orchestrator with the `docs`
+subagent
+**Status:** Complete
+
+#### Summary
+
+The last eight confirmed documentation defects of the audit were closed, and a
+sweep of the documentation tree against the code found and corrected eleven
+further inaccuracies. Four of the findings that the earlier pass had been
+reported as resolved turned out to be **still open** in the tree, and are
+closed here: the `F-54` family, `F-56`, `F-59` and `F-71`. The change is
+documentation only: no code, no schema, no configuration and no public
+contract changed.
+
+#### Reason
+
+A document that states something the code does not do is worse than no
+document: it sends the next contributor looking for a behaviour that is not
+there. The audit findings were confirmed against the source before they were
+fixed, and every correction was made in the document rather than in the code.
+
+#### The eight closed findings
+
+| Finding | Defect | Correction |
+| ------- | ------ | ---------- |
+| `F-57` | Q-10 said the manifest declares `license = "MIT"`. | The manifest declares **no** licence — its comment reads "The licence has not been chosen yet." — and only `publish = false`. `README.md` and `CONTRIBUTING.md` agree with it. The decision is the choice itself, not "add the `LICENSE` file". |
+| `F-58` | `module-boundaries.md` had no section for the `utils` module. | A new §7.9 with the same nine-row shape as §7.8, describing `char_len` and `is_blank`. |
+| `F-61` | `system-overview.md` listed `subtle` as a direct dependency. | The row now names only the crates the manifest declares, and the note says which crates are dev-dependencies and which are not dependencies of the crate at all. |
+| `F-62` | The start-up table hid the connect-info wrapper. | The real call is shown: `axum::serve(listener, api::router(state).into_make_service_with_connect_info::<std::net::SocketAddr>())`, with a note on what the wrapper decides. |
+| `F-63` | The notes specification pointed at `schema.md` §5 for the search design. | §7, which is the search design; §5 is `projects`. |
+| `F-64` | `project-truth.md` §9.11 described a trusted-proxy mechanism that does not exist. | The requirement now says the API never reads the header and that there is no trusted-proxy declaration, and cross-references `Q-07` and `KI-003`. |
+| `F-66` | The change log recorded a fix to the feature status files that had not been applied. | The three rows now name the covering tests and no longer say the opposite, so the record is true of the tree. |
+| `F-69` | `testing/strategy.md` named `test_config()` for the test-database guard. | `test_database_url()`, which holds the assertion. |
+
+#### What the sweep found
+
+| Defect | Correction |
+| ------ | ---------- |
+| `F-54` family: the projects and tasks **specifications** still said `Implemented` and claimed that the search, the pagination, the read, the delete and the manual ordering had no HTTP-level test, while their own `status.md` said `Verified` and the tests exist. | Both specifications now say `Verified`, name the covering tests, and no longer carry the false limitations. |
+| `F-56`: Q-07's context was premised on the pre-`KI-010` defect — "the server also does not install the connection information". | The context now describes the current state: the server installs the connection information, the key is the peer address, and what is missing is the trusted-proxy declaration. |
+| `F-59`: `api/conventions.md` said the correlation id "appears in the structured log lines of the request". | The sentence now says what is true: the id is carried by the header and the tracing span, and is not an explicit field on every log line — as `request-lifecycle.md` §8 and `deployment.md` §6.2 already said. |
+| `F-71`: `data-architecture.md` said "Two gaps are worth naming" and listed three. | The count is now correct. |
+| `security/README.md` gave the unit-test counts of `src/auth/password.rs` and `src/auth/token.rs` the wrong way round (7 and 6, instead of 6 and 7). | Both counts now match the tree. |
+| `security/README.md` and `secure-development.md` (SD-14) said that the CORS refusals had no automated test, and `testing/strategy.md` §6 item 1 listed the refusal of a `*` origin as uncovered. | The two configuration tests are named, and the remaining gap is narrowed to the HTTP-level behaviour: a disallowed `Origin` is answered without the CORS headers. |
+| `secure-development.md` (SD-4) said the redaction of the two configuration types had no test in the tree. | `the_secret_is_never_rendered` in `src/config/tests.rs` is named. |
+| `database/README.md` still said "Multi-step writes use an explicit transaction", which is the requirement `F-18` amended. | The rule now carries the exception that `ADR-0003` records. |
+| `ADR-0003` still said the rate-limit key "is currently shared by every caller", which was the `KI-010` defect and is Closed. | The consequence now describes the peer-address key. The decision itself is unchanged. |
+| `system-overview.md` also named `hex` and the `sqlx/json` feature, and `tower` as a runtime dependency. | The table now lists only the declared direct dependencies, and names the dev-dependencies separately. |
+| `deployment.md` presented §5.2 before §5.1, and one table cell used `-` where the others use `—`. | The two subsections are in order, and the cell is consistent. |
+
+#### Affected features and files
+
+| Feature | Area | Files |
+| ------- | ---- | ----- |
+| Foundation | The engineering record | [`open-questions.md`](open-questions.md), [`known-issues.md`](known-issues.md), [`change-log.md`](change-log.md) |
+| Foundation | The architecture | [`system-overview.md`](../architecture/system-overview.md), [`module-boundaries.md`](../architecture/module-boundaries.md), [`data-architecture.md`](../architecture/data-architecture.md), [`deployment.md`](../architecture/deployment.md) |
+| Foundation | The public contract | [`api/conventions.md`](../api/conventions.md) |
+| Foundation | The persistence documentation | [`database/README.md`](../database/README.md) |
+| Foundation | The security documentation | [`security/README.md`](../security/README.md), [`secure-development.md`](../security/secure-development.md) |
+| Foundation | The testing documentation | [`testing/strategy.md`](../testing/strategy.md) |
+| Foundation | The requirements | [`project-truth.md`](../project-truth.md) |
+| Notes, projects and tasks | The feature documents | the six `specification.md`, `status.md`, `architecture.md` and `testing.md` files of the three features |
+| Foundation | The decisions | [`ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md) — a stale consequence sentence, not the decision |
+
+#### Requirements and decisions referenced
+
+| Reference | Subject |
+| --------- | ------- |
+| [`../project-truth.md`](../project-truth.md) §9.11 | The security expectation about the client address, reworded to match the code. |
+| [`../project-truth.md`](../project-truth.md) §12 | The transaction rule, with the exception `ADR-0003` records. |
+| [`../decisions/ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md) | The token design; the rotation that preserves the absolute deadline, and the rate-limit key. |
+| [`../decisions/ADR-0005-ownership-enforced-in-sql.md`](../decisions/ADR-0005-ownership-enforced-in-sql.md) | The ownership predicates, which were not touched. |
+| [`../audit/audit-report.md`](../audit/audit-report.md) | The findings this entry closes, and the eleven duplications that were verified as deliberate. |
+
+#### Architectural impact
+
+None. The modules, the boundaries, the request lifecycle and the schema are
+unchanged. The only architectural document that changed is
+`module-boundaries.md`, which gained the missing section for the `utils`
+module, and `ADR-0003`, whose stale consequence sentence was corrected.
+
+#### Compatibility impact
+
+None for a client. No endpoint, status code, error code, response shape or
+configuration key changed. The published pagination convention, the `search`
+bound, the body limit and the token lifetimes are described exactly as they
+were before.
+
+#### Security implications
+
+None. No control was added, removed or weakened, and no code changed. The
+security documentation now says what the code does: the API never reads
+`X-Forwarded-For` and has no trusted-proxy declaration, the rate-limit key is
+the peer address of the connection, and the redaction of the two
+configuration types is covered by a test.
+
+#### Checks and results
+
+| Command | Result |
+| ------- | ------ |
+| `cargo run --bin atom-docs` | **Passed.** `atom-docs: OK (0 warning(s))`, exit code 0. |
+| `cargo run --bin atom-docs -- --strict` | **Passed.** `atom-docs: OK (0 warning(s))`, exit code 0. |
+| `cargo fmt --all -- --check` | **Not run.** This entry changed no Rust file, and the build cache is shared with the agents that are changing the code. |
+| `cargo clippy --all-targets --all-features -- -D warnings` | **Not run.** For the same reason. |
+| `cargo test --all-targets` | **Not run.** For the same reason. The suite was last run on 2026-10-22 against the tree of `ATOM-CHANGE-20261022-003`: 162 tests, 0 failed. |
+
+#### Manual verification
+
+Every test count quoted in a document that this entry touches was recounted
+against the tree: 106 unit tests in 12 modules, of which 48 are in
+`src/config/tests.rs`, and 56 integration tests in three files — 28 in
+`tests/auth_api.rs`, 9 in `tests/notes_api.rs` and 19 in
+`tests/projects_tasks_api.rs`. The 27 keys in the four files in `config/`
+were compared by hand with both reference tables: the one in
+`../architecture/deployment.md` §1.3, which the checker compares
+mechanically, and the one in [`../../config/README.md`](../../config/README.md)
+§3, which it does not. The two tables agree with the files and with each
+other.
+
+The documentation checker was run over the tree after the change.
+
+#### Review findings
+
+No independent review has been performed on this change set. The findings
+this entry resolves were produced by the audits recorded in
+[`../audit/audit-report.md`](../audit/audit-report.md) and confirmed against
+the source before they were fixed. See [`review-log.md`](review-log.md).
+
+#### Documentation
+
+This entry is itself part of the documentation it describes. The documents
+changed are listed under *Affected features and files* above.
+
+#### Links
+
+- [`../audit/audit-report.md`](../audit/audit-report.md) — the findings.
+- `KI-003`, `KI-010` and `KI-018` in [`known-issues.md`](known-issues.md).
+- `Q-07` and `Q-10` in [`open-questions.md`](open-questions.md).
+- [`../decisions/ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md).
+
+---
+
+### ATOM-CHANGE-20261022-003 - The audit remediation
+
+**Date:** 2026-10-22 (UTC)
+**Type:** Fix
+**Author:** The ATOM engineering team - the orchestrator with the `general`
+and `docs` subagents
+**Status:** Complete
+
+#### Summary
+
+Five independent audits were run over the whole repository: duplication,
+standards and architecture, documentation, efficiency, and configuration and
+reusability. Eighty-three findings were confirmed, eleven deliberate
+duplications were verified as correct and recorded as such, and the highest
+value findings were remediated. Two of them were real behavioural defects:
+the configured pagination bounds were validated and published but never
+applied, and a refresh-token rotation silently extended the absolute lifetime
+that ADR-0003 requires.
+
+The findings, their evidence and the retained duplications are in
+[`../audit/audit-report.md`](../audit/audit-report.md). The task backlog is
+[`../audit/remediation-backlog.md`](../audit/remediation-backlog.md).
+
+#### Reason
+
+A setting an operator can change that changes nothing is worse than no
+setting: the operator believes the system behaves as configured. The same
+applies to a documented absolute lifetime that the rotation does not keep.
+Both were found by more than one audit, independently.
+
+#### The two behavioural defects
+
+| Finding | Defect | Resolution |
+| ------- | ------ | ---------- |
+| `F-01` | `api.pagination.default_limit` and `max_limit` were read into the typed settings, validated at start-up and published in the operator reference, but the list endpoints clamped against compile-time constants. A setting an operator could change had no effect. | `PaginationQuery::effective_limit` now takes the configured bounds, and the three services hold them. The constants `DEFAULT_LIMIT` and `MAX_LIMIT` are gone, so the published convention has exactly one home. |
+| `F-02` | The refresh rotation wrote the replacement session with `expires_at = now + ttl`, which converts the absolute lifetime of ADR-0003 into a sliding one: a client that keeps rotating holds a session for ever. | The replacement session inherits the deadline of the session it replaces. An integration test asserts that the rotated row carries the same `expires_at`. |
+
+#### The rest of the remediation
+
+| Area | What changed |
+| ---- | ------------ |
+| Configuration | The `app.name` key and the `messages.general.body_mismatch` key were removed: nothing read them. The password minimum, the clock-skew allowance, the prune grace, the two token lifetimes, the page maximum and the body limit gained the floors and bounds that keep a deployment from configuring away an accepted requirement or a safety ceiling. |
+| Validation | The fifteen rules that had no test now have one each: twenty-two new configuration tests. Two `Default` implementations that returned zero — `PaginationSettings` and `RateLimitSettings` — now match the serde defaults. |
+| Error handling | The start-up failure is printed with its `Display` form, so the operator sees `error: required environment variable DATABASE_URL is missing or empty` instead of `Error: Missing("DATABASE_URL")`. |
+| Duplication | `field_error` is one public helper instead of two private copies. The catalogue has one `too_long` template instead of three byte-identical ones. The session-creation sequence is one helper used by both the first session and a rotation. `AuthService` reaches the user through the `UserService` it already holds instead of a second repository over the same pool. |
+| Dead code | `AppState::sessions()`, `AppState::tokens`, `AppState::passwords`, `ConfigLoader::directory()`, `RateLimiter::reset()`, `RequestSettings` and the `x-request-id` literal were removed or consolidated. |
+| Tooling | The documentation checker compares the keys in `config/*.toml` with the keys in the operator reference, in both directions, and it no longer filters `ATOM_CONFIG_DIR` out of the environment-variable comparison. It found two wrong key names and one missing key on the first run. |
+| Dependencies | The `axum/macros`, `tokio/sync` and `sqlx/json` features and the `hex` crate were removed. The refresh-token hash is now formatted with `format!("{hasher:x}")`, and a literal assertion proves the encoding is unchanged. |
+| Build | The development profile keeps line tables only. The build artifacts fell from 4.4 GB to 1.45 GB, a measured 67% reduction. |
+| Review | The change was reviewed independently by the read-only `code-reviewer` agent. Its seventeen findings are recorded in [`review-log.md`](review-log.md) as `ATOM-REVIEW-20261022-002`; the seven it required are resolved here. |
+
+#### Affected features and files
+
+| Feature | Area | Files |
+| ------- | ---- | ----- |
+| Foundation | The pagination convention | [`../../src/pagination.rs`](../../src/pagination.rs), [`../../src/notes/service.rs`](../../src/notes/service.rs), [`../../src/projects/service.rs`](../../src/projects/service.rs), [`../../src/tasks/service.rs`](../../src/tasks/service.rs), [`../../src/state.rs`](../../src/state.rs) |
+| Foundation | The configuration | [`../../src/config/`](../../src/config/), [`../../config/`](../../config/), [`.env.example`](../../.env.example) |
+| Foundation | The request lifecycle | [`../../src/api/`](../../src/api/), [`../../src/helpers/`](../../src/helpers/), [`../../src/utils/`](../../src/utils/) |
+| Authentication | The token lifecycle | [`../../src/auth/`](../../src/auth/), [`../../tests/auth_api.rs`](../../tests/auth_api.rs) |
+| Foundation | The start-up | [`../../src/main.rs`](../../src/main.rs) |
+| Foundation | The repository checker | [`../../src/bin/atom-docs.rs`](../../src/bin/atom-docs.rs) |
+| Foundation | The build | [`../../Cargo.toml`](../../Cargo.toml) |
+
+#### Requirements and decisions referenced
+
+| Reference | Subject |
+| --------- | ------- |
+| [`../decisions/ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md) | The absolute refresh lifetime, which the rotation now preserves. |
+| [`../decisions/ADR-0005-ownership-enforced-in-sql.md`](../decisions/ADR-0005-ownership-enforced-in-sql.md) | The ownership predicates, which were checked and deliberately left as they are. |
+| [`../decisions/ADR-0006-configuration-source-of-truth.md`](../decisions/ADR-0006-configuration-source-of-truth.md) | The configuration layers, the precedence and the rule that a setting has exactly one home. |
+| [`../project-truth.md`](../project-truth.md) §13 | The password policy, whose twelve-character minimum is now a floor. |
+
+#### Architectural impact
+
+None of the module boundaries changed. The configuration module gains two
+exported floors, and the HTTP layer reads the body-reader ceiling from the
+configuration module instead of declaring its own copy, so that the ceiling
+has one home.
+
+#### Compatibility impact
+
+None for a client. The pagination bounds keep their committed values of 20 and
+100, so the published convention is unchanged; only the *source* of the bound
+changed. The `search` parameter of the notes and projects listings gains a
+bound of 200 characters, which is a `422` naming the `search` field. A
+configuration that sets the body limit above 4 MiB, the password minimum below
+twelve characters, the clock skew above five minutes or the prune grace below
+one hour is now refused at start-up, with a message that names the bound. A
+configuration that sets the pagination bounds differently from 20 and 100 now
+takes effect — that is the point of the fix, and the setting still has no
+environment variable, so it cannot change by accident.
+
+#### Security implications
+
+Two properties are now enforced rather than documented: the absolute lifetime
+of a refresh session survives a rotation, and the configuration cannot lower
+the password minimum, widen the clock-skew allowance or shorten the prune
+grace below its floor. No control was removed or weakened. The secrets are
+untouched: both remain environment-only and are still redacted in every
+`Debug` output.
+
+#### Checks and results
+
+| Command | Result |
+| ------- | ------ |
+| `cargo fmt --all -- --check` | **Passed.** Exit code 0, no diff. |
+| `cargo clippy --all-targets --all-features -- -D warnings` | **Passed.** Exit code 0, no warning. |
+| `cargo test --all-targets` | **Passed.** 162 tests: 106 unit, 28 authentication, 9 notes, 19 projects and tasks. 0 failed. |
+| `cargo run --bin atom-docs` | **Passed.** `atom-docs: OK (0 warning(s))`, exit code 0. |
+| `cargo run --bin atom-docs -- --strict` | **Passed.** `atom-docs: OK (0 warning(s))`, exit code 0. |
+| `scripts/validate-opencode.ps1` | **Passed.** `PASSED: all checks completed (0 warning(s)).` |
+| `cargo build --release` | **Passed.** Exit code 0. The binary is 19.35 MB. |
+| The release binary, started against the disposable test database | **Passed.** `GET /health/live` answered `200`. `GET /api/v1/openapi.json` answered `200`, carries the title `ATOM API` and the version `0.1.0`, and declares the `422` on `GET /api/v1/notes`. `GET /api/v1/notes` without a bearer token answered `401` in the standard envelope. |
+
+#### Manual verification
+
+Every finding that was fixed was read out of the source before it was fixed,
+and the fixed behaviour was read back out of the source afterwards. The
+configuration keys were compared with the files in `config/` and with the
+operator reference by the checker itself, in both directions. The pagination
+bounds were confirmed to be applied by the unit test that a configured maximum
+is honoured, and the rotation deadline by the integration test that asserts
+the inherited `expires_at`.
+
+#### Reviewer findings
+
+The findings that this entry resolves were produced by five independent
+audits and confirmed against the source. The full list, with the evidence and
+the eleven duplications that were verified as deliberate, is in
+[`../audit/audit-report.md`](../audit/audit-report.md).
+
+The change was then reviewed independently by the read-only `code-reviewer`
+agent, recorded in [`review-log.md`](review-log.md) as
+`ATOM-REVIEW-20261022-002`. It returned **ACCEPT WITH REQUIRED FOLLOW-UP**
+with seventeen findings; the seven it required are resolved in the same
+change, and the re-verification is recorded with the review.
+
+#### Documentation
+
+The documents changed by the parallel documentation pass are listed in
+`ATOM-CHANGE-20261022-002` above. The audit report and the backlog are new
+documents under [`../audit/`](../audit/).
+
+#### Links
+
+- [`../audit/audit-report.md`](../audit/audit-report.md) — the five audits,
+  the eighty-three findings and the retained duplications.
+- [`../audit/remediation-backlog.md`](../audit/remediation-backlog.md) — the
+  task backlog, with the status of every task.
+- `KI-015`, `KI-016`, `KI-017` and `KI-018` in
+  [`known-issues.md`](known-issues.md).
+
+---
+
+### ATOM-CHANGE-20261022-002 - The documentation findings, resolved
+
+**Date:** 2026-10-22 (UTC)
+**Type:** Documentation
+**Author:** The ATOM engineering team - the orchestrator with the `docs`
+subagent
+**Status:** Complete
+
+#### Summary
+
+Fourteen confirmed documentation defects were remediated, together with the
+two behaviour changes that were landing in parallel. The body-limit contract,
+the CORS layer, the configuration reference, the pagination convention, the
+refresh-rotation lifetime policy and the engineering record were each
+brought back into agreement with the code. Three new known issues were opened
+and closed, a fourth was opened to record a discrepancy between a finding and
+the code, one open question was annotated, and the requirement about
+transactions was amended to name the exception that ADR-0003 already records.
+
+#### Reason
+
+The documentation is part of the product, and a document that states
+something the code does not do is worse than no document: it sends the next
+contributor looking for a behaviour that is not there. The findings were
+confirmed against the source before they were fixed, and each fix was made in
+the document rather than in the code.
+
+#### Affected features and files
+
+| Feature | Area | Files |
+| ------- | ---- | ----- |
+| Foundation | The API contract | [`../api/conventions.md`](../api/conventions.md) |
+| Foundation | The operator-facing configuration reference | [`../architecture/deployment.md`](../architecture/deployment.md) |
+| Foundation | The request lifecycle | [`../architecture/request-lifecycle.md`](../architecture/request-lifecycle.md) |
+| Foundation | The module interfaces | [`../architecture/module-boundaries.md`](../architecture/module-boundaries.md) |
+| Foundation | The persistence model | [`../architecture/data-architecture.md`](../architecture/data-architecture.md), [`../database/schema.md`](../database/schema.md) |
+| Foundation | The security architecture | [`../architecture/security-architecture.md`](../architecture/security-architecture.md) |
+| Authentication | The token lifecycle | [`../features/authentication/specification.md`](../features/authentication/specification.md), [`../features/authentication/architecture.md`](../features/authentication/architecture.md), [`../features/authentication/testing.md`](../features/authentication/testing.md), [`../features/authentication/status.md`](../features/authentication/status.md), [`../decisions/ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md) |
+| Notes and projects | The list contract | [`../features/notes/api.md`](../features/notes/api.md), [`../features/notes/specification.md`](../features/notes/specification.md), [`../features/notes/architecture.md`](../features/notes/architecture.md), [`../features/projects/api.md`](../features/projects/api.md), [`../features/projects/specification.md`](../features/projects/specification.md), [`../features/projects/architecture.md`](../features/projects/architecture.md), [`../features/tasks/api.md`](../features/tasks/api.md) |
+| Security | The rules a change must follow | [`../security/secure-development.md`](../security/secure-development.md) |
+| Quality | The testing strategy | [`../testing/strategy.md`](../testing/strategy.md) |
+| Product | The requirements | [`../project-truth.md`](../project-truth.md) |
+| Engineering | The record | [`known-issues.md`](known-issues.md), [`open-questions.md`](open-questions.md), [`implementation-status.md`](implementation-status.md) |
+
+#### The findings, and what each one became
+
+The identifiers in the table below are the **per-audit** ones, as they were
+recorded when the finding was made. The consolidated identifiers used by
+[`ATOM-CHANGE-20261022-003`](../audit/audit-report.md) and by the backlog are
+different; the mapping is in the *status* line of each finding in
+[`../audit/audit-report.md`](../audit/audit-report.md).
+
+| Finding | Defect | Resolution |
+| ------- | ------ | ---------- |
+| `F-03`, `CFG-10` | The API conventions described a second, independent 4 MiB body cap, which the finding said the code did not have. | The code changed under this pass: the extractor now passes a named `MAX_BODY_BYTES_BACKSTOP` of 4 MiB, so the two-limit description is accurate again. §9 was rewritten to describe **both** limits, and `KI-018` records the discrepancy between the finding and the code for the architect to settle. |
+| `F-04` | Three passages described a `panic!` in the CORS layer and called it an open finding. | The layer falls back to an empty header value. The request-lifecycle and the secure-development rules now describe that behaviour, and the "open finding" wording is gone. |
+| `F-05` | The requirements demanded an explicit transaction for every multi-step write, which the refresh rotation does not use. | The requirement now reads "unless an accepted ADR records that the ordering fails safe" and cites ADR-0003. The meaning is otherwise unchanged. |
+| `F-06` | The header comment of the applied migration `0001` claimed the `projects → tasks` relation is handled in the service layer. | The comment was **not** edited: the migration is applied, and editing it would change its SQLx checksum. The correction is recorded in [`../database/schema.md`](../database/schema.md) §1.1 and here. The relation is a database cascade, declared in `0003`. |
+| `F-07` | The operator-facing start-up failure was not described. | A new §1.5 in [`../architecture/deployment.md`](../architecture/deployment.md) shows the readable message the operator sees, in the four shapes `ConfigError` renders. |
+| `F-09` | The `AppState` public interface listed `sessions()`, `tokens` and `passwords`. | §7.3 of the module boundaries now lists what remains, and the security boundary row follows the services that hold the signing secret and the Argon2 parameters. |
+| `F-11` | The implementation status said the configuration module had no unit test at all, while the table above it said `Verified`. | The closing paragraph was rewritten: the module has its own unit tests and the rows are `Verified`. The test counts it quoted were stale and were corrected at the same time. |
+| `F-12` | The security architecture said the `429` path was not covered by the suite. | The row now records `the_authentication_endpoints_are_rate_limited` and `KI-002` as Closed. |
+| `CFG-09` | The reference table named `auth.jwt_issuer` and `auth.jwt_audience`; the keys in `config/auth.toml` are `auth.issuer` and `auth.audience`. | The rows were corrected, and every other key in the table was checked against the files in `config/`. The `app.name` key, which the parallel configuration work removed, was dropped from the table at the same time. |
+| `CFG-15` | The production checklist said to leave `APP_CORS_ALLOWED_ORIGINS` empty, but the template shipped a value that overrides the committed default. | The precedence is now stated explicitly in §1.1 and in a new §5.2, and the checklist says the variable must name the real origins or stay empty. The template now ships an empty value, so the committed defaults and the template agree. |
+| `F-14` | The `search` parameter had no documented length bound. | The bound of 200 characters is documented in the conventions, in the notes and projects contracts, in the two specifications and in the testing gaps, together with the shared validator `validate_search` that enforces it and the catalogue message that words it. |
+| `KI-015` | The refresh rotation recomputed the session expiry, extending the absolute lifetime. | Opened and closed: the replacement session inherits the original `expires_at`. The property is recorded in ADR-0003, in the data architecture, in the schema and in the authentication documents. |
+| `KI-016`, `KI-017` | The configuration accepted a password minimum below the policy floor, an unbounded clock skew and a prune grace shorter than the expired-token window needs. | Opened and closed: the floors are enforced in `src/config/validation.rs` and recorded in the constraint column of the reference table. |
+| `KI-018` | The finding said the extractor had no second body cap; the code has an independent 4 MiB backstop. | Opened: the documentation describes the code, and the discrepancy is recorded for the architect to settle. |
+
+Two further inconsistencies were found while the findings were being fixed,
+and are corrected here as well: the authentication specification still
+described the feature as `Implemented` because of the rate-limit gap that
+`KI-002` closed, and the testing strategy still said that the configuration
+module had no unit test while listing twenty-seven of them.
+
+The unit-test inventory in [`../testing/strategy.md`](../testing/strategy.md)
+§1.1 was corrected as well: the table double-counted the `auth` module, and
+the counts were stale. The table now lists 106 unit tests in 12 modules,
+counted on 2026-10-22, of which the configuration module contributes 46.
+
+**Correction (2026-10-22).** The configuration module contributes **48** unit
+tests, not 46. The audit remediation recorded in `ATOM-CHANGE-20261022-003`
+added the tests for the validation rules that had none, and the current
+figure is 48 in [`../../src/config/tests.rs`](../../src/config/tests.rs). The
+totals are unchanged: 106 unit tests in 12 modules, and 162 tests in the
+suite as a whole.
+
+#### Requirements and decisions referenced
+
+| Reference | Subject |
+| --------- | ------- |
+| [`../project-truth.md`](../project-truth.md) §12 | The persistence requirements, including the amended transaction rule. |
+| [`../project-truth.md`](../project-truth.md) §16 Q3 | The refresh-token lifetime question, of which the absolute-lifetime half is now settled by ADR-0003. |
+| [`../decisions/ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md) | The token design: the absolute lifetime, the rotation that preserves it, and the session-pruning grace. |
+| [`../decisions/ADR-0006-configuration-source-of-truth.md`](../decisions/ADR-0006-configuration-source-of-truth.md) | The configuration layers and the precedence the reference table describes. |
+| [`../database/migration-policy.md`](../database/migration-policy.md) | The rule that an applied migration is never edited. |
+
+#### Architectural impact
+
+None. No code, schema, contract or configuration changed by this entry: it is
+the documentation pass that accompanies the behaviour changes landing in
+parallel. Three of the documented behaviours are new or newly enforced — the
+pagination bounds are read from the configuration, the refresh rotation
+preserves the absolute deadline, and the configuration refuses a password
+minimum, a clock skew, a session prune grace and the two token lifetimes
+outside their bounds — and the documents now describe them as the truth.
+
+#### Compatibility impact
+
+None for a client. The pagination bounds keep their committed values of 20
+and 100, and the documents now say plainly that changing either of them is a
+breaking change for a client. The `search` parameter gains a documented
+length bound of 200 characters; a longer term is a `422` validation failure
+that names the `search` field. The body limit keeps both of its caps: the
+configured `app.limits.max_body_bytes` and the independent 4 MiB backstop in
+the extractor, which is recorded as `KI-018`.
+
+#### Security implications
+
+None of the findings was a security defect in the code, and no control was
+added, removed or weakened by this entry. Two security properties are now
+described accurately rather than falsely: the absolute lifetime of a refresh
+session is preserved by the rotation, and the configuration floors cannot be
+configured away.
+
+#### Checks and results
+
+| Command | Result |
+| ------- | ------ |
+| `cargo run --bin atom-docs` | **Passed.** `atom-docs: OK (0 warning(s))`, exit code 0. |
+| `cargo fmt --all -- --check` | **Not run.** This entry changed no Rust file, and the build cache is shared with the agents that are changing the code. |
+| `cargo clippy --all-targets --all-features -- -D warnings` | **Not run.** For the same reason. |
+| `cargo test --all-targets` | **Not run.** For the same reason. |
+
+#### Manual verification
+
+Every configuration key in the reference table was read out of the files in
+[`../../config/`](../../config/) and compared with the table, and every
+environment variable was compared with the override in
+[`../../src/config/loader.rs`](../../src/config/loader.rs). The two keys that
+did not match — `auth.jwt_issuer` and `auth.jwt_audience` — were corrected,
+and the key the parallel configuration work removed — `app.name` — was
+dropped.
+
+The `unwrap`, `expect` and `panic!` inventory was run over
+[`../../src/`](../../src/), and the remaining hits are in test modules, in
+[`../../src/telemetry.rs`](../../src/telemetry.rs) and in the default-value
+helpers of [`../../src/config/settings.rs`](../../src/config/settings.rs).
+The CORS layer contains no `panic!`.
+
+#### Reviewer findings
+
+The findings that this entry resolves were produced by the review of the
+documentation tree and confirmed against the source. No independent review
+has been performed on this change set; see [`review-log.md`](review-log.md).
+
+#### Documentation
+
+This entry is itself part of the documentation it describes. The documents
+changed are listed under *Affected features and files* above.
+
+#### Links
+
+- [`../database/schema.md`](../database/schema.md) §1.1 — the correction to the
+  stale migration comment.
+- `KI-015`, `KI-016`, `KI-017` and `KI-018` in
+  [`known-issues.md`](known-issues.md).
+- `Q-03` in [`open-questions.md`](open-questions.md).
+- [`../decisions/ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md).
+
+---
+
 ### ATOM-CHANGE-20261022-001 - The configuration centralisation
 
 **Date:** 2026-10-22 (UTC)
@@ -305,6 +1034,16 @@ exists to catch: a record that claimed a verification that had not held.
 | **The CI workflow would not have created the test database it points at** | Required | The official `postgres` image ignores `POSTGRES_MULTIPLE_DATABASES`. The workflow now creates `atom_test` with `psql` before the test step, and the compose file no longer relies on the non-existent variable. |
 | Two records still described the rate limiter as sharing one bucket | Required | `Q-07` and `KI-012` now describe the post-`KI-010` behaviour. |
 | Four advisory items | Advisory | A wrong document path, a mislabelled link, a stale sentence about the session revocation and a stale description of the rate-limiter row. |
+
+**Correction (2026-10-22).** The row "Two feature status files understated
+their own evidence" was written before the change had actually landed: the
+three rows still carried the sentences that understated the evidence, even
+though the tests they name existed in the tree. The sentences have now been
+removed, so the row is true of the tree: the `PROJ-R02`, `TASK-R01` and
+`TASK-R04` rows in
+[`../features/projects/status.md`](../features/projects/status.md) and
+[`../features/tasks/status.md`](../features/tasks/status.md) name the
+covering tests and no longer say the opposite.
 
 #### Requirements and decisions referenced
 

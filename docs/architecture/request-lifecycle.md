@@ -81,8 +81,10 @@ When the list is not empty:
   wildcard origin combined with credentials is a security foot-gun;
 - an entry that is not a valid header value is refused by the same rule, for
   the same reason;
-- the router keeps a `panic!` for an origin that fails to parse. The
-  validation makes it unreachable; it is an invariant, not a check;
+- the router therefore has nothing to assert. If an origin still fails to
+  parse, the layer falls back to an empty header value rather than panicking:
+  a mistake can never take the process down at run time, and the origin is
+  simply not matched;
 - the allowed methods and headers are fixed in the source; only the origins
   are configurable.
 
@@ -254,11 +256,11 @@ consequence is documented in
   consult it — Axum's own `Bytes`, `Json`, `String` and `Form`. Every
   endpoint of this API reads its body through the project's own
   `api::extract::Json`, which calls `req.into_limited_body()` and therefore
-  **does** consult the configured limit. **The effective cap on a JSON body is
-  the configured limit**, and there is no second, independent cap: the
-  extractor passes `usize::MAX` to `axum::body::to_bytes`, so a configured
-  limit is honoured in full. A body over the cap is answered with
-  `AppError::PayloadTooLarge`, which is a `413` in the standard envelope.
+  **does** consult the configured limit. The extractor also passes an
+  independent **4 MiB backstop** — the constant `MAX_BODY_BYTES_BACKSTOP` —
+  to `axum::body::to_bytes`, so a body is refused when it exceeds **either**
+  limit. A body over the cap is answered with `AppError::PayloadTooLarge`,
+  which is a `413` in the standard envelope.
 - **No concurrency limit.** There is no per-client cap on the number of
   simultaneous requests, and the timeout does not bound the work a query
   performs inside the database.

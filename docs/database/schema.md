@@ -32,6 +32,32 @@ users ──1:N──► refresh_sessions
 Two enum types are created by `migrations/0003_projects_and_tasks.sql`:
 `task_status` and `task_priority`.
 
+### 1.1 A stale comment in an applied migration
+
+The header comment of
+[`../../migrations/0001_users_and_sessions.sql`](../../migrations/0001_users_and_sessions.sql)
+says that "Deletes cascade for strictly-owned data and restrict where a parent
+must survive its children (projects -> tasks is handled explicitly in the
+service layer, see docs/database/migration-policy.md)".
+
+**That sentence is wrong.** The `projects → tasks` relation is a **database
+cascade**: `tasks.project_id` references `projects (id) ON DELETE CASCADE`,
+declared in
+[`../../migrations/0003_projects_and_tasks.sql`](../../migrations/0003_projects_and_tasks.sql).
+The service layer does not delete the tasks: the database deletes them, in the
+same statement and the same transaction as the delete of the project. The
+behaviour is described in §6 and in
+[`../architecture/data-architecture.md`](../architecture/data-architecture.md)
+§1.2, and it is verified by `deleting_a_project_removes_its_tasks` in
+[`../../tests/projects_tasks_api.rs`](../../tests/projects_tasks_api.rs).
+
+The comment has **not** been corrected in place, because the migration is
+**applied**: editing it would change its SQLx checksum, and the next start-up
+would refuse to run. The correction is recorded here and in
+[`../engineering/change-log.md`](../engineering/change-log.md) instead. The
+rule is in [`migration-policy.md`](migration-policy.md): an applied migration
+is never edited, and a schema change is a new migration.
+
 ---
 
 ## 2. `users`
@@ -104,6 +130,12 @@ its successor, so the history stays intact.
 
 A session is usable when `revoked_at IS NULL` and `expires_at > NOW()`; the
 same rule is expressed in `RefreshSession::is_usable_at`.
+
+The replacement row **inherits the original `expires_at`**. A rotation
+therefore never extends the absolute lifetime of a session: the deadline is
+measured from the moment the session was created. The property is analysed in
+[`../architecture/data-architecture.md`](../architecture/data-architecture.md)
+§7.1.
 
 ---
 

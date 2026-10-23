@@ -39,12 +39,16 @@ pub struct ProjectResponse {
     pub updated_at: DateTime<Utc>,
 }
 
-impl From<&Project> for ProjectResponse {
-    fn from(project: &Project) -> Self {
+/// Builds the public representation of a project.
+///
+/// The model is consumed rather than borrowed, so that the strings of a
+/// listed page are moved into the response instead of being copied.
+impl From<Project> for ProjectResponse {
+    fn from(project: Project) -> Self {
         Self {
             id: project.id,
-            name: project.name.clone(),
-            description: project.description.clone(),
+            name: project.name,
+            description: project.description,
             created_at: project.created_at,
             updated_at: project.updated_at,
         }
@@ -82,6 +86,8 @@ pub struct UpdateProjectRequest {
 #[into_params(parameter_in = Query)]
 pub struct ProjectQuery {
     /// Free-text search over name and description.
+    ///
+    /// At most 200 characters. A longer term is a validation failure.
     #[param(example = "phase")]
     pub search: Option<String>,
 }

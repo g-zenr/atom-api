@@ -12,7 +12,6 @@ use std::sync::Arc;
 use sqlx::PgPool;
 
 use crate::auth::password::PasswordHasher;
-use crate::auth::repository::RefreshSessionRepository;
 use crate::auth::service::AuthService;
 use crate::auth::token::TokenService;
 use crate::config::Config;
@@ -35,10 +34,6 @@ pub struct AppState {
     pub db: PgPool,
     /// The in-process rate limiter used by the authentication endpoints.
     pub rate_limiter: Arc<RateLimiter>,
-    /// Access-token issuing and verification.
-    pub tokens: Arc<TokenService>,
-    /// Argon2id password hashing.
-    pub passwords: Arc<PasswordHasher>,
     /// The authentication use cases.
     pub auth: AuthService,
     /// The note use cases.
@@ -83,53 +78,37 @@ impl AppState {
 
         let auth = AuthService::new(
             user_service,
-            tokens.clone(),
-            passwords.clone(),
+            tokens,
+            passwords,
             &db,
             messages.clone(),
             config.auth.refresh_token_ttl,
         );
 
-        let notes = NoteService::new(NoteRepository::new(db.clone()), messages.clone());
-        let projects = ProjectService::new(ProjectRepository::new(db.clone()), messages.clone());
-        let tasks = TaskService::new(TaskRepository::new(db.clone()), messages.clone());
+        let notes = NoteService::new(
+            NoteRepository::new(db.clone()),
+            messages.clone(),
+            config.api.pagination,
+        );
+        let projects = ProjectService::new(
+            ProjectRepository::new(db.clone()),
+            messages.clone(),
+            config.api.pagination,
+        );
+        let tasks = TaskService::new(
+            TaskRepository::new(db.clone()),
+            messages.clone(),
+            config.api.pagination,
+        );
 
         Ok(Self {
             config: Arc::new(config),
             db,
             rate_limiter,
-            tokens,
-            passwords,
             auth,
             notes,
             projects,
             tasks,
         })
-    }
-
-    /// The authentication use cases.
-    pub fn auth_service(&self) -> &AuthService {
-        &self.auth
-    }
-
-    /// The refresh-session repository.
-    pub fn sessions(&self) -> RefreshSessionRepository {
-        RefreshSessionRepository::new(self.db.clone())
-    }
-
-    /// Deletes refresh sessions that expired more than `grace` ago.
-    ///
-    /// Returns the number of removed rows.
-    pub async fn prune_expired_sessions(
-        &self,
-        grace: chrono::Duration,
-    ) -> Result<u64, sqlx::Error> {
-        self.auth
-            .prune_expired_sessions(grace)
-            .await
-            .map_err(|error| match error {
-                crate::error::AppError::Database(error) => error,
-                other => sqlx::Error::Protocol(other.to_string()),
-            })
     }
 }

@@ -151,8 +151,23 @@ Each feature directory contains the same five documents:
 | [`engineering/change-log.md`](engineering/change-log.md) | Newest-first chronological record of substantial changes. Append-only. |
 | [`engineering/implementation-status.md`](engineering/implementation-status.md) | The current verified state of every feature. |
 | [`engineering/review-log.md`](engineering/review-log.md) | Substantive reviews: findings, required fixes, resolution, re-review evidence. |
+| [`engineering/git-workflow.md`](engineering/git-workflow.md) | The branch model, the branch and commit naming rules, the six gates, the pull-request process, and how a review is conducted. |
+| [`engineering/release-and-promotion.md`](engineering/release-and-promotion.md) | How a change moves through DEV, UAT and PROD: the gate at each stage, what is verified, what is recorded, and what infrastructure does not exist yet. |
 | [`engineering/known-issues.md`](engineering/known-issues.md) | Confirmed defects, limitations, workarounds and remediation status. |
 | [`engineering/open-questions.md`](engineering/open-questions.md) | Unresolved product or architecture decisions. |
+
+### The audits
+
+| Document | Contents |
+| -------- | -------- |
+| [`audit/audit-report.md`](audit/audit-report.md) | The findings of the repository-wide audits: the evidence, the severity, the fix and the regression risk of each. |
+| [`audit/remediation-backlog.md`](audit/remediation-backlog.md) | The remediation tasks, their acceptance criteria and their status. |
+
+The audits are a **record of a review**, not a source of truth about the
+product. Where an audit finding and the code disagree, the code is right and
+the finding is a report of what the reviewer saw. Where an audit finding and
+[`project-truth.md`](project-truth.md) or an accepted ADR disagree, the
+requirement wins and the disagreement is recorded.
 
 ### Templates
 
@@ -183,10 +198,25 @@ cargo run --bin atom-docs            # check the tree
 pwsh ./scripts/check-docs.ps1        # the same check, Windows
 ```
 
-The checker verifies that required documents exist, that relative links
-resolve, that feature statuses use the defined vocabulary, that ADR
-identifiers are unique and have a status, that change identifiers are
-unique, and that every feature directory has its five documents.
+The checker verifies that:
+
+1. every required document exists;
+2. every relative link resolves;
+3. every feature status uses the defined vocabulary;
+4. every ADR has a status and a unique identifier;
+5. every change-log identifier is unique;
+6. every feature directory has its five documents;
+7. the configuration directory has its required files;
+8. `.env.example` and the configuration loader agree about the environment
+   variables, in both directions;
+9. the configuration files and the operator reference in
+   [`architecture/deployment.md`](architecture/deployment.md) agree about the
+   **names** of the settings, in both directions.
+
+The checker compares names, not values: a setting whose *default* in the
+reference table no longer matches the file is not reported. It also does not
+compare the second reference table, in [`../config/README.md`](../config/README.md);
+that table has to be kept in step by hand.
 
 The checker cannot tell you whether a sentence is *true*. That is the job of
 the `code-reviewer` and the `quality-gate` agents, and of every human

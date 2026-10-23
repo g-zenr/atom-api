@@ -23,7 +23,6 @@ use crate::auth::token::{
 use crate::config::messages::Messages;
 use crate::error::{AppError, AppResult};
 use crate::users::dto::{RegisterRequest, UserResponse};
-use crate::users::repository::UserRepository;
 use crate::users::service::UserService;
 
 /// Client metadata recorded alongside a session.
@@ -37,7 +36,6 @@ pub struct ClientMeta {
 #[derive(Clone)]
 pub struct AuthService {
     users: UserService,
-    user_repository: UserRepository,
     sessions: RefreshSessionRepository,
     tokens: Arc<TokenService>,
     passwords: Arc<PasswordHasher>,
@@ -67,7 +65,6 @@ impl AuthService {
     ) -> Self {
         Self {
             users,
-            user_repository: UserRepository::new(pool.clone()),
             sessions: RefreshSessionRepository::new(pool.clone()),
             tokens,
             passwords,
@@ -109,7 +106,7 @@ impl AuthService {
     pub async fn login(&self, request: LoginRequest, meta: &ClientMeta) -> AppResult<AuthResponse> {
         let email = UserService::normalize_email(&request.email);
 
-        let user = self.user_repository.find_by_email(&email).await?;
+        let user = self.users.find_user_by_email(&email).await?;
 
         let Some(user) = user else {
             // Spend the same time hashing as a real attempt would, so that the
@@ -199,10 +196,16 @@ impl AuthService {
             ));
         }
 
-        let Some(user) = self.user_repository.find_by_id(session.user_id).await? else {
-            return Err(AppError::Unauthorized(
-                self.messages.auth.refresh_token_invalid.clone(),
-            ));
+        // A missing account is an invalid credential, not a missing resource:
+        // the caller presented a token, not a path to a user.
+        let user = match self.users.get_user(session.user_id).await {
+            Ok(user) => user,
+            Err(AppError::NotFound(_)) => {
+                return Err(AppError::Unauthorized(
+                    self.messages.auth.refresh_token_invalid.clone(),
+                ));
+            }
+            Err(error) => return Err(error),
         };
 
         if !user.is_active {
@@ -214,20 +217,26 @@ impl AuthService {
 
         let issued = generate_refresh_token();
         let new_session_id = Uuid::new_v4();
-        let expires_at = self.refresh_expiry();
+
+        // The replacement inherits the deadline of the session it replaces.
+        //
+        // ADR-0003 requires one *absolute* refresh lifetime: rotating the
+        // token must not extend it, otherwise a client that keeps rotating
+        // holds a session forever. The deadline is the one recorded when the
+        // session was created, so it is the same value for every link of the
+        // chain.
+        let expires_at = session.expires_at;
 
         // The replacement row is written first, because the rotation link is a
         // foreign key to it.
-        self.sessions
-            .insert(
-                new_session_id,
-                user.id,
-                &issued.token_hash,
-                expires_at,
-                meta.user_agent.as_deref(),
-                meta.ip_address.as_deref(),
-            )
-            .await?;
+        self.new_session(
+            new_session_id,
+            user.id,
+            &issued.token_hash,
+            expires_at,
+            meta,
+        )
+        .await?;
 
         // Claim the old session atomically.
         //
@@ -303,18 +312,38 @@ impl AuthService {
         let session_id = Uuid::new_v4();
         let expires_at = self.refresh_expiry();
 
+        self.new_session(session_id, user_id, &issued.token_hash, expires_at, meta)
+            .await?;
+
+        self.token_pair(&issued, user_id, email)
+    }
+
+    /// Writes a refresh-session row.
+    ///
+    /// Both the first session of a token pair and the replacement of a
+    /// rotation go through this helper, so the two cannot drift apart. The
+    /// deadline is a parameter: a rotation passes the deadline of the session
+    /// it replaces, which is what keeps the absolute lifetime absolute.
+    async fn new_session(
+        &self,
+        session_id: Uuid,
+        user_id: Uuid,
+        token_hash: &str,
+        expires_at: DateTime<Utc>,
+        meta: &ClientMeta,
+    ) -> AppResult<()> {
         self.sessions
             .insert(
                 session_id,
                 user_id,
-                &issued.token_hash,
+                token_hash,
                 expires_at,
                 meta.user_agent.as_deref(),
                 meta.ip_address.as_deref(),
             )
             .await?;
 
-        self.token_pair(&issued, user_id, email)
+        Ok(())
     }
 
     /// Builds the token pair for a refresh token that was just issued.
@@ -328,9 +357,7 @@ impl AuthService {
         user_id: Uuid,
         email: &str,
     ) -> AppResult<TokenPair> {
-        let access = self
-            .tokens
-            .issue_access_token(&user_id.to_string(), email)?;
+        let access = self.tokens.issue_access_token(user_id, email)?;
 
         Ok(TokenPair {
             access_token: access.token,
@@ -342,28 +369,34 @@ impl AuthService {
     }
 
     /// The absolute expiry of a refresh session.
+    ///
+    /// The configured lifetime is bounded by the configuration validation, so
+    /// the conversion to a `chrono` duration cannot fail. If it ever did, the
+    /// fallback is a zero-length session rather than an unbounded one.
     fn refresh_expiry(&self) -> DateTime<Utc> {
-        Utc::now()
-            + chrono::Duration::from_std(self.refresh_ttl)
-                .unwrap_or_else(|_| chrono::Duration::days(14))
+        Utc::now() + chrono::Duration::from_std(self.refresh_ttl).unwrap_or_default()
     }
 
     /// Validates the credentials carried by a bearer token.
+    ///
+    /// Every failure mode produces the same error, so that a caller cannot
+    /// tell a bad signature from an unknown account.
     pub async fn authenticate_bearer(&self, token: &str) -> AppResult<UserResponse> {
         let claims = self
             .tokens
             .decode_access_token(token)
-            .map_err(|_| AppError::Unauthorized(self.messages.auth.access_token_invalid.clone()))?;
+            .map_err(|_| self.invalid_access_token())?;
 
-        let user_id = Uuid::parse_str(&claims.sub)
-            .map_err(|_| AppError::Unauthorized(self.messages.auth.access_token_invalid.clone()))?;
+        // The subject is typed, so there is nothing to parse: a malformed one
+        // never reaches this point.
+        let user_id = claims.sub;
 
-        let user = self.user_repository.find_by_id(user_id).await?;
-
-        let Some(user) = user else {
-            return Err(AppError::Unauthorized(
-                self.messages.auth.access_token_invalid.clone(),
-            ));
+        // A missing account is an invalid credential, not a missing resource:
+        // the caller presented a token, not a path to a user.
+        let user = match self.users.get_user(user_id).await {
+            Ok(user) => user,
+            Err(AppError::NotFound(_)) => return Err(self.invalid_access_token()),
+            Err(error) => return Err(error),
         };
 
         if !user.is_active {
@@ -373,5 +406,10 @@ impl AuthService {
         }
 
         Ok(UserResponse::from(&user))
+    }
+
+    /// The error for a bearer token that cannot be trusted.
+    fn invalid_access_token(&self) -> AppError {
+        AppError::Unauthorized(self.messages.auth.access_token_invalid.clone())
     }
 }

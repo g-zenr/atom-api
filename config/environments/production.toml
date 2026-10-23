@@ -26,10 +26,11 @@ prune_interval_seconds = 900
 # default. Set this to `true` if the deployment wants them.
 docs_enabled = false
 
-[api.pagination]
-# A smaller maximum page, so that one request cannot pull a large slice of
-# the table.
-max_limit = 100
+# The pagination bounds are deliberately not overridden here. They are part of
+# the published client convention, so a client must see the same page size in
+# every environment. An operator that needs a smaller page changes
+# `api.pagination.max_limit` in the base file, deliberately and for every
+# environment at once.
 
 [database]
 # A larger pool, because the production deployment serves more traffic than

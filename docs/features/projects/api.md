@@ -62,17 +62,19 @@ The task endpoints that live under a project are documented in
 ### Query parameters — `GET /api/v1/projects`
 
 The endpoint accepts the two shared pagination parameters, which are declared
-once for the whole API in `PaginationQuery`, and one filter of its own:
+once for the whole API in `PaginationQuery` and described in
+[`conventions.md`](../../api/conventions.md) §5, and one filter of its own:
 
 | Parameter | Type | Default | Meaning |
 | --------- | ---- | ------- | ------- |
-| `limit` | integer | `20` | Page size. Capped at 100. A value of zero or less falls back to 20. |
-| `offset` | integer | `0` | Items to skip. A negative value falls back to 0. |
-| `search` | string | — | Case-insensitive substring match over the name **or** the description. Trimmed; an empty value is treated as no search. |
+| `search` | string | — | Case-insensitive substring match over the name **or** the description. Trimmed; an empty value is treated as no search. At most 200 characters. |
 
 `limit` and `offset` are the shared pagination parameters; `search` is the
-filter of the projects feature. The convention is described in
-[`conventions.md`](../../api/conventions.md) §5.
+filter of the projects feature, and it is the only parameter this endpoint
+declares of its own. A `search` term longer than 200 characters is a `422`
+validation failure that names the `search` field; the bound is enforced by the
+shared validator `validate_search` in `src/helpers/validation.rs`, and its
+wording comes from the message catalogue in `config/messages.toml`.
 
 ## 3. `GET /api/v1/projects`
 
@@ -105,6 +107,7 @@ The order is `created_at DESC`, then `id DESC`.
 | ------ | ---- | ---- |
 | `400` | `bad_request` | A query parameter cannot be parsed, for example `limit=abc`. |
 | `401` | `unauthorized` | No access token, or an invalid one. |
+| `422` | `validation_failed` | The `search` term is longer than 200 characters. `details` names the field. |
 | `500` | `database_error` | The database failed. |
 
 ```bash

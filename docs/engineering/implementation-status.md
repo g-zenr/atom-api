@@ -37,9 +37,9 @@ A feature is never `Verified` because the code exists or compiles.
 | Area | Status | Evidence | Last verified |
 | ---- | ------ | -------- | ------------- |
 | Rust/Axum modular monolith | `Implemented` | [`../../src/`](../../src/), [`../../Cargo.toml`](../../Cargo.toml) | 2026-10-22 |
-| Typed configuration with start-up validation | `Verified` | [`../../src/config/`](../../src/config/) — three layers (the committed files, the environment overlay, the environment variables), resolved once and validated before the socket is bound. The loader is exercised by the integration harness, which starts from `Config::defaults()`. The validation rules and the precedence between the layers are covered by the 27 unit tests in [`../../src/config/tests.rs`](../../src/config/tests.rs) — see [`../testing/strategy.md`](../testing/strategy.md) §6. | 2026-10-22 |
+| Typed configuration with start-up validation | `Verified` | [`../../src/config/`](../../src/config/) — three layers (the committed files, the environment overlay, the environment variables), resolved once and validated before the socket is bound. The loader is exercised by the integration harness, which starts from `Config::defaults()`. The validation rules and the precedence between the layers are covered by the unit tests in [`../../src/config/tests.rs`](../../src/config/tests.rs) — 50 cases, counted on 2026-10-22; see [`../testing/strategy.md`](../testing/strategy.md) §6. | 2026-10-22 |
 | Client-facing message catalogue | `Implemented` | [`../../config/messages.toml`](../../config/messages.toml), [`../../src/config/messages.rs`](../../src/config/messages.rs) — every string that reaches a client through the error envelope. The stable codes live in the `code` module in [`../../src/error.rs`](../../src/error.rs); the messages for a database failure and for an unexpected failure stay in the error type. | 2026-10-22 |
-| Shared text validators | `Verified` | [`../../src/helpers/validation.rs`](../../src/helpers/validation.rs) — 3 unit tests. `required_text` trims and rejects an empty value; `bounded_text` keeps the value verbatim. | 2026-10-22 |
+| Shared text validators | `Verified` | [`../../src/helpers/validation.rs`](../../src/helpers/validation.rs) — 4 unit tests. `required_text` trims and rejects an empty value; `bounded_text` keeps the value verbatim. | 2026-10-22 |
 | Central error contract with a stable error code | `Verified` | [`../../src/error.rs`](../../src/error.rs) — 5 unit tests | 2026-10-22 |
 | SQLx migrations, append-only | `Implemented` | [`../../migrations/`](../../migrations/) — three migrations, applied by the harness and at start-up | 2026-10-22 |
 | Structured logging with request correlation | `Implemented` | [`../../src/telemetry.rs`](../../src/telemetry.rs), [`../../src/api/mod.rs`](../../src/api/mod.rs) | 2026-10-22 |
@@ -49,17 +49,17 @@ A feature is never `Verified` because the code exists or compiles.
 | Documentation tree | `Verified` | [`../`](../) — `cargo run --bin atom-docs` reports no error and no warning | 2026-10-22 |
 | Registration with a unique, normalized email | `Verified` | [`../../src/users/`](../../src/users/), [`../../migrations/0001_users_and_sessions.sql`](../../migrations/0001_users_and_sessions.sql) — the cases in [`../../tests/auth_api.rs`](../../tests/auth_api.rs) | 2026-10-22 |
 | Argon2id hashing and the password policy | `Verified` | [`../../src/auth/password.rs`](../../src/auth/password.rs) — 6 unit tests; [`../../src/users/service.rs`](../../src/users/service.rs) — 9 unit tests; the weak-password case in [`../../tests/auth_api.rs`](../../tests/auth_api.rs) | 2026-10-22 |
-| Access tokens with issuer and audience validation | `Verified` | [`../../src/auth/token.rs`](../../src/auth/token.rs) — 6 unit tests; the authentication cases in [`../../tests/auth_api.rs`](../../tests/auth_api.rs) | 2026-10-22 |
+| Access tokens with issuer and audience validation | `Verified` | [`../../src/auth/token.rs`](../../src/auth/token.rs) — 7 unit tests; the authentication cases in [`../../tests/auth_api.rs`](../../tests/auth_api.rs) | 2026-10-22 |
 | Refresh rotation, reuse detection and revocation | `Verified` | [`../../src/auth/service.rs`](../../src/auth/service.rs), [`../../src/auth/repository.rs`](../../src/auth/repository.rs) — the rotation claims the old session atomically; the rotation, reuse and logout cases in [`../../tests/auth_api.rs`](../../tests/auth_api.rs) | 2026-10-22 |
 | Expired refresh-session pruning | `Implemented` | [`../../src/main.rs`](../../src/main.rs) — the background task calls `delete_expired` every hour with a one-day grace. **No test covers it.** | 2026-10-22 |
 | Generic authentication failure | `Verified` | [`../../src/auth/service.rs`](../../src/auth/service.rs); two cases in [`../../tests/auth_api.rs`](../../tests/auth_api.rs) | 2026-10-22 |
 | Ownership isolation | `Verified` | [`../../src/notes/repository.rs`](../../src/notes/repository.rs), [`../../src/projects/repository.rs`](../../src/projects/repository.rs), [`../../src/tasks/repository.rs`](../../src/tasks/repository.rs); the isolation cases in [`../../tests/notes_api.rs`](../../tests/notes_api.rs) and [`../../tests/projects_tasks_api.rs`](../../tests/projects_tasks_api.rs) | 2026-10-22 |
 | Rate limiting on the authentication endpoints | `Verified` | [`../../src/ratelimit.rs`](../../src/ratelimit.rs) - 3 unit tests for the algorithm; `the_authentication_endpoints_are_rate_limited` in [`../../tests/auth_api.rs`](../../tests/auth_api.rs) | 2026-10-22 |
 | CORS allowlist, body limit, request timeout, panic containment | `Verified` | [`../../src/api/mod.rs`](../../src/api/mod.rs), [`../../src/api/extract.rs`](../../src/api/extract.rs); `an_oversized_body_is_refused` and `an_unknown_route_returns_the_error_envelope` in [`../../tests/auth_api.rs`](../../tests/auth_api.rs), `a_slow_request_is_abandoned_with_the_error_envelope` in [`../../tests/projects_tasks_api.rs`](../../tests/projects_tasks_api.rs) | 2026-10-22 |
-| Notes CRUD, archive, search, pagination | `Verified` | [`../../src/notes/`](../../src/notes/) — 5 unit tests; 8 cases in [`../../tests/notes_api.rs`](../../tests/notes_api.rs) | 2026-10-22 |
+| Notes CRUD, archive, search, pagination | `Verified` | [`../../src/notes/`](../../src/notes/) — 5 unit tests; 9 cases in [`../../tests/notes_api.rs`](../../tests/notes_api.rs) | 2026-10-22 |
 | Projects CRUD, search, pagination | `Verified` | [`../../src/projects/`](../../src/projects/) — 5 unit tests; the project cases in [`../../tests/projects_tasks_api.rs`](../../tests/projects_tasks_api.rs) | 2026-10-22 |
 | Tasks CRUD, status, priority, filtering, ordering, completion timestamp | `Verified` | [`../../src/tasks/`](../../src/tasks/) — 7 unit tests; the task cases in [`../../tests/projects_tasks_api.rs`](../../tests/projects_tasks_api.rs) | 2026-10-22 |
-| Pagination convention | `Verified` | [`../../src/pagination.rs`](../../src/pagination.rs) — 3 unit tests; the pagination case in [`../../tests/notes_api.rs`](../../tests/notes_api.rs) | 2026-10-22 |
+| Pagination convention | `Verified` | [`../../src/pagination.rs`](../../src/pagination.rs) — 5 unit tests; the pagination case in [`../../tests/notes_api.rs`](../../tests/notes_api.rs) | 2026-10-22 |
 | Contract tests against the OpenAPI document | `Implemented` | The document is generated from the handlers in [`../../src/api/routes.rs`](../../src/api/routes.rs), so it cannot list a route that does not exist. **No test asserts its content.** | 2026-10-21 |
 | The disposable test database guard | `Verified` | [`../../tests/common/mod.rs`](../../tests/common/mod.rs) refuses to start unless the database name contains `test` | 2026-10-22 |
 | CI pipeline | `Implemented` | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) - formatting, linting, the test suite, a release build, the documentation check and the OpenCode configuration check. | 2026-10-22 |
@@ -68,15 +68,19 @@ A feature is never `Verified` because the code exists or compiles.
 | Edge rate limiting | `Proposed` | The requirement in [`../project-truth.md`](../project-truth.md) §9.10 applies to a production deployment. | — |
 | Everything in the roadmap | `Proposed` | By design. See [`../roadmap.md`](../roadmap.md). | — |
 
-The last full run of the test suite was on 2026-10-22: 92 tests passed (39
-unit, 26 authentication, 8 notes, 19 projects and tasks). **The tree has
-changed since that run.** The configuration centralisation turned the
-configuration module into a directory and added the shared validators, so the
-tree now holds 80 unit tests in 9 modules, and the configuration module is
-not covered by a unit test at all — which is why the configuration rows above
-are `Implemented` and not `Verified`. The suite has **not** been re-run on the
-current tree; the checks that were run are recorded in
-[`change-log.md`](change-log.md) under `ATOM-CHANGE-20261022-001`. The earlier
+The last full run of the test suite was on 2026-10-22: **177 tests passed**
+(111 unit, 29 authentication, 12 notes, 25 projects and tasks), 0 failed. The
+run covers the current tree, after the audit remediation recorded in
+[`change-log.md`](change-log.md) under `ATOM-CHANGE-20261022-003`: the
+configuration module contributes 50 unit tests in
+[`../../src/config/tests.rs`](../../src/config/tests.rs), the shared validators
+four in [`../../src/helpers/validation.rs`](../../src/helpers/validation.rs),
+and the pagination convention five in
+[`../../src/pagination.rs`](../../src/pagination.rs). That is why the
+configuration row above is `Verified` and not `Implemented`.
+
+The checks that were run, and their real output, are recorded in
+[`change-log.md`](change-log.md) under `ATOM-CHANGE-20261022-003`. The earlier
 failure of the formatting and lint gates at the end of 2026-10-21 — on a file
 that another agent was editing concurrently — is recorded in
 [`change-log.md`](change-log.md) under `ATOM-CHANGE-20261021-001` (status
@@ -89,7 +93,7 @@ the accepted scope rather than as an anonymous backlog.
 
 | # | Missing | Requirement it serves | Why it is not done yet | Recorded as |
 | - | ------- | ---------------------- | ---------------------- | ----------- |
-| 1 | A CI pipeline that runs the three gates on every change | [`../project-truth.md`](../project-truth.md) §13.6, and the open-source contribution goal in §3 | **Done.** [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) runs the gates on every push and pull request. It has never run on a GitHub runner, because the repository has not been published. | `KI-005` in [`known-issues.md`](known-issues.md), Closed |
+| 1 | A CI pipeline that runs the three gates on every change | [`../project-truth.md`](../project-truth.md) §13.6, and the open-source contribution goal in §3 | **Verified.** [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) runs the gates on every push and pull request. It has been observed passing on GitHub-hosted runners, on runs `39761383251` and `39765107169`, and it found two real defects in its own first executions. | `KI-005` in [`known-issues.md`](known-issues.md), Closed |
 | 2 | A container image for the API | The deployment story in [`../architecture/deployment.md`](../architecture/deployment.md) | [`../../docker-compose.yml`](../../docker-compose.yml) provides PostgreSQL for local development only and explicitly does not build an application image. | `KI-006` in [`known-issues.md`](known-issues.md) |
 | 3 | Compile-time SQLx verification (`cargo sqlx prepare` plus a CI check) | [`../project-truth.md`](../project-truth.md) §12 and the reproducibility requirement | It would make the build depend on a live database, which conflicts with the constraint that the build must not require a hosted or paid service. | `KI-004` in [`known-issues.md`](known-issues.md) |
 | 4 | Edge rate limiting in front of the API | [`../project-truth.md`](../project-truth.md) §9.10 | The in-process limiter is a defence-in-depth control. Edge limiting is a deployment concern. | `KI-001` in [`known-issues.md`](known-issues.md) |

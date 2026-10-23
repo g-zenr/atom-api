@@ -227,8 +227,13 @@ oversight.
    secret hygiene.
 10. **Rate limiting protects authentication**, and production deployments put
     edge rate limiting in front of the API as well.
-11. **HTTPS is required in production**; the API refuses to trust
-    `X-Forwarded-For` unless a trusted proxy sets it.
+11. **HTTPS is required in production**; the API never reads the
+    `X-Forwarded-For` header, and there is no trusted-proxy declaration. The
+    client address the API uses is the peer address of the connection. How a
+    trusted proxy would be declared is an open decision, `Q-07` in
+    [`engineering/open-questions.md`](engineering/open-questions.md); the
+    limitation is recorded as `KI-003` in
+    [`engineering/known-issues.md`](engineering/known-issues.md).
 
 ## 10. Supported platforms and clients
 
@@ -276,7 +281,14 @@ The API is plain HTTP/1.1 with JSON bodies, so any HTTP client can use it.
   constraints where practical.
 - Indexes exist for the access paths the API actually uses: ownership
   lookups, listing order, filters and search.
-- Multi-step writes use an explicit transaction.
+- Multi-step writes use an explicit transaction, unless an accepted ADR
+  records that the ordering fails safe. The refresh-token rotation is the one
+  such case: the replacement session is inserted before the presented one is
+  claimed, so an interruption leaves the caller with a usable session rather
+  than with none. That ordering is recorded in
+  [`decisions/ADR-0003-auth-token-design.md`](decisions/ADR-0003-auth-token-design.md)
+  and analysed in
+  [`architecture/data-architecture.md`](architecture/data-architecture.md) §7.
 - Migrations are reproducible: applying them to an empty database produces the
   same schema as applying them in sequence.
 
@@ -350,7 +362,7 @@ blocks Phase 1 work that does not depend on the answer.
 | - | -------- | ------ |
 | Q1 | Should a deleted project delete its tasks, or archive them? | Phase 1 implements *delete*, matching the current schema. If the answer becomes *archive*, the task table needs a soft-delete column. |
 | Q2 | Should refresh tokens live in an HTTP-only cookie instead of the response body? | The browser client design. Bearer tokens work for both the future web and mobile clients; a cookie choice adds CSRF obligations. |
-| Q3 | What is the refresh-token absolute lifetime and idle timeout? | Currently one absolute lifetime, no idle timeout. |
+| Q3 | What is the refresh-token absolute lifetime and idle timeout? | One absolute lifetime, no idle timeout. The implementation matches the absolute-lifetime answer that [`decisions/ADR-0003-auth-token-design.md`](decisions/ADR-0003-auth-token-design.md) already records, and the rotation preserves that deadline. The idle timeout is still open. |
 | Q4 | Should note search support ranking and highlighting? | The search UX. Phase 1 uses a plain full-text match. |
 | Q5 | Does the future web client need refresh tokens in cookies, and does ATOM need a CSRF strategy? | The web client, not the API. |
 

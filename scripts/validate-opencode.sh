@@ -10,14 +10,29 @@
 #   5. JSON/JSONC well-formedness
 #   6. secret scan
 #
-# Exit code 0 means every check passed.
+# Flags, for a runner that has no provider credentials:
+#   --skip-model-check      do not ask the catalog whether the default model
+#                           is offered
+#   --skip-agent-discovery  do not ask which agents were discovered. The agents
+#                           inherit the default model, so without a provider
+#                           every one of them reports as missing. The skip is
+#                           printed as a warning, never as a pass.
+#
+# Exit code 0 means every check that ran passed.
 
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 
-SKIP_MODEL_CHECK="${1:-}"
+SKIP_MODEL_CHECK=""
+SKIP_AGENT_DISCOVERY=""
+for arg in "$@"; do
+  case "$arg" in
+    --skip-model-check)     SKIP_MODEL_CHECK="--skip-model-check" ;;
+    --skip-agent-discovery) SKIP_AGENT_DISCOVERY="--skip-agent-discovery" ;;
+  esac
+done
 
 failures=()
 warnings=()
@@ -57,7 +72,7 @@ if command -v opencode >/dev/null 2>&1; then
 fi
 
 step "Agent discovery"
-if command -v opencode >/dev/null 2>&1; then
+if command -v opencode >/dev/null 2>&1 && [ "$SKIP_AGENT_DISCOVERY" != "--skip-agent-discovery" ]; then
   if agents_raw="$(opencode debug agents 2>&1)"; then
     expected="orchestrator architect rust-backend auth-security database test-engineer code-reviewer quality-gate docs devops"
     for name in $expected; do
@@ -83,6 +98,13 @@ if command -v opencode >/dev/null 2>&1; then
   else
     fail "opencode debug agents failed"
   fi
+elif [ "$SKIP_AGENT_DISCOVERY" = "--skip-agent-discovery" ]; then
+  # Agent discovery resolves the default model through the configured provider,
+  # so it reports every agent as missing on a runner that has no provider
+  # credentials. Skipping it is stated as a warning rather than passed silently,
+  # so the output never looks like the agents were checked.
+  warn "agent discovery skipped: this environment has no provider credentials"
+  warn "run this script locally, or in CI with a provider, to check the agents"
 fi
 
 step "Model availability"

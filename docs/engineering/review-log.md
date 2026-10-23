@@ -1,7 +1,7 @@
 # ATOM review log
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 
 The record of independent reviews of changes to the ATOM backend: what was
@@ -22,11 +22,24 @@ recorded.
 
 ## The entries so far
 
-One review has been performed:
-`ATOM-REVIEW-20261021-001`, the review of the Phase 1 implementation and the
-OpenCode engineering system. It returned **APPROVE WITH COMMENTS** with
-eleven findings; all eleven are resolved and the re-review evidence is
-recorded with the entry.
+Three reviews have been performed:
+
+- `ATOM-REVIEW-20261022-003`, the review of the final remediation pass recorded
+  in [`change-log.md`](change-log.md) as `ATOM-CHANGE-20261022-007`. It returned
+  **FAIL** with one blocking defect: the shutdown grace was expressed in
+  seconds but carried the old millisecond value, and the drain was applied
+  inside the signal future, which delays the shutdown instead of bounding it.
+  It also found that `F-06` had been marked `verified` while five copies of the
+  fixture still existed, and that three new tests could not distinguish the
+  fix they claimed to guard. All of it is corrected and re-verified below.
+- `ATOM-REVIEW-20261022-002`, the review of the audit remediation recorded in
+  [`change-log.md`](change-log.md) as `ATOM-CHANGE-20261022-003`. It returned
+  **ACCEPT WITH REQUIRED FOLLOW-UP** with seventeen findings; the seven it
+  required are resolved and the re-verification is recorded with the entry.
+- `ATOM-REVIEW-20261021-001`, the review of the Phase 1 implementation and the
+  OpenCode engineering system. It returned **APPROVE WITH COMMENTS** with
+  eleven findings; all eleven are resolved and the re-review evidence is
+  recorded with the entry.
 
 The Phase 1 foundation itself, recorded in
 [`change-log.md`](change-log.md) as `ATOM-CHANGE-20261021-001`, was **not**
@@ -114,8 +127,7 @@ Re-inspected by: code-reviewer, 2026-10-22 -> APPROVE.
 ```
 
 The example above is illustrative. **It is not a record of a review that
-happened.** No review has taken place yet, and the first real entry will carry
-a real identifier and real output.
+happened.** The first real entry is below.
 
 ## Related
 
@@ -126,6 +138,144 @@ a real identifier and real output.
   answer.
 - [`../testing/verification-policy.md`](../testing/verification-policy.md) —
   the rules this log implements.
+
+---
+
+### ATOM-REVIEW-20261022-003 — The final remediation pass
+
+**Date:** 2026-10-22 (UTC)
+**Reviewer:** the `code-reviewer` agent, read-only
+**Change reviewed:** `ATOM-CHANGE-20261022-007`
+**Verdict:** **FAIL**, one blocking defect and nine non-blocking findings.
+**Outcome after the follow-up:** all blocking and non-blocking findings
+resolved; re-verified by the commands below.
+
+#### What the reviewer confirmed was correct
+
+The token subject is typed `Uuid` end to end and a malformed one still yields
+`401`. The start-up redaction cannot leak the connection string on any
+`sqlx::Error` or `MigrateError` path. The `RequestContext` extension is outer to
+the timeout middleware in the layer order, so requiring it is not a regression.
+Every validation rule survived the split into per-group functions. The list
+statements are static fragments with the ownership predicate written out, the
+tri-state archive filter resolves identically, and no parameter is mis-bound.
+The combined task statement preserves both the `404` and the empty-page answer.
+`utoipa-swagger-ui` still carries `vendored` and the lockfile agrees.
+
+#### The blocking defect
+
+| Finding | Correction |
+| ------- | ---------- |
+| The new `shutdown_grace_seconds` was `100`, an integer of **seconds**, while the code had used 100 **milliseconds**: a 1000× change that the change log described as "no change for a deployment". Worse, the sleep sat inside the future passed to `with_graceful_shutdown`, so the listener kept accepting new connections for the whole grace and the drain that followed was **unbounded** — the opposite of what the setting was documented to do. | The signal future now resolves immediately. The listener stops accepting on the signal, and the drain is bounded by a `select!` against a deadline that starts when the signal arrives. The units are honest: `shutdown_grace_seconds = 10`, a real ceiling. The change log states the operational change instead of denying it. |
+
+#### The other findings, and what was done
+
+| # | Finding | Correction |
+| - | ------- | ---------- |
+| 1 | The new setting had only the rejection test, not the default or the override that AGENTS.md §4.11 requires | Added `the_shutdown_grace_can_be_set_from_the_environment` and a defaults assertion |
+| 2 | `F-06` was marked `verified` while five byte-identical `fn messages()` fixtures remained | Consolidated into `config::messages::test_messages()`; the task record now says the earlier status was wrong |
+| 3 | Three pagination tests asserted 20/100, the same values as the old constants, so they passed against the pre-fix code | They now build a state with bounds of **7 and 13** through the new `test_state_with_pagination` helper, so a fallback to a literal fails |
+| 4 | The rate-limiter tests cannot distinguish the amortised sweep from a per-check one | The backlog now says so: they pin the behaviour, and the optimisation rests on its cost argument |
+| 5 | Four documents said the limiter's map is swept on every check | `module-boundaries.md`, `deployment.md`, `threat-model.md` T-11 and `authentication/status.md` corrected, with the boundedness restated honestly |
+| 6 | `telemetry::init`'s signature, formatter choice and error behaviour were described as they were before | `module-boundaries.md` §7.6, `system-overview.md` and `deployment.md` §6.1 corrected |
+| 7 | Documents still listed `auth_service()` and `RateLimiter::reset`, and said `AuthService` holds a `UserRepository` | All three removed |
+| 8 | The test counts in `implementation-status.md` and `testing/strategy.md` were stale | 177 total: 111 unit, 29 authentication, 12 notes, 25 projects and tasks. The configuration module contributes 50 |
+| 9 | `notes/testing.md` contradicted itself about the page size and listed a covered case as a gap | Corrected |
+
+Two smaller items were also fixed: the shutdown grace was missing from the
+positivity rule in `deployment.md` §1.4, and a comment in `src/api/mod.rs`
+called a value copy "not a copy".
+
+#### Re-verification
+
+| Command | Result |
+| ------- | ------ |
+| `cargo fmt --all -- --check` | **Passed.** Exit code 0. |
+| `cargo clippy --all-targets --all-features -- -D warnings` | **Passed.** Exit code 0, no warning. |
+| `cargo test --all-targets` | **Passed.** 177 tests, 0 failed. |
+| `cargo run --bin atom-docs` | **Passed.** `OK (0 warning(s))`. |
+| `cargo run --bin atom-docs -- --strict` | **Passed.** `OK (0 warning(s))`. |
+| `scripts/validate-opencode.ps1` | **Passed.** `PASSED: all checks completed (0 warning(s)).` |
+| Live process, disposable database | `GET /health/live` → `{"status":"live"}`; `GET /api/v1/docs` → `200`; `GET /api/v1/openapi.json` → `info.title = "ATOM API"`, 13 paths, `422` declared on the notes listing. This exercises the restored `vendored` Swagger bundle. |
+
+**Not verified at runtime:** the shutdown path itself. Delivering a console
+Ctrl-C event to a background process on Windows is not something this
+environment can do, so the drain bound is verified by reading the code and by
+compilation, not by a signal test. That is stated rather than implied.
+
+---
+
+### ATOM-REVIEW-20261022-002 - Review of the audit remediation
+
+**Date:** 2026-10-22 (UTC)
+**Reviewer:** the read-only `code-reviewer` agent
+**Scope:** the whole working tree against `aba97f6` — 70 modified files and
+the new [`../audit/`](../audit/) directory
+**Verdict:** ACCEPT WITH REQUIRED FOLLOW-UP
+**Status:** Closed - every required finding is resolved
+
+#### What the review checked
+
+The correctness of the two behavioural fixes (`F-01`, the applied pagination
+bounds, and `F-02`, the preserved refresh deadline), the regression risk of
+the new configuration floors, whether each new validation rule is reachable
+and tested, the `search` bound, the body-reader ceiling, the extended
+documentation checker, dead code and duplication, whether any security control
+was weakened, the accuracy of the documentation, and whether the audit report
+itself overstates anything.
+
+The reviewer ran `cargo fmt --all -- --check` and
+`cargo clippy --all-targets --all-features -- -D warnings` read-only, and
+re-implemented the two new checker functions by hand because the permission
+layer blocks `cargo run`. It could not run the test suite; the orchestrator
+ran it.
+
+#### Findings and resolutions
+
+| # | Severity | Finding | Resolution |
+| - | -------- | ------- | ---------- |
+| `R-01` | Medium | The list endpoints can now answer `422`, because the `search` bound is enforced in the service, but the OpenAPI annotations did not declare it. | **Fixed.** [`../../src/notes/handlers.rs`](../../src/notes/handlers.rs) and [`../../src/projects/handlers.rs`](../../src/projects/handlers.rs) declare the `422`, and the `search` parameter descriptions name the 200-character bound. |
+| `R-02` | Medium | `docs/api/error-contract.md` said "exactly three sources of a `422`"; the search bound is a fourth. | **Fixed.** The document names `validate_search` and the field `search`. |
+| `R-03` | Medium | The authentication testing document said the inherited deadline was untested; the test was added in the same change. | **Fixed.** The row now names `a_rotation_preserves_the_absolute_lifetime_of_the_session`. |
+| `R-04` | Medium | The new `helpers` table in the module boundaries had a malformed row: two cells were merged with a doubled `\|`. | **Fixed.** The row is split. |
+| `R-05` | Medium | Two documents said the `search` bound was untested. | **Fixed.** Both name the unit test and the HTTP-level test. |
+| `R-06` | Medium | Four documents described the 4 MiB ceiling as a silent clamp, and named the wrong file for the constant. The code refuses the configuration at start-up. | **Fixed.** The four documents say the configuration is refused, and the constant is named in `src/config/validation.rs`. |
+| `R-07` | Medium | `KI-018` described a backstop as if it had always been there. Before the remediation the extractor passed `usize::MAX` and the configured limit was the only cap. | **Fixed.** The record says the backstop and the ceiling were introduced by `ATOM-CHANGE-20261022-003`, and that a deployment configured above 4 MiB previously started and now does not. |
+| `R-08` | Low | The pagination maximum gained no ceiling, while every other configurable limit in the change did. | **Fixed.** `MAX_PAGINATION_LIMIT` (1000 items) is enforced, with a test. |
+| `R-09` | Low | Seven test counts in the documentation did not match the tree. | **Fixed.** Every count was recounted and corrected. |
+| `R-10` | Low | The implementation status said the suite had not been re-run, while the change log recorded a run of the same tree. | **Fixed.** The paragraph now records the 162-test run. |
+| `R-11` | Low | The audit report said both High findings were found by three audits; only one was, and its category table double-counted a finding and omitted two. | **Fixed.** |
+| `R-12` | Low | The change log used two different finding-identifier schemes without saying so. | **Fixed.** A note now explains the mapping. |
+| `R-13` | Low | The new checker compares setting **names**, not values, and does not read the second reference table in `config/README.md`. | **Accepted, with the wording narrowed.** [`../README.md`](../README.md) §5 now says the checker compares names and does not compare the second table. Comparing the default values and the second table is a task in the backlog. |
+| `R-14` | Low | The body-reader ceiling sat in the settings module while its five sibling floors sat in the validation module. | **Fixed.** The ceiling moved to [`../../src/config/validation.rs`](../../src/config/validation.rs) with the other floors. |
+| `R-15` | Low | The test harness could set a body limit above the ceiling, because it mutates the configuration after validation. | **Fixed.** The harness asserts the ceiling. |
+| `R-16` | Low | `MAX_SEARCH_LENGTH` was re-exported from `crate::helpers` with no consumer. | **Fixed.** The re-export is gone. |
+| `R-17` | Low | Three documents gave three different counts for the same set of findings. | **Fixed.** One number per set. |
+
+#### The reviewer's clean checks
+
+The reviewer confirmed, with file and line references, that: the configured
+bounds are applied on all three list endpoints and the old constants are gone;
+the deadline survives an arbitrary chain of rotations and the reuse detection
+is unaffected; every floor is consistent with the committed defaults and
+none of them is impossible to satisfy; every new rule is reachable and has a
+test that would fail without it; the `search` bound is enforced on every path
+that accepts the parameter; the new body-limit rule **lowers** the reachable
+maximum and cannot be used to bypass or raise a limit; no ownership
+predicate, authentication boundary, secret-handling rule, rate limit, CORS
+allowlist or error-redaction rule was weakened; the `hex` removal produces the
+same hash, pinned by a literal assertion; and the two new checker functions
+compare exactly the same 27 keys on both sides.
+
+#### Re-verification
+
+| Check | Result |
+| ----- | ------ |
+| `cargo fmt --all -- --check` | **Passed**, exit code 0. |
+| `cargo clippy --all-targets --all-features -- -D warnings` | **Passed**, exit code 0. |
+| `cargo test --all-targets` | **Passed**, 162 tests: 106 unit, 28 authentication, 9 notes, 19 projects and tasks. 0 failed. |
+| `cargo run --bin atom-docs` | **Passed**, `atom-docs: OK (0 warning(s))`. |
+| `cargo run --bin atom-docs -- --strict` | **Passed**, `atom-docs: OK (0 warning(s))`. |
 
 ---
 

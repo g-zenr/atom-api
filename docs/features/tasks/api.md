@@ -69,18 +69,18 @@ root. The general rules are in
 ### Query parameters — `GET /api/v1/projects/{project_id}/tasks`
 
 The endpoint accepts the two shared pagination parameters, which are declared
-once for the whole API in `PaginationQuery`, and two filters of its own:
+once for the whole API in `PaginationQuery` and described in
+[`conventions.md`](../../api/conventions.md) §5, and two filters of its own:
 
 | Parameter | Type | Default | Meaning |
 | --------- | ---- | ------- | ------- |
-| `limit` | integer | `20` | Page size. Capped at 100. A value of zero or less falls back to 20. |
-| `offset` | integer | `0` | Items to skip. A negative value falls back to 0. |
 | `status` | string | — | Filter by status: `open`, `in_progress` or `done`. |
 | `priority` | string | — | Filter by priority: `low`, `medium`, `high` or `urgent`. |
 
 `limit` and `offset` are the shared pagination parameters; `status` and
-`priority` are the filters of the tasks feature. The convention is described
-in [`conventions.md`](../../api/conventions.md) §5.
+`priority` are the filters of the tasks feature, and they are the only
+parameters this endpoint declares of its own. The convention is described in
+[`conventions.md`](../../api/conventions.md) §5.
 
 ## 3. `GET /api/v1/projects/{project_id}/tasks`
 

@@ -7,7 +7,7 @@
 //!
 //! ```text
 //! cargo run --bin atom-docs            # check the docs/ tree and config/
-//! cargo run --bin atom-docs --strict   # treat warnings as failures
+//! cargo run --bin atom-docs -- --strict   # treat warnings as failures
 //! ```
 //!
 //! Checks performed:
@@ -21,6 +21,8 @@
 //! 7. The configuration directory has its required files.
 //! 8. `.env.example` and the configuration loader agree about the environment
 //!    variables, in both directions.
+//! 9. The configuration files and the operator reference agree about the
+//!    settings, in both directions.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -63,7 +65,7 @@ const FEATURE_FILES: [&str; 5] = [
 const FEATURES: [&str; 4] = ["authentication", "notes", "projects", "tasks"];
 
 /// The files that must exist in the configuration directory.
-const CONFIG_FILES: [&str; 7] = [
+const CONFIG_FILES: [&str; 8] = [
     "config/README.md",
     "config/app.toml",
     "config/api.toml",
@@ -71,7 +73,23 @@ const CONFIG_FILES: [&str; 7] = [
     "config/database.toml",
     "config/messages.toml",
     "config/environments/development.toml",
+    "config/environments/production.toml",
 ];
+
+/// The configuration files that hold the settings, and the section of the
+/// operator reference that documents them.
+///
+/// The message catalogue is not here: it is documented in `config/README.md`,
+/// and its keys are messages, not settings.
+const SETTINGS_FILES: [&str; 4] = [
+    "config/app.toml",
+    "config/api.toml",
+    "config/auth.toml",
+    "config/database.toml",
+];
+
+/// The document that is the operator's reference for the settings.
+const SETTINGS_REFERENCE: &str = "docs/architecture/deployment.md";
 
 /// The file that lists the environment variables.
 const ENV_EXAMPLE: &str = ".env.example";
@@ -119,6 +137,7 @@ fn main() -> ExitCode {
     check_feature_directories(&root, &mut report);
     check_configuration(&root, &mut report);
     check_environment_variables(&root, &mut report);
+    check_settings_reference(&root, &mut report);
 
     for warning in &report.warnings {
         println!("WARN  {warning}");
@@ -463,7 +482,9 @@ fn check_environment_variables(root: &Path, report: &mut Report) {
             let end = rest.find('"')?;
             Some(&rest[..end])
         })
-        .filter(|name| name.starts_with("APP_") || name.starts_with("DATABASE_"))
+        .filter(|name| {
+            name.starts_with("APP_") || name.starts_with("DATABASE_") || name.starts_with("ATOM_")
+        })
         .collect();
 
     for name in read.difference(&documented) {
@@ -481,4 +502,125 @@ fn check_environment_variables(root: &Path, report: &mut Report) {
             "{ENV_EXAMPLE} documents {name}, but the configuration does not read it"
         ));
     }
+}
+
+/// Checks that the configuration files and the operator reference agree about
+/// the settings, in both directions.
+///
+/// A setting that exists in a file but in no reference table is a setting an
+/// operator cannot find. A setting in the reference table that exists in no
+/// file is a setting that cannot be set: writing it into a configuration file
+/// is a start-up error, because every settings structure refuses unknown
+/// keys.
+fn check_settings_reference(root: &Path, report: &mut Report) {
+    let mut configured: BTreeSet<String> = BTreeSet::new();
+
+    for file in SETTINGS_FILES {
+        let path = root.join(file);
+        let contents = match fs::read_to_string(&path) {
+            Ok(contents) => contents,
+            Err(error) => {
+                report.error(format!("could not read {file}: {error}"));
+                continue;
+            }
+        };
+
+        let table: toml::Table = match contents.parse() {
+            Ok(table) => table,
+            Err(error) => {
+                report.error(format!("could not parse {file}: {error}"));
+                continue;
+            }
+        };
+
+        collect_setting_keys(&table, "", &mut configured);
+    }
+
+    let reference = match fs::read_to_string(root.join(SETTINGS_REFERENCE)) {
+        Ok(contents) => contents,
+        Err(error) => {
+            report.error(format!("could not read {SETTINGS_REFERENCE}: {error}"));
+            return;
+        }
+    };
+
+    let documented = reference_setting_keys(&reference);
+
+    for key in configured.difference(&documented) {
+        report.error(format!(
+            "{SETTINGS_REFERENCE} does not document the setting {key}"
+        ));
+    }
+
+    for key in documented.difference(&configured) {
+        report.error(format!(
+            "{SETTINGS_REFERENCE} documents the setting {key}, but no configuration file defines it"
+        ));
+    }
+}
+
+/// Collects the leaf key paths of a TOML table.
+fn collect_setting_keys(table: &toml::Table, prefix: &str, keys: &mut BTreeSet<String>) {
+    for (name, value) in table {
+        let path = if prefix.is_empty() {
+            name.clone()
+        } else {
+            format!("{prefix}.{name}")
+        };
+
+        match value {
+            toml::Value::Table(inner) => collect_setting_keys(inner, &path, keys),
+            _ => {
+                keys.insert(path);
+            }
+        }
+    }
+}
+
+/// Extracts the setting keys named in the rows of a Markdown table.
+///
+/// Only a backticked, dotted, lower-case name is taken, and only one of the
+/// four settings sections. Anything else in a table cell is prose.
+fn reference_setting_keys(contents: &str) -> BTreeSet<String> {
+    let mut keys = BTreeSet::new();
+
+    for line in contents.lines() {
+        let line = line.trim();
+        if !line.starts_with('|') {
+            continue;
+        }
+
+        let Some(cell) = line.split('|').nth(1) else {
+            continue;
+        };
+        let cell = cell.trim();
+
+        if !cell.starts_with('`') || !cell.ends_with('`') || cell.len() < 3 {
+            continue;
+        }
+        let key = &cell[1..cell.len() - 1];
+
+        if !key.contains('.') {
+            continue;
+        }
+        if !key.split('.').all(|part| {
+            !part.is_empty()
+                && part.chars().all(|character| {
+                    character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
+                })
+        }) {
+            continue;
+        }
+        if !(key.starts_with("app.")
+            || key.starts_with("api.")
+            || key.starts_with("auth.")
+            || key.starts_with("database."))
+        {
+            continue;
+        }
+
+        keys.insert(key.to_string());
+    }
+
+    keys
 }

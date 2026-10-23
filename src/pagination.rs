@@ -7,16 +7,16 @@
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-/// Default number of items returned by a list endpoint.
-pub const DEFAULT_LIMIT: i64 = 20;
-/// Maximum number of items a caller may request.
-pub const MAX_LIMIT: i64 = 100;
+use crate::config::settings::PaginationSettings;
 
 /// Query parameters accepted by every list endpoint.
 #[derive(Debug, Clone, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct PaginationQuery {
-    /// Maximum number of items to return. Defaults to 20, capped at 100.
+    /// Maximum number of items to return.
+    ///
+    /// Defaults to `api.pagination.default_limit` and is capped at
+    /// `api.pagination.max_limit`.
     #[serde(default)]
     pub limit: Option<i64>,
     /// Number of items to skip. Defaults to 0.
@@ -25,12 +25,15 @@ pub struct PaginationQuery {
 }
 
 impl PaginationQuery {
-    /// The effective limit, clamped into the allowed range.
-    pub fn effective_limit(&self) -> i64 {
+    /// The effective limit, clamped into the configured range.
+    ///
+    /// The bounds come from the configuration, so that the published page size
+    /// has exactly one home. A caller that asks for more than the configured
+    /// maximum receives the maximum.
+    pub fn effective_limit(&self, bounds: &PaginationSettings) -> i64 {
         match self.limit {
-            Some(limit) if limit > 0 => limit.min(MAX_LIMIT),
-            Some(_) => DEFAULT_LIMIT,
-            None => DEFAULT_LIMIT,
+            Some(limit) if limit > 0 => limit.min(bounds.max_limit),
+            _ => bounds.default_limit,
         }
     }
 
@@ -94,13 +97,38 @@ impl<T> Page<T> {
 mod tests {
     use super::*;
 
+    fn bounds(default_limit: i64, max_limit: i64) -> PaginationSettings {
+        PaginationSettings {
+            default_limit,
+            max_limit,
+        }
+    }
+
     #[test]
     fn limit_is_clamped_into_range() {
         let query = PaginationQuery {
             limit: Some(5_000),
             offset: None,
         };
-        assert_eq!(query.effective_limit(), MAX_LIMIT);
+        assert_eq!(query.effective_limit(&bounds(20, 100)), 100);
+    }
+
+    #[test]
+    fn the_configured_maximum_is_honoured() {
+        let query = PaginationQuery {
+            limit: Some(5_000),
+            offset: None,
+        };
+        assert_eq!(query.effective_limit(&bounds(20, 50)), 50);
+    }
+
+    #[test]
+    fn the_configured_default_is_honoured() {
+        let query = PaginationQuery {
+            limit: None,
+            offset: None,
+        };
+        assert_eq!(query.effective_limit(&bounds(25, 100)), 25);
     }
 
     #[test]
@@ -109,7 +137,7 @@ mod tests {
             limit: Some(0),
             offset: Some(-3),
         };
-        assert_eq!(query.effective_limit(), DEFAULT_LIMIT);
+        assert_eq!(query.effective_limit(&bounds(20, 100)), 20);
         assert_eq!(query.effective_offset(), 0);
     }
 

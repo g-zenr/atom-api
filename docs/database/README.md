@@ -1,7 +1,7 @@
 # ATOM database
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 
 This directory holds the persistence documentation of the ATOM Phase 1
@@ -151,7 +151,15 @@ by the migrations:
   practical.
 - **Indexes** exist for the access paths the API actually uses: ownership
   lookups, listing order, filters and search.
-- Multi-step writes use an explicit transaction.
+- Multi-step writes use an explicit transaction, unless an accepted ADR records
+  that the ordering fails safe. The refresh-token rotation is the one such
+  case: the replacement session is inserted before the presented one is
+  claimed, so an interruption leaves the caller with a usable session. The
+  exception is recorded in
+  [`../decisions/ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md)
+  and analysed in
+  [`../architecture/data-architecture.md`](../architecture/data-architecture.md)
+  §7.
 - Migrations are **reproducible**: applying them to an empty database
   produces the same schema as applying them in sequence.
 

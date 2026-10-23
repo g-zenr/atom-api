@@ -41,12 +41,18 @@ pub struct NoteResponse {
     pub updated_at: DateTime<Utc>,
 }
 
-impl From<&Note> for NoteResponse {
-    fn from(note: &Note) -> Self {
+/// Builds the public representation of a note.
+///
+/// The model is consumed rather than borrowed, so that the strings of a
+/// listed page are moved into the response instead of being copied. A page
+/// at the published limits carries megabytes of text, and a borrowed
+/// conversion would copy all of it.
+impl From<Note> for NoteResponse {
+    fn from(note: Note) -> Self {
         Self {
             id: note.id,
-            title: note.title.clone(),
-            content: note.content.clone(),
+            title: note.title,
+            content: note.content,
             is_archived: note.is_archived,
             created_at: note.created_at,
             updated_at: note.updated_at,
@@ -91,6 +97,8 @@ pub struct UpdateNoteRequest {
 #[into_params(parameter_in = Query)]
 pub struct NoteQuery {
     /// Free-text search over title and content.
+    ///
+    /// At most 200 characters. A longer term is a validation failure.
     #[param(example = "release")]
     pub search: Option<String>,
     /// Filter by archive state. When omitted, only active notes are returned.

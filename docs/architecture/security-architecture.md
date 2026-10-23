@@ -101,6 +101,10 @@ Rotation and reuse detection:
 
 - `POST /api/v1/auth/refresh` inserts the replacement session, revokes the
   presented one and links them through `replaced_by_session_id`.
+- The replacement session **inherits the original absolute deadline**, so a
+  rotation never extends the lifetime of a session. The bound on a stolen
+  refresh token is therefore the configured absolute lifetime and nothing
+  else.
 - Presenting an already-revoked token is treated as reuse: **every** active
   session of that account is revoked and the request fails.
 - `POST /api/v1/auth/logout` revokes one session. A caller may only revoke
@@ -224,7 +228,7 @@ forge the rate-limit key and get an unlimited budget.
 | The server did not install the connection information, so `ClientIp` resolved to `None` for every request and all callers shared one bucket. | **Fixed.** `src/main.rs` serves the router through `into_make_service_with_connect_info::<SocketAddr>()`, so the limiter is keyed by the peer address. A deployment behind a proxy that does not terminate the connection still shares one bucket, because `X-Forwarded-For` is deliberately not read. |
 | The algorithm is a fixed window. | A caller can spend the whole budget at the end of one window and again at the start of the next. |
 | The limiter fails open when its mutex is poisoned. | A poisoned lock degrades the control rather than the availability of the API. |
-| There is no HTTP-level test of the limiter. | The `429` path is not covered by the suite. |
+| There was no HTTP-level test of the limiter. | **Closed.** `the_authentication_endpoints_are_rate_limited` in [`../../tests/auth_api.rs`](../../tests/auth_api.rs) drives the login endpoint past the limit and asserts the `429` status and the `rate_limited` code, so the `429` path is covered by the suite. `KI-002` in [`../engineering/known-issues.md`](../engineering/known-issues.md) is Closed. |
 
 The limiter is a **defence-in-depth control**, not the primary protection.
 The primary protection for the authentication endpoints is the Argon2 cost

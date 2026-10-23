@@ -2,7 +2,7 @@
 
 # Tasks — status
 
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-TASK-001`](specification.md)
 
@@ -26,10 +26,10 @@ simply did not name the tests that were added later.
 
 | Requirement | State | Evidence |
 | ----------- | ----- | -------- |
-| `TASK-R01` Create, list, read, update and delete tasks within a project | Covered | Create and list: `tests/projects_tasks_api.rs` — `tasks_can_be_created_and_listed_inside_a_project`. Update: `completing_a_task_stamps_the_completion_timestamp`. **Read (`GET /tasks/{id}`) and delete (`DELETE /tasks/{id}`) are implemented but not exercised by a test.**  Read and delete: `a_task_can_be_read_and_deleted`. |
+| `TASK-R01` Create, list, read, update and delete tasks within a project | Covered | Create and list: `tests/projects_tasks_api.rs` — `tasks_can_be_created_and_listed_inside_a_project`. Update: `completing_a_task_stamps_the_completion_timestamp`. Read (`GET /tasks/{id}`) and delete (`DELETE /tasks/{id}`): `a_task_can_be_read_and_deleted`. |
 | `TASK-R02` Status and priority vocabularies | Covered | `tasks_can_be_created_and_listed_inside_a_project` asserts the default status `open` and the requested priority `high`; `an_unknown_task_status_is_rejected` asserts that an unknown variant is refused with `422`; `src/tasks/service.rs` — `status_and_priority_have_stable_wire_names` and `status_round_trips_through_serde`; the values are constrained by the PostgreSQL enum types `task_status` and `task_priority`. |
 | `TASK-R03` Filtering by status and priority | Covered | `tests/projects_tasks_api.rs` — `tasks_can_be_filtered_by_status_and_priority` filters by `priority=urgent` and by `status=open`. |
-| `TASK-R04` Manual ordering inside a project | Covered | `tasks.position` is a `DOUBLE PRECISION` column with the `tasks_project_id_position_idx` index; the insert defaults to `MAX(position) + 1000`; the listing orders by `position ASC, created_at ASC, id ASC`. No test asserts a position or the resulting order.  `tests/projects_tasks_api.rs` - `tasks_are_returned_in_manual_order`. |
+| `TASK-R04` Manual ordering inside a project | Covered | `tasks.position` is a `DOUBLE PRECISION` column with the `tasks_project_id_position_idx` index; the insert defaults to `MAX(position) + 1000`; the listing orders by `position ASC, created_at ASC, id ASC`. `tests/projects_tasks_api.rs` — `tasks_are_returned_in_manual_order` asserts that an explicit `position` sorts before a task appended without one. |
 | `TASK-R05` Consistent completion timestamps | Covered | `tests/projects_tasks_api.rs` — `completing_a_task_stamps_the_completion_timestamp` asserts the timestamp when the task becomes `done` and its absence when the task is reopened. The `tasks_completion_consistency_chk` constraint backs it in the database. |
 | `TASK-R06` Tasks unreachable through a project the caller does not own | Covered | `tests/projects_tasks_api.rs` — `a_task_cannot_be_reached_through_a_project_of_another_user` (read, list and update) and `a_task_cannot_be_created_in_a_project_of_another_user` (create). |
 

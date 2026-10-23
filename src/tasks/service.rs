@@ -12,6 +12,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::config::messages::Messages;
+use crate::config::settings::PaginationSettings;
 use crate::error::{AppError, AppResult};
 use crate::helpers::{bounded_text, required_text};
 use crate::pagination::{Page, PaginationQuery};
@@ -27,14 +28,20 @@ use crate::tasks::repository::{NewTask, TaskFilters, TaskPatch, TaskRepository};
 pub struct TaskService {
     repository: TaskRepository,
     messages: Arc<Messages>,
+    pagination: PaginationSettings,
 }
 
 impl TaskService {
     /// Builds the service.
-    pub fn new(repository: TaskRepository, messages: Arc<Messages>) -> Self {
+    pub fn new(
+        repository: TaskRepository,
+        messages: Arc<Messages>,
+        pagination: PaginationSettings,
+    ) -> Self {
         Self {
             repository,
             messages,
+            pagination,
         }
     }
 
@@ -70,7 +77,7 @@ impl TaskService {
             .await?
             .ok_or_else(|| AppError::NotFound(self.messages.resources.project_not_found.clone()))?;
 
-        Ok(TaskResponse::from(&task))
+        Ok(TaskResponse::from(task))
     }
 
     /// Lists the tasks of a project owned by `owner`.
@@ -84,7 +91,7 @@ impl TaskService {
         query: TaskQuery,
         pagination: PaginationQuery,
     ) -> AppResult<Page<TaskResponse>> {
-        let limit = pagination.effective_limit();
+        let limit = pagination.effective_limit(&self.pagination);
         let offset = pagination.effective_offset();
 
         let filters = TaskFilters {
@@ -98,7 +105,9 @@ impl TaskService {
             .await?
             .ok_or_else(|| AppError::NotFound(self.messages.resources.project_not_found.clone()))?;
 
-        let items = tasks.iter().map(TaskResponse::from).collect();
+        // The page is consumed: the strings of every task are moved into the
+        // response rather than copied.
+        let items = tasks.into_iter().map(TaskResponse::from).collect();
 
         Ok(Page::new(items, limit, offset, total))
     }
@@ -111,7 +120,7 @@ impl TaskService {
             .await?
             .ok_or_else(|| AppError::NotFound(self.messages.resources.task_not_found.clone()))?;
 
-        Ok(TaskResponse::from(&task))
+        Ok(TaskResponse::from(task))
     }
 
     /// Applies a partial update to one task owned by `owner`.
@@ -151,7 +160,7 @@ impl TaskService {
             .await?
             .ok_or_else(|| AppError::NotFound(self.messages.resources.task_not_found.clone()))?;
 
-        Ok(TaskResponse::from(&task))
+        Ok(TaskResponse::from(task))
     }
 
     /// Deletes one task owned by `owner`.
@@ -178,7 +187,7 @@ pub fn validate_title(title: &str, messages: &Messages) -> AppResult<String> {
         "title",
         title,
         MAX_TITLE_LENGTH,
-        &messages.validation.title_too_long,
+        &messages.validation.too_long,
         messages,
     )
 }
@@ -193,7 +202,7 @@ pub fn validate_description(description: &str, messages: &Messages) -> AppResult
         "description",
         description,
         MAX_DESCRIPTION_LENGTH,
-        &messages.validation.description_too_long,
+        &messages.validation.too_long,
         messages,
     )
 }
@@ -201,18 +210,12 @@ pub fn validate_description(description: &str, messages: &Messages) -> AppResult
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::messages::test_messages;
     use crate::error::code;
-
-    /// The shipped catalogue, so that the tests exercise the same templates
-    /// the application serves.
-    fn messages() -> Messages {
-        Messages::from_toml(include_str!("../../config/messages.toml"))
-            .expect("the message catalogue parses")
-    }
 
     #[test]
     fn titles_are_trimmed_and_required() {
-        let messages = messages();
+        let messages = test_messages();
 
         assert_eq!(validate_title("  Ship it  ", &messages).unwrap(), "Ship it");
         assert!(validate_title("  ", &messages).is_err());
@@ -220,7 +223,7 @@ mod tests {
 
     #[test]
     fn descriptions_are_kept_verbatim() {
-        let messages = messages();
+        let messages = test_messages();
 
         assert_eq!(
             validate_description("  spaced  ", &messages).unwrap(),
@@ -230,7 +233,7 @@ mod tests {
 
     #[test]
     fn oversized_titles_and_descriptions_are_rejected() {
-        let messages = messages();
+        let messages = test_messages();
 
         let long_title = "x".repeat(MAX_TITLE_LENGTH + 1);
         assert!(validate_title(&long_title, &messages).is_err());
@@ -241,7 +244,7 @@ mod tests {
 
     #[test]
     fn a_validation_failure_carries_the_catalogue_wording() {
-        let messages = messages();
+        let messages = test_messages();
 
         let error = validate_title("  ", &messages).unwrap_err();
         let body = error.body();
@@ -254,7 +257,7 @@ mod tests {
 
     #[test]
     fn a_too_long_title_names_the_limit() {
-        let messages = messages();
+        let messages = test_messages();
 
         let long_title = "x".repeat(MAX_TITLE_LENGTH + 1);
         let error = validate_title(&long_title, &messages).unwrap_err();

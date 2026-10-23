@@ -2,7 +2,7 @@
 
 # Projects — status
 
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-PROJ-001`](specification.md)
 
@@ -26,8 +26,8 @@ simply did not name the tests that were added later.
 
 | Requirement | State | Evidence |
 | ----------- | ----- | -------- |
-| `PROJ-R01` Create, list, read, update and delete projects | Covered | `tests/projects_tasks_api.rs` — `projects_can_be_created_read_updated_and_deleted` covers create, read, update and delete; the list endpoint is exercised by `tasks_can_be_created_and_listed_inside_a_project` through the `create_project` helper, but no test asserts the contents of the project page. |
-| `PROJ-R02` Optional search and pagination over projects | Covered | `src/projects/repository.rs::ProjectRepository::list_owned` implements the `ILIKE` search and the `LIMIT`/`OFFSET` window, and `src/pagination.rs` provides the clamping. No test sends a search term or a pagination window to `GET /api/v1/projects`.  `tests/projects_tasks_api.rs` - `projects_can_be_searched` and `project_listing_is_paginated`. |
+| `PROJ-R01` Create, list, read, update and delete projects | Covered | `tests/projects_tasks_api.rs` — `projects_can_be_created_read_updated_and_deleted` covers create, read, update and delete; the listing is asserted by `the_project_listing_only_contains_the_callers_projects`, which checks the contents of the project page. |
+| `PROJ-R02` Optional search and pagination over projects | Covered | `src/projects/repository.rs::ProjectRepository::list_owned` implements the `ILIKE` search and the `LIMIT`/`OFFSET` window, and `src/pagination.rs` provides the clamping. `tests/projects_tasks_api.rs` — `projects_can_be_searched` sends a search term to `GET /api/v1/projects`, and `project_listing_is_paginated` sends a pagination window. |
 | `PROJ-R03` A defined behaviour when a project is deleted | Covered | `tests/projects_tasks_api.rs` — `deleting_a_project_removes_its_tasks`: the project is deleted with `204` and its task is afterwards `404`. The cascade itself is `tasks.project_id ... ON DELETE CASCADE` in `migrations/0003_projects_and_tasks.sql`. |
 | `PROJ-R04` Strict ownership isolation | Covered | `tests/projects_tasks_api.rs` — `a_project_of_another_user_is_invisible`: another account's token gets `404` on `GET` and `PATCH`. The same predicate also governs `a_task_cannot_be_created_in_a_project_of_another_user`. |
 

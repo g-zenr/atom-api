@@ -8,8 +8,14 @@
 //! the real `config/` files. The harness then weakens three settings so that
 //! the suite stays fast and deterministic. Nothing else is changed, so a
 //! broken configuration file fails the suite rather than a deployment.
-
-#![allow(dead_code)]
+//!
+//! The module is imported with `pub mod common;` by every test binary. The
+//! harness is compiled into each of them separately, so a helper that only
+//! some of the binaries use - a task helper in the authentication tests, for
+//! example - would be reported as dead code in the others. Declaring the
+//! module `pub` states that the whole harness is the support surface of every
+//! test binary; it keeps the dead-code lint active in the test files
+//! themselves, where a forgotten helper belongs.
 
 use axum::Router;
 use axum::body::Body;
@@ -96,7 +102,9 @@ pub fn test_database_url() -> String {
 
     assert!(
         database_name(&url).contains("test"),
-        "refusing to run integration tests against '{url}': the database name must contain 'test'"
+        "refusing to run integration tests against the database '{}': the database name must \
+         contain 'test'",
+        database_name(&url)
     );
 
     url
@@ -138,8 +146,25 @@ pub async fn test_state_with_rate_limit(max_requests: u32) -> AppState {
     state_with(config).await
 }
 
+/// A test state with specific pagination bounds.
+///
+/// The values are deliberately unlike the shipped defaults (20 and 100) and
+/// unlike any constant the code could have compiled in, so that a page size
+/// produced by a fallback to a literal fails the test that asserts them.
+pub async fn test_state_with_pagination(default_limit: i64, max_limit: i64) -> AppState {
+    let mut config = test_config();
+    config.api.pagination.default_limit = default_limit;
+    config.api.pagination.max_limit = max_limit;
+    state_with(config).await
+}
+
 /// A test state with a specific request body limit.
 pub async fn test_state_with_body_limit(max_body_bytes: usize) -> AppState {
+    assert!(
+        max_body_bytes <= atom_api::config::MAX_BODY_BYTES_BACKSTOP,
+        "the body limit of a test may not exceed the ceiling of the body reader"
+    );
+
     let mut config = test_config();
     config.app.limits.max_body_bytes = max_body_bytes;
     state_with(config).await

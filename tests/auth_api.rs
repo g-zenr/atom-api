@@ -1,9 +1,11 @@
 //! Integration tests for the authentication endpoints.
 
-mod common;
+pub mod common;
 
 use axum::http::{Method, StatusCode};
-use common::{app, create_project, register_user, request, send, test_state, unique_email};
+use common::{
+    app, create_project, login_user, register_user, request, send, test_state, unique_email,
+};
 use serde_json::json;
 use tower::ServiceExt;
 
@@ -150,6 +152,25 @@ async fn login_succeeds_with_the_right_password() {
 }
 
 #[tokio::test]
+async fn a_session_started_by_logging_in_opens_a_protected_route() {
+    let state = test_state().await;
+    let app = app(state);
+
+    let user = register_user(&app, "login-session").await;
+    let token = login_user(&app, &user).await;
+
+    let response = send(
+        &app,
+        request(Method::GET, "/api/v1/auth/me", Some(&token), None),
+    )
+    .await;
+
+    let body = response.expect_status(StatusCode::OK);
+    assert_eq!(body["id"], user.id.to_string());
+    assert_eq!(body["email"], user.email);
+}
+
+#[tokio::test]
 async fn login_fails_with_a_generic_message() {
     let state = test_state().await;
     let app = app(state);
@@ -225,6 +246,48 @@ async fn refresh_rotates_the_token_pair() {
         .unwrap()
         .to_string();
     assert_ne!(new_refresh, user.refresh_token);
+}
+
+#[tokio::test]
+async fn a_rotation_preserves_the_absolute_lifetime_of_the_session() {
+    let state = test_state().await;
+    let app = app(state.clone());
+    let user = register_user(&app, "absolute-lifetime").await;
+
+    let expires_at: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT expires_at FROM refresh_sessions WHERE token_hash = $1")
+            .bind(common::hash_of(&user.refresh_token))
+            .fetch_one(&state.db)
+            .await
+            .expect("the session must exist");
+
+    let response = send(
+        &app,
+        request(
+            Method::POST,
+            "/api/v1/auth/refresh",
+            None,
+            Some(json!({ "refresh_token": user.refresh_token })),
+        ),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::OK);
+    let new_refresh = body["tokens"]["refresh_token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let rotated_expires_at: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT expires_at FROM refresh_sessions WHERE token_hash = $1")
+            .bind(common::hash_of(&new_refresh))
+            .fetch_one(&state.db)
+            .await
+            .expect("the replacement session must exist");
+
+    // ADR-0003 requires one *absolute* refresh lifetime: a rotation must not
+    // extend it, otherwise a client that keeps rotating holds a session
+    // forever.
+    assert_eq!(rotated_expires_at, expires_at);
 }
 
 #[tokio::test]
@@ -508,6 +571,50 @@ async fn an_expired_refresh_token_is_rejected() {
 }
 
 #[tokio::test]
+async fn an_expired_session_cannot_be_extended_by_a_rotation() {
+    let state = test_state().await;
+    let app = app(state.clone());
+    let user = register_user(&app, "expired-rotation").await;
+
+    // The session expired an hour ago.
+    sqlx::query(
+        "UPDATE refresh_sessions SET expires_at = NOW() - INTERVAL '1 hour' WHERE token_hash = $1",
+    )
+    .bind(common::hash_of(&user.refresh_token))
+    .execute(&state.db)
+    .await
+    .expect("the session must be expired");
+
+    let response = send(
+        &app,
+        request(
+            Method::POST,
+            "/api/v1/auth/refresh",
+            None,
+            Some(json!({ "refresh_token": user.refresh_token })),
+        ),
+    )
+    .await;
+    response.expect_status(StatusCode::UNAUTHORIZED);
+
+    // The rotation must not have written a replacement session with a fresh
+    // deadline. A rotation inherits the deadline of the session it replaces,
+    // so an expired session cannot be brought back to life.
+    let extended: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM refresh_sessions WHERE user_id = $1 AND expires_at > NOW()",
+    )
+    .bind(user.id)
+    .fetch_one(&state.db)
+    .await
+    .expect("the sessions must be readable");
+
+    assert_eq!(
+        extended, 0,
+        "an expired session must not be extended by a rotation"
+    );
+}
+
+#[tokio::test]
 async fn an_expired_access_token_is_rejected() {
     let state = test_state().await;
     let app = app(state.clone());
@@ -516,7 +623,7 @@ async fn an_expired_access_token_is_rejected() {
     // A token that was valid an hour ago, signed with the configured secret.
     let hour_ago = chrono::Utc::now() - chrono::Duration::hours(1);
     let claims = atom_api::auth::token::AccessTokenClaims {
-        sub: user.id.to_string(),
+        sub: user.id,
         email: user.email.clone(),
         iss: "atom-api-test".to_string(),
         aud: "atom-api-test".to_string(),
@@ -563,7 +670,7 @@ async fn revoking_every_session_invalidates_the_refresh_tokens() {
         .to_string();
 
     let revoked = state
-        .auth_service()
+        .auth
         .revoke_all_sessions(user.id)
         .await
         .expect("the sessions must be revoked");

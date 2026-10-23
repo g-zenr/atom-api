@@ -10,23 +10,44 @@
 //! Every failure is reported on stderr with a non-zero exit code. The process
 //! never starts in a partially configured state.
 
-use std::time::Duration;
+use std::future::IntoFuture;
+use std::process::ExitCode;
 
 use sqlx::postgres::PgPoolOptions;
 use tokio::net::TcpListener;
 
 use atom_api::api;
 use atom_api::config::Config;
+use atom_api::error::AppError;
 use atom_api::state::AppState;
 use atom_api::telemetry;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> ExitCode {
+    match run().await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            // The readable message, not the debug form: the operator has to
+            // be able to act on it.
+            eprintln!("error: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Starts the server.
+///
+/// # Errors
+///
+/// Returns the error that stopped the process. Every failure is a start-up
+/// failure: an invalid configuration, an unreachable database, a migration
+/// that cannot be applied, or a socket that cannot be bound.
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // `.env` is optional; a missing file is not an error.
     dotenvy::dotenv().ok();
 
     let config = Config::load()?;
-    telemetry::init(&config.app.log_filter);
+    telemetry::init(&config.app.log_filter, config.environment)?;
 
     tracing::info!(
         bind_addr = %config.app.bind_addr,
@@ -46,18 +67,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .connect(&config.database.url),
     )
     .await
-    .map_err(|_| {
-        Box::<dyn std::error::Error>::from(format!(
-            "the database did not answer within {connect_timeout:?}"
-        ))
-    })??;
+    .map_err(|_| -> Box<dyn std::error::Error> {
+        format!("the database did not answer within {connect_timeout:?}").into()
+    })?
+    .map_err(|error| -> Box<dyn std::error::Error> {
+        format!(
+            "could not connect to the database: {}",
+            describe_database_error(&error)
+        )
+        .into()
+    })?;
 
     // Migrations are embedded in the binary, so a deployed instance never
     // depends on files that ship next to it.
-    sqlx::migrate!("./migrations").run(&pool).await?;
+    sqlx::migrate!("./migrations").run(&pool).await.map_err(
+        |error| -> Box<dyn std::error::Error> {
+            format!(
+                "could not apply the migrations: {}",
+                describe_migration_error(&error)
+            )
+            .into()
+        },
+    )?;
     tracing::info!("database migrations are up to date");
 
     let bind_addr = config.app.bind_addr;
+    let shutdown_grace = config.app.limits.shutdown_grace;
     let state = AppState::new(config, pool)?;
 
     // Prune expired refresh sessions in the background, so that the table
@@ -71,15 +106,70 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // request extensions. The `ClientIp` extractor reads it from there, and
     // the authentication rate limiter is keyed by that address. Without this
     // wiring every request would share a single rate-limit bucket.
-    axum::serve(
+    let server = axum::serve(
         listener,
         api::router(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
     .with_graceful_shutdown(shutdown_signal())
-    .await?;
+    .into_future();
+
+    tokio::pin!(server);
+
+    // The signal future above makes the server stop accepting and start
+    // draining. This bounds that drain: a request that never finishes would
+    // otherwise keep the process alive indefinitely. The second subscription
+    // observes the same OS signal, so the clock starts when the drain does.
+    let drain_deadline = async move {
+        wait_for_signal().await;
+        tokio::time::sleep(shutdown_grace).await;
+    };
+
+    tokio::select! {
+        result = &mut server => result?,
+        () = drain_deadline => {
+            tracing::warn!(
+                grace_seconds = shutdown_grace.as_secs(),
+                "the shutdown grace elapsed with requests still in flight"
+            );
+        }
+    }
 
     tracing::info!("ATOM API stopped");
     Ok(())
+}
+
+/// Describes a database failure without revealing the driver message.
+///
+/// The driver message can contain the connection string or a row, so only the
+/// error kind and the SQLSTATE are reported. This is the same rule the
+/// request path applies in `src/error.rs`.
+fn describe_database_error(error: &sqlx::Error) -> String {
+    match error.as_database_error() {
+        Some(database) => match database.code() {
+            Some(code) => format!("{:?} (SQLSTATE {code})", database.kind()),
+            None => format!("{:?}", database.kind()),
+        },
+        // Every other variant carries a message the driver wrote, and a
+        // configuration error can carry the connection string, so the
+        // message is not repeated.
+        None => match error {
+            sqlx::Error::Io(inner) => format!("the connection could not be established: {inner}"),
+            _ => "the connection could not be established".to_string(),
+        },
+    }
+}
+
+/// Describes a migration failure without revealing the driver message.
+fn describe_migration_error(error: &sqlx::migrate::MigrateError) -> String {
+    match error {
+        sqlx::migrate::MigrateError::Execute(inner) => describe_database_error(inner),
+        sqlx::migrate::MigrateError::ExecuteMigration(inner, version) => format!(
+            "migration {version} failed: {}",
+            describe_database_error(inner)
+        ),
+        sqlx::migrate::MigrateError::Source(_) => "the migration source failed".to_string(),
+        other => other.to_string(),
+    }
 }
 
 /// Deletes refresh sessions that expired more than a day ago.
@@ -95,13 +185,16 @@ async fn prune_expired_sessions(state: AppState) {
     loop {
         ticker.tick().await;
 
-        let grace = chrono::Duration::from_std(grace).unwrap_or(chrono::Duration::days(1));
-        match state.prune_expired_sessions(grace).await {
+        // The configured grace is bounded by the configuration validation, so
+        // the conversion cannot fail. If it ever did, a zero-length grace
+        // prunes more, never less.
+        let grace = chrono::Duration::from_std(grace).unwrap_or_default();
+        match state.auth.prune_expired_sessions(grace).await {
             Ok(removed) if removed > 0 => {
                 tracing::info!(removed, "pruned expired refresh sessions");
             }
             Ok(_) => {}
-            Err(error) => {
+            Err(AppError::Database(error)) => {
                 // The driver message can contain a row, so only the SQLSTATE
                 // is logged.
                 tracing::warn!(
@@ -109,12 +202,20 @@ async fn prune_expired_sessions(state: AppState) {
                     "could not prune expired refresh sessions"
                 );
             }
+            Err(error) => {
+                tracing::warn!(error = ?error, "could not prune expired refresh sessions");
+            }
         }
     }
 }
 
 /// Resolves when the process receives Ctrl-C or a termination signal.
-async fn shutdown_signal() {
+///
+/// It resolves as soon as the signal arrives, and does not wait: the future
+/// passed to `with_graceful_shutdown` is what *starts* the shutdown, so
+/// sleeping here would keep the listener accepting new connections for the
+/// whole grace period and only begin to drain afterwards.
+async fn wait_for_signal() {
     let ctrl_c = async {
         let _ = tokio::signal::ctrl_c().await;
     };
@@ -133,10 +234,13 @@ async fn shutdown_signal() {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c => tracing::info!("received Ctrl-C, shutting down"),
-        _ = terminate => tracing::info!("received termination signal, shutting down"),
+        _ = ctrl_c => {}
+        _ = terminate => {}
     }
+}
 
-    // Give in-flight requests a bounded amount of time to finish.
-    tokio::time::sleep(Duration::from_millis(100)).await;
+/// Resolves when the process receives a shutdown signal, and records it.
+async fn shutdown_signal() {
+    wait_for_signal().await;
+    tracing::info!("shutdown signal received, draining in-flight requests");
 }

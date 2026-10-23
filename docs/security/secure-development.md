@@ -85,12 +85,11 @@ repository.
 `DatabaseSettings` must print `[REDACTED]`, and no committed configuration file
 may hold a secret-shaped value.
 
-**Test.** The error-envelope tests in [`../../src/error.rs`](../../src/error.rs).
-The redaction of the two configuration types needs a unit test next to them in
-[`../../src/config/settings.rs`](../../src/config/settings.rs); **no such test
-is in the tree at the time of writing**, because the coverage was not carried
-over when the configuration module became a directory. It is listed as a gap
-in [`../testing/strategy.md`](../testing/strategy.md) §6.
+**Test.** The error-envelope tests in [`../../src/error.rs`](../../src/error.rs),
+and `the_secret_is_never_rendered` in
+[`../../src/config/tests.rs`](../../src/config/tests.rs), which asserts that
+the `Debug` rendering of the two configuration types carries the redaction
+placeholder and never the secret itself.
 
 ### SD-5 — No `unwrap` or `expect` in a request path
 
@@ -101,7 +100,8 @@ in [`../testing/strategy.md`](../testing/strategy.md) §6.
 default-value helpers of
 [`../../src/config/settings.rs`](../../src/config/settings.rs) — nowhere else.
 The CORS allowlist is validated when the configuration is loaded, so the router
-needs no assertion of its own.
+needs no assertion of its own: an origin that still fails to parse falls back
+to an empty header value, and the process is never taken down by it.
 
 **Why.** An `unwrap` in a request path turns a recoverable failure into a
 panic, which the panic layer converts into a `500` while discarding the reason.
@@ -111,10 +111,10 @@ panic, which the panic layer converts into a `500` while discarding the reason.
 that parses a constant, or in the development tool. Nowhere else.
 
 The CORS allowlist is validated when the configuration is loaded, so the router
-needs no assertion of its own. The `panic!` that
-[`../../src/api/mod.rs`](../../src/api/mod.rs) still holds for an origin that
-cannot be parsed is unreachable — the allowlist it reads was refused at
-start-up — and it is a finding until it is removed.
+needs no assertion of its own. The layer in
+[`../../src/api/mod.rs`](../../src/api/mod.rs) falls back to an empty header
+value for an origin that cannot be parsed, so there is no `panic!` in the
+request path to find.
 
 **Test.** The behaviour of the affected path is covered by a case that would
 fail if the code panicked.
@@ -250,8 +250,12 @@ panic in the router or a layer that silently accepts every origin.
 **Check.** See §2: no `allow_credentials`, no wildcard origin. The refusal
 lives in the configuration layer, not in the router.
 
-**Test.** No automated test exists. The behaviour is verified by review and by
-starting the server with a wildcard and observing that it refuses to start.
+**Test.** The refusals are covered by the configuration tests
+`a_wildcard_cors_origin_is_refused` and
+`a_cors_origin_that_is_not_a_valid_header_is_refused` in
+[`../../src/config/tests.rs`](../../src/config/tests.rs). There is no
+HTTP-level test that a request carrying a disallowed `Origin` is answered
+without the CORS headers.
 
 ### SD-15 — Every input is validated and bounded at the service boundary
 
@@ -380,10 +384,11 @@ tracing subscriber — in a default-value helper in
 [`../../src/config/settings.rs`](../../src/config/settings.rs) that parses a
 constant, or in the development tool
 [`../../src/bin/atom-docs.rs`](../../src/bin/atom-docs.rs). Nowhere else. A
-hit in a handler, a service or a repository is a finding. The only other hit
-that is tolerated is the unreachable `panic!` in the CORS layer of
-[`../../src/api/mod.rs`](../../src/api/mod.rs), and it is a finding until the
-allowlist is built without it.
+hit in a handler, a service or a repository is a finding. There is no other
+tolerated hit: the CORS layer of
+[`../../src/api/mod.rs`](../../src/api/mod.rs) contains no `panic!`, because
+the allowlist it reads was refused at start-up and the layer falls back to an
+empty header value for anything that still fails to parse.
 
 ### SD-13 and SD-14 — the proxy header and the CORS allowlist
 

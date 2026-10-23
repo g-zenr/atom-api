@@ -8,8 +8,9 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::config::messages::Messages;
+use crate::config::settings::PaginationSettings;
 use crate::error::{AppError, AppResult};
-use crate::helpers::{bounded_text, required_text};
+use crate::helpers::{bounded_text, required_text, validate_search};
 use crate::pagination::{Page, PaginationQuery};
 use crate::projects::dto::{
     CreateProjectRequest, MAX_DESCRIPTION_LENGTH, MAX_NAME_LENGTH, ProjectQuery, ProjectResponse,
@@ -22,14 +23,20 @@ use crate::projects::repository::ProjectRepository;
 pub struct ProjectService {
     repository: ProjectRepository,
     messages: Arc<Messages>,
+    pagination: PaginationSettings,
 }
 
 impl ProjectService {
     /// Builds the service.
-    pub fn new(repository: ProjectRepository, messages: Arc<Messages>) -> Self {
+    pub fn new(
+        repository: ProjectRepository,
+        messages: Arc<Messages>,
+        pagination: PaginationSettings,
+    ) -> Self {
         Self {
             repository,
             messages,
+            pagination,
         }
     }
 
@@ -47,7 +54,7 @@ impl ProjectService {
             .insert(Uuid::new_v4(), owner, &name, &description)
             .await?;
 
-        Ok(ProjectResponse::from(&project))
+        Ok(ProjectResponse::from(project))
     }
 
     /// Lists the owner's projects.
@@ -57,15 +64,24 @@ impl ProjectService {
         query: ProjectQuery,
         pagination: PaginationQuery,
     ) -> AppResult<Page<ProjectResponse>> {
-        let limit = pagination.effective_limit();
+        let limit = pagination.effective_limit(&self.pagination);
         let offset = pagination.effective_offset();
+
+        let search = query
+            .search
+            .as_deref()
+            .map(|term| validate_search(term, &self.messages))
+            .transpose()?
+            .filter(|term| !term.is_empty());
 
         let (projects, total) = self
             .repository
-            .list_owned(owner, query.search.as_deref(), limit, offset)
+            .list_owned(owner, search.as_deref(), limit, offset)
             .await?;
 
-        let items = projects.iter().map(ProjectResponse::from).collect();
+        // The page is consumed: the strings of every project are moved into
+        // the response rather than copied.
+        let items = projects.into_iter().map(ProjectResponse::from).collect();
 
         Ok(Page::new(items, limit, offset, total))
     }
@@ -78,7 +94,7 @@ impl ProjectService {
             .await?
             .ok_or_else(|| AppError::NotFound(self.messages.resources.project_not_found.clone()))?;
 
-        Ok(ProjectResponse::from(&project))
+        Ok(ProjectResponse::from(project))
     }
 
     /// Applies a partial update to one of the owner's projects.
@@ -105,7 +121,7 @@ impl ProjectService {
             .await?
             .ok_or_else(|| AppError::NotFound(self.messages.resources.project_not_found.clone()))?;
 
-        Ok(ProjectResponse::from(&project))
+        Ok(ProjectResponse::from(project))
     }
 
     /// Deletes one of the owner's projects. Its tasks are removed with it.
@@ -132,7 +148,7 @@ pub fn validate_name(name: &str, messages: &Messages) -> AppResult<String> {
         "name",
         name,
         MAX_NAME_LENGTH,
-        &messages.validation.title_too_long,
+        &messages.validation.too_long,
         messages,
     )
 }
@@ -147,7 +163,7 @@ pub fn validate_description(description: &str, messages: &Messages) -> AppResult
         "description",
         description,
         MAX_DESCRIPTION_LENGTH,
-        &messages.validation.description_too_long,
+        &messages.validation.too_long,
         messages,
     )
 }
@@ -155,32 +171,26 @@ pub fn validate_description(description: &str, messages: &Messages) -> AppResult
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::messages::test_messages;
     use crate::error::code;
-
-    fn messages() -> Messages {
-        // The shipped catalogue, so that the tests exercise the same templates
-        // the application serves.
-        Messages::from_toml(include_str!("../../config/messages.toml"))
-            .expect("the message catalogue parses")
-    }
 
     #[test]
     fn names_are_trimmed_and_required() {
-        let messages = messages();
+        let messages = test_messages();
         assert_eq!(validate_name("  ATOM  ", &messages).unwrap(), "ATOM");
         assert!(validate_name("   ", &messages).is_err());
     }
 
     #[test]
     fn oversized_names_are_rejected() {
-        let messages = messages();
+        let messages = test_messages();
         let long = "x".repeat(MAX_NAME_LENGTH + 1);
         assert!(validate_name(&long, &messages).is_err());
     }
 
     #[test]
     fn the_name_limit_in_the_message_comes_from_the_constant() {
-        let messages = messages();
+        let messages = test_messages();
         let long = "x".repeat(MAX_NAME_LENGTH + 1);
 
         let error = validate_name(&long, &messages).unwrap_err();
@@ -196,14 +206,14 @@ mod tests {
 
     #[test]
     fn oversized_descriptions_are_rejected() {
-        let messages = messages();
+        let messages = test_messages();
         let long = "x".repeat(MAX_DESCRIPTION_LENGTH + 1);
         assert!(validate_description(&long, &messages).is_err());
     }
 
     #[test]
     fn descriptions_are_kept_verbatim() {
-        let messages = messages();
+        let messages = test_messages();
         assert_eq!(
             validate_description("   ", &messages).unwrap(),
             "   ",

@@ -1,9 +1,12 @@
 //! Integration tests for the projects and tasks endpoints.
 
-mod common;
+pub mod common;
 
 use axum::http::{Method, StatusCode};
-use common::{app, create_project, register_user, request, send, test_state};
+use common::{
+    app, assert_pagination, create_project, create_task, register_user, request, send, test_state,
+    test_state_with_pagination,
+};
 use serde_json::json;
 use tower::ServiceExt;
 
@@ -150,7 +153,7 @@ async fn tasks_can_be_created_and_listed_inside_a_project() {
     .await;
     let body = response.expect_status(StatusCode::OK);
     assert_eq!(body["items"].as_array().unwrap().len(), 1);
-    assert_eq!(body["pagination"]["total"], 1);
+    assert_pagination(&body, 1, 20, 0);
 }
 
 #[tokio::test]
@@ -160,18 +163,7 @@ async fn completing_a_task_stamps_the_completion_timestamp() {
     let user = register_user(&app, "task-complete").await;
     let project_id = create_project(&app, &user, "Roadmap").await;
 
-    let response = send(
-        &app,
-        request(
-            Method::POST,
-            &format!("/api/v1/projects/{project_id}/tasks"),
-            Some(&user.access_token),
-            Some(json!({ "title": "Ship it" })),
-        ),
-    )
-    .await;
-    let created = response.expect_status(StatusCode::CREATED);
-    let task_id = created["id"].as_str().unwrap().to_string();
+    let task_id = create_task(&app, &user, project_id, "Ship it").await;
 
     let response = send(
         &app,
@@ -264,18 +256,7 @@ async fn a_task_cannot_be_reached_through_a_project_of_another_user() {
 
     let project_id = create_project(&app, &owner, "Private").await;
 
-    let response = send(
-        &app,
-        request(
-            Method::POST,
-            &format!("/api/v1/projects/{project_id}/tasks"),
-            Some(&owner.access_token),
-            Some(json!({ "title": "secret work" })),
-        ),
-    )
-    .await;
-    let created = response.expect_status(StatusCode::CREATED);
-    let task_id = created["id"].as_str().unwrap().to_string();
+    let task_id = create_task(&app, &owner, project_id, "secret work").await;
 
     // direct access
     send(
@@ -346,18 +327,7 @@ async fn deleting_a_project_removes_its_tasks() {
     let user = register_user(&app, "task-cascade").await;
     let project_id = create_project(&app, &user, "Doomed").await;
 
-    let response = send(
-        &app,
-        request(
-            Method::POST,
-            &format!("/api/v1/projects/{project_id}/tasks"),
-            Some(&user.access_token),
-            Some(json!({ "title": "will be cascaded" })),
-        ),
-    )
-    .await;
-    let created = response.expect_status(StatusCode::CREATED);
-    let task_id = created["id"].as_str().unwrap().to_string();
+    let task_id = create_task(&app, &user, project_id, "will be cascaded").await;
 
     send(
         &app,
@@ -478,17 +448,7 @@ async fn tasks_are_returned_in_manual_order() {
     let project_id = create_project(&app, &user, "Roadmap").await;
 
     // Created without a position: the service appends to the end.
-    send(
-        &app,
-        request(
-            Method::POST,
-            &format!("/api/v1/projects/{project_id}/tasks"),
-            Some(&user.access_token),
-            Some(json!({ "title": "last" })),
-        ),
-    )
-    .await
-    .expect_status(StatusCode::CREATED);
+    create_task(&app, &user, project_id, "last").await;
 
     // Created with an explicit position: it sorts before the appended task.
     send(
@@ -532,17 +492,7 @@ async fn task_listing_is_paginated() {
     let project_id = create_project(&app, &user, "Roadmap").await;
 
     for index in 0..5 {
-        send(
-            &app,
-            request(
-                Method::POST,
-                &format!("/api/v1/projects/{project_id}/tasks"),
-                Some(&user.access_token),
-                Some(json!({ "title": format!("task {index}") })),
-            ),
-        )
-        .await
-        .expect_status(StatusCode::CREATED);
+        create_task(&app, &user, project_id, &format!("task {index}")).await;
     }
 
     let response = send(
@@ -558,10 +508,7 @@ async fn task_listing_is_paginated() {
     let body = response.expect_status(StatusCode::OK);
 
     assert_eq!(body["items"].as_array().unwrap().len(), 2);
-    assert_eq!(body["pagination"]["total"], 5);
-    assert_eq!(body["pagination"]["limit"], 2);
-    assert_eq!(body["pagination"]["offset"], 0);
-    assert_eq!(body["pagination"]["has_more"], true);
+    assert_pagination(&body, 5, 2, 0);
 
     // The second page continues where the first stopped.
     let response = send(
@@ -577,8 +524,7 @@ async fn task_listing_is_paginated() {
     let body = response.expect_status(StatusCode::OK);
 
     assert_eq!(body["items"].as_array().unwrap().len(), 2);
-    assert_eq!(body["pagination"]["offset"], 2);
-    assert_eq!(body["pagination"]["has_more"], true);
+    assert_pagination(&body, 5, 2, 2);
 }
 
 #[tokio::test]
@@ -619,7 +565,7 @@ async fn projects_can_be_searched() {
     .await;
     let body = response.expect_status(StatusCode::OK);
     assert_eq!(body["items"].as_array().unwrap().len(), 2);
-    assert_eq!(body["pagination"]["total"], 2);
+    assert_pagination(&body, 2, 20, 0);
 
     // A term in the description matches too.
     let response = send(
@@ -634,7 +580,7 @@ async fn projects_can_be_searched() {
     .await;
     let body = response.expect_status(StatusCode::OK);
     assert_eq!(body["items"].as_array().unwrap().len(), 2);
-    assert_eq!(body["pagination"]["total"], 2);
+    assert_pagination(&body, 2, 20, 0);
 
     // A term that matches nothing returns an empty page, not an error.
     let response = send(
@@ -649,7 +595,7 @@ async fn projects_can_be_searched() {
     .await;
     let body = response.expect_status(StatusCode::OK);
     assert_eq!(body["items"].as_array().unwrap().len(), 0);
-    assert_eq!(body["pagination"]["total"], 0);
+    assert_pagination(&body, 0, 20, 0);
 }
 
 #[tokio::test]
@@ -685,10 +631,7 @@ async fn project_listing_is_paginated() {
     let body = response.expect_status(StatusCode::OK);
 
     assert_eq!(body["items"].as_array().unwrap().len(), 2);
-    assert_eq!(body["pagination"]["total"], 5);
-    assert_eq!(body["pagination"]["limit"], 2);
-    assert_eq!(body["pagination"]["offset"], 0);
-    assert_eq!(body["pagination"]["has_more"], true);
+    assert_pagination(&body, 5, 2, 0);
 }
 
 #[tokio::test]
@@ -737,7 +680,7 @@ async fn the_project_listing_only_contains_the_callers_projects() {
     let body = response.expect_status(StatusCode::OK);
 
     assert_eq!(body["items"].as_array().unwrap().len(), 2);
-    assert_eq!(body["pagination"]["total"], 2);
+    assert_pagination(&body, 2, 20, 0);
     for item in body["items"].as_array().unwrap() {
         let name = item["name"].as_str().unwrap();
         assert!(
@@ -859,5 +802,255 @@ async fn a_task_created_as_done_carries_a_completion_timestamp() {
     assert!(
         created["completed_at"].is_string(),
         "a task created as done must carry a completion timestamp"
+    );
+}
+
+#[tokio::test]
+async fn a_project_without_tasks_is_an_empty_page_and_not_a_not_found() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "task-empty-project").await;
+    let project_id = create_project(&app, &user, "Empty").await;
+
+    // The project exists, so the listing is an empty page with a total of
+    // zero, not a 404. The distinction is observable.
+    let response = send(
+        &app,
+        request(
+            Method::GET,
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&user.access_token),
+            None,
+        ),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::OK);
+
+    assert_eq!(body["items"].as_array().unwrap().len(), 0);
+    assert_pagination(&body, 0, 20, 0);
+}
+
+#[tokio::test]
+async fn an_offset_past_the_end_still_reports_the_whole_task_set() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "task-offset").await;
+    let project_id = create_project(&app, &user, "Roadmap").await;
+
+    for index in 0..5 {
+        create_task(&app, &user, project_id, &format!("task {index}")).await;
+    }
+
+    let response = send(
+        &app,
+        request(
+            Method::GET,
+            &format!("/api/v1/projects/{project_id}/tasks?limit=2&offset=100"),
+            Some(&user.access_token),
+            None,
+        ),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::OK);
+
+    assert_eq!(body["items"].as_array().unwrap().len(), 0);
+    assert_pagination(&body, 5, 2, 100);
+}
+
+#[tokio::test]
+async fn the_reported_task_total_is_the_size_of_the_filtered_set() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "task-total").await;
+    let project_id = create_project(&app, &user, "Roadmap").await;
+
+    for (title, status) in [("one", "open"), ("two", "open"), ("three", "done")] {
+        send(
+            &app,
+            request(
+                Method::POST,
+                &format!("/api/v1/projects/{project_id}/tasks"),
+                Some(&user.access_token),
+                Some(json!({ "title": title, "status": status })),
+            ),
+        )
+        .await
+        .expect_status(StatusCode::CREATED);
+    }
+
+    // The page query and the count query must filter identically, otherwise
+    // the total silently drifts away from the rows that were returned.
+    for (query, expected) in [("", 3), ("?status=open", 2), ("?status=done", 1)] {
+        let response = send(
+            &app,
+            request(
+                Method::GET,
+                &format!("/api/v1/projects/{project_id}/tasks{query}"),
+                Some(&user.access_token),
+                None,
+            ),
+        )
+        .await;
+        let body = response.expect_status(StatusCode::OK);
+
+        assert_eq!(
+            body["pagination"]["total"], expected,
+            "unexpected total for '{query}'"
+        );
+        assert_eq!(
+            body["items"].as_array().unwrap().len(),
+            expected,
+            "the page and the count must describe the same set for '{query}'"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_reported_project_total_is_the_size_of_the_filtered_set() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "project-total").await;
+
+    for name in ["kernel one", "kernel two", "storage three"] {
+        send(
+            &app,
+            request(
+                Method::POST,
+                "/api/v1/projects",
+                Some(&user.access_token),
+                Some(json!({ "name": name })),
+            ),
+        )
+        .await
+        .expect_status(StatusCode::CREATED);
+    }
+
+    // The page query and the count query must filter identically, otherwise
+    // the total silently drifts away from the rows that were returned.
+    for (query, expected) in [("", 3), ("?search=kernel", 2), ("?search=storage", 1)] {
+        let response = send(
+            &app,
+            request(
+                Method::GET,
+                &format!("/api/v1/projects{query}"),
+                Some(&user.access_token),
+                None,
+            ),
+        )
+        .await;
+        let body = response.expect_status(StatusCode::OK);
+
+        assert_eq!(
+            body["pagination"]["total"], expected,
+            "unexpected total for '{query}'"
+        );
+        assert_eq!(
+            body["items"].as_array().unwrap().len(),
+            expected,
+            "the page and the count must describe the same set for '{query}'"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_configured_page_bounds_are_applied_to_the_project_listing() {
+    // Bounds that are neither the shipped defaults nor any plausible
+    // compiled-in constant, so a fallback to a literal cannot pass this test.
+    let state = test_state_with_pagination(7, 13).await;
+    let bounds = state.config.api.pagination;
+    let app = app(state);
+    let user = register_user(&app, "project-bounds").await;
+
+    for index in 0..3 {
+        send(
+            &app,
+            request(
+                Method::POST,
+                "/api/v1/projects",
+                Some(&user.access_token),
+                Some(json!({ "name": format!("bounded {index}") })),
+            ),
+        )
+        .await
+        .expect_status(StatusCode::CREATED);
+    }
+
+    let response = send(
+        &app,
+        request(
+            Method::GET,
+            "/api/v1/projects?limit=100000",
+            Some(&user.access_token),
+            None,
+        ),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::OK);
+    assert_eq!(
+        body["pagination"]["limit"], bounds.max_limit,
+        "the request must be capped at the configured maximum"
+    );
+
+    let response = send(
+        &app,
+        request(
+            Method::GET,
+            "/api/v1/projects",
+            Some(&user.access_token),
+            None,
+        ),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::OK);
+    assert_eq!(
+        body["pagination"]["limit"], bounds.default_limit,
+        "the default must come from the configuration"
+    );
+}
+
+#[tokio::test]
+async fn the_configured_page_bounds_are_applied_to_the_task_listing() {
+    // Bounds that are neither the shipped defaults nor any plausible
+    // compiled-in constant, so a fallback to a literal cannot pass this test.
+    let state = test_state_with_pagination(7, 13).await;
+    let bounds = state.config.api.pagination;
+    let app = app(state);
+    let user = register_user(&app, "task-bounds").await;
+    let project_id = create_project(&app, &user, "Bounded").await;
+
+    for index in 0..3 {
+        create_task(&app, &user, project_id, &format!("bounded {index}")).await;
+    }
+
+    let response = send(
+        &app,
+        request(
+            Method::GET,
+            &format!("/api/v1/projects/{project_id}/tasks?limit=100000"),
+            Some(&user.access_token),
+            None,
+        ),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::OK);
+    assert_eq!(
+        body["pagination"]["limit"], bounds.max_limit,
+        "the request must be capped at the configured maximum"
+    );
+
+    let response = send(
+        &app,
+        request(
+            Method::GET,
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&user.access_token),
+            None,
+        ),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::OK);
+    assert_eq!(
+        body["pagination"]["limit"], bounds.default_limit,
+        "the default must come from the configuration"
     );
 }

@@ -58,7 +58,7 @@ impl FromRequestParts<AppState> for AuthUser {
             .ok_or_else(|| AppError::Unauthorized(messages.general.unauthorized.clone()))?;
 
         let user = state
-            .auth_service()
+            .auth
             .authenticate_bearer(token)
             .await
             .map_err(|error| match error {

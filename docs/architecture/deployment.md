@@ -43,6 +43,14 @@ The two secrets have **no file layer at all**: `DATABASE_URL` and
 `APP_JWT_SECRET` are required environment variables, and no file in `config/`
 may contain a secret. See §2.
 
+**The environment layer wins over the files.** A variable that is set — even
+to a value that the committed file does not use — replaces the file value.
+`.env.example` is a template that ships a working value for every setting, so
+a `.env` copied from it is an **override** of the committed files, not a
+neutral copy of them. The setting where that matters most is
+`APP_API_DOCS_ENABLED`, which the production overlay turns off and the
+template turns back on. See §5.2.
+
 ### 1.2 Where the files come from
 
 The files are **embedded in the binary**, so a deployment needs no
@@ -71,14 +79,14 @@ file.
 
 | Key | Default | Environment variable | Constraint |
 | --- | ------- | -------------------- | ---------- |
-| `app.name` | `ATOM API` | — | The product name, used in the OpenAPI document and the start-up log. |
 | `app.bind_addr` | `127.0.0.1:3000` | `APP_BIND_ADDR` | Must be a valid socket address. |
 | `app.log_filter` | `info` | `APP_LOG_FILTER` | Must parse as a `tracing` filter. An unparsable filter is a start-up error, not a silent fallback to `info`. |
-| `app.limits.max_body_bytes` | `1048576` (1 MiB) | `APP_MAX_BODY_BYTES` | Must be positive. It is the effective ceiling on a request body; see §4. |
+| `app.limits.max_body_bytes` | `1048576` (1 MiB) | `APP_MAX_BODY_BYTES` | Must be positive and at most 4 MiB, the ceiling of the body reader. It is the ceiling the router applies to a request body; the extractor applies an independent 4 MiB backstop, and a value above it is refused at start-up. See §4. |
 | `app.limits.request_timeout_seconds` | `30` | `APP_REQUEST_TIMEOUT_SECONDS` | Must be positive. A request that exceeds it is abandoned with a `408`. |
 | `app.limits.readiness_probe_timeout_seconds` | `1` | `APP_READINESS_PROBE_TIMEOUT_SECONDS` | Must be positive. It bounds the readiness probe. |
+| `app.limits.shutdown_grace_seconds` | `10` | `APP_SHUTDOWN_GRACE_SECONDS` | Must be positive. The listener stops accepting as soon as the signal arrives, then drains; this value is the **ceiling** on that drain, so a request that never completes cannot keep the process alive. It must stay below the time the orchestrator allows the process to stop. |
 | `app.sessions.prune_interval_seconds` | `3600` | `APP_SESSION_PRUNE_INTERVAL_SECONDS` | Must be positive. |
-| `app.sessions.prune_grace_seconds` | `86400` | `APP_SESSION_PRUNE_GRACE_SECONDS` | Must be positive. This is a **security window**, not a tuning knob: a revoked session has to survive long enough that a replayed token is still recognised as reuse. |
+| `app.sessions.prune_grace_seconds` | `86400` | `APP_SESSION_PRUNE_GRACE_SECONDS` | Must be positive **and at least `3600` (one hour)**. The grace keeps the row of an expired session alive for a while, so that a token that expired recently is still recognised as *expired* rather than as one that never existed. It may be raised, never lowered below the floor. See *The floors that are not settings* below. |
 
 #### `api.toml`
 
@@ -86,9 +94,9 @@ file.
 | --- | ------- | -------------------- | ---------- |
 | `api.title` | `ATOM API` | — | The title of the OpenAPI document. |
 | `api.docs_enabled` | `true` | `APP_API_DOCS_ENABLED` | A boolean: `true`, `false`, `1`, `0`, `yes`, `no`, `on` or `off`. The production overlay turns the document and the explorer off. |
-| `api.cors.allowed_origins` | `[]` | `APP_CORS_ALLOWED_ORIGINS` | A comma-separated list. Empty disables CORS. A wildcard is refused, and every entry must be a valid header value. |
-| `api.pagination.default_limit` | `20` | — | Must be positive. **Part of the published client convention**: changing it changes what a client receives. |
-| `api.pagination.max_limit` | `100` | — | Must be at least the default limit. Also part of the published client convention. |
+| `api.cors.allowed_origins` | `[]` | `APP_CORS_ALLOWED_ORIGINS` | A comma-separated list. Empty disables CORS. A wildcard is refused, and every entry must be a valid header value. The variable overrides the file, so a non-empty value in a `.env` enables CORS; see §5.2. |
+| `api.pagination.default_limit` | `20` | — | Must be positive. **Part of the published client convention**: changing it changes what a client receives, so it is a breaking change for a client. |
+| `api.pagination.max_limit` | `100` | — | Must be at least the default limit and at most 1000 items. Also part of the published client convention, and therefore a breaking change for a client. |
 | `api.rate_limit.max_requests` | `10` | `APP_AUTH_RATE_LIMIT_MAX_REQUESTS` | Must be positive. |
 | `api.rate_limit.window_seconds` | `60` | `APP_AUTH_RATE_LIMIT_WINDOW_SECONDS` | Must be positive. |
 
@@ -96,15 +104,15 @@ file.
 
 | Key | Default | Environment variable | Constraint |
 | --- | ------- | -------------------- | ---------- |
-| `auth.access_token_ttl_seconds` | `900` (15 min) | `APP_ACCESS_TOKEN_TTL_SECONDS` | Must be positive. |
-| `auth.refresh_token_ttl_seconds` | `1209600` (14 days) | `APP_REFRESH_TOKEN_TTL_SECONDS` | Must be **longer** than the access-token lifetime. |
-| `auth.jwt_issuer` | `atom-api` | `APP_JWT_ISSUER` | Must not be empty. It is the `iss` claim, written into every token and required back from it. |
-| `auth.jwt_audience` | `atom-api` | `APP_JWT_AUDIENCE` | Must not be empty. It is the `aud` claim. |
-| `auth.clock_skew_seconds` | `30` | `APP_ACCESS_TOKEN_CLOCK_SKEW_SECONDS` | The clock-skew allowance applied when validating an access token. A deployment whose hosts drift by more than this sees unexplained `401` responses. |
+| `auth.access_token_ttl_seconds` | `900` (15 min) | `APP_ACCESS_TOKEN_TTL_SECONDS` | Must be positive and at most `86400` (one day). |
+| `auth.refresh_token_ttl_seconds` | `1209600` (14 days) | `APP_REFRESH_TOKEN_TTL_SECONDS` | Must be **longer** than the access-token lifetime and at most `31536000` (one year). |
+| `auth.issuer` | `atom-api` | `APP_JWT_ISSUER` | Must not be empty. It is the `iss` claim, written into every token and required back from it. The key in `config/auth.toml` is `auth.issuer`: the `jwt_` prefix is not part of it. |
+| `auth.audience` | `atom-api` | `APP_JWT_AUDIENCE` | Must not be empty. It is the `aud` claim. The key in `config/auth.toml` is `auth.audience`: the `jwt_` prefix is not part of it. |
+| `auth.clock_skew_seconds` | `30` | `APP_ACCESS_TOKEN_CLOCK_SKEW_SECONDS` | The clock-skew allowance applied when validating an access token. Must be positive and at most `300` (five minutes). A deployment whose hosts drift by more than this sees unexplained `401` responses. See *The floors that are not settings* below. |
 | `auth.argon2.memory_kib` | `19456` (19 MiB) | `APP_ARGON2_MEMORY_KIB` | Must be at least `8192` (8 MiB), which is a security floor rather than a setting. |
 | `auth.argon2.iterations` | `2` | `APP_ARGON2_ITERATIONS` | Must be at least one. |
 | `auth.argon2.parallelism` | `1` | `APP_ARGON2_PARALLELISM` | Must be at least one. |
-| `auth.password.min_length` | `12` | — | Must be positive, and not above the maximum. |
+| `auth.password.min_length` | `12` | — | Must be positive, not above the maximum, and at least `12` (the policy floor). See *The floors that are not settings* below. |
 | `auth.password.max_length` | `256` | — | Must be at least the minimum. The maximum bounds the cost of hashing a very long password. |
 
 #### `database.toml`
@@ -114,6 +122,27 @@ file.
 | `database.max_connections` | `10` | `DATABASE_MAX_CONNECTIONS` | Must be positive. |
 | `database.acquire_timeout_seconds` | `5` | `DATABASE_ACQUIRE_TIMEOUT_SECS` | Must not be zero: a zero value would mean "wait forever". |
 | `database.connect_timeout_seconds` | `10` | `DATABASE_CONNECT_TIMEOUT_SECS` | Must not be zero. Without a bound, an unreachable database hangs the process before it binds a port. |
+
+#### The floors that are not settings
+
+Five settings have a bound that a deployment may not cross. The bound is a
+constant in `src/config/validation.rs`, not a setting: a configuration that
+crosses it is a start-up error.
+
+| Setting | The bound | Why it is a floor and not a knob |
+| ------- | --------- | -------------------------------- |
+| `auth.password.min_length` | At least `12` characters. | A deployment may **raise** the minimum, never lower it below the floor. The floor is what keeps the guessing cost of a leaked credential list at a level the product is willing to stand behind. |
+| `auth.clock_skew_seconds` | At most `300` seconds. | A deployment may **lower** the allowance to tighten the expiry check, never raise it beyond the bound. An unbounded allowance would accept a token long after it expired. |
+| `auth.access_token_ttl_seconds` | At most `86400` seconds (one day). | The access token is the short-lived half of the token design. A lifetime longer than a day is far beyond any usable session. |
+| `auth.refresh_token_ttl_seconds` | At most `31536000` seconds (one year). | The refresh token is the long-lived half. The bound keeps the arithmetic of the absolute deadline well inside the range of a timestamp. |
+| `app.sessions.prune_grace_seconds` | At least `3600` seconds (one hour). | The grace keeps the row of an expired session alive, so that a token that expired recently is still recognised as *expired* rather than as one that never existed. It may be lengthened, never shortened below the bound. |
+
+The numeric values live with the rules in
+[`../../src/config/validation.rs`](../../src/config/validation.rs), as the
+constants `MIN_PASSWORD_LENGTH`, `MAX_CLOCK_SKEW_SECONDS`,
+`MAX_ACCESS_TOKEN_TTL_SECONDS`, `MAX_REFRESH_TOKEN_TTL_SECONDS` and
+`MIN_PRUNE_GRACE_SECONDS`. The table above repeats them so that an operator
+can act without reading the source; the source is the enforced copy.
 
 #### `messages.toml`
 
@@ -143,8 +172,13 @@ or `prod`:
 | `app.limits.request_timeout_seconds` | `30` |
 | `app.sessions.prune_interval_seconds` | `900` |
 | `api.docs_enabled` | `false` |
-| `api.pagination.max_limit` | `100` |
 | `database.max_connections` | `20` |
+
+The overlay deliberately does **not** override the pagination bounds. They are
+part of the published client convention, so a client must see the same page
+size in every environment. An operator that needs a smaller page changes
+`api.pagination.max_limit` in the base file, deliberately and for every
+environment at once.
 
 #### The variables that are not settings
 
@@ -156,8 +190,10 @@ or `prod`:
 | `APP_JWT_SECRET` | **Required.** The HMAC signing secret for the access tokens. It has no file layer. At least **32 bytes**; the documented placeholder is refused when `APP_ENV` is `production`. |
 | `TEST_DATABASE_URL` | The disposable database used by the integration suite. The harness refuses to run unless the database name contains `test`. |
 
-`.env.example` holds the same variables with placeholder values and is the
-committed template. `.env` is git-ignored and must never be committed.
+`.env.example` holds the same variables, with a placeholder for the two
+secrets and a working value for the rest. A working value is an **override**,
+because the environment layer wins over the file layer; see §5.2. `.env` is
+git-ignored and must never be committed.
 
 ### 1.4 The start-up contract
 
@@ -171,17 +207,46 @@ rule below stops it **before** the socket is bound.
 | `ATOM_CONFIG_DIR` points at an existing directory. | `discover_directory` in `src/config/loader.rs`; `ConfigError::Invalid`. |
 | Every configuration file can be read and parsed. | `src/config/loader.rs`; `ConfigError::Io` and `ConfigError::Parse`. An unknown key is a parse error, because every settings structure uses `deny_unknown_fields`. |
 | The signing secret is at least 32 bytes, and the documented placeholder is refused in production. | `validate_secret` in `src/config/validation.rs`. |
-| Every duration is positive: the request timeout, the readiness timeout, the prune interval, the prune grace and the body limit. | `validate_settings` in `src/config/validation.rs`. |
+| The body limit, the request timeout, the readiness timeout, the shutdown grace, the prune interval and the prune grace are positive. | `validate_settings` in `src/config/validation.rs`. |
+| The prune grace is at least one hour. | `validate_settings` in `src/config/validation.rs`, as `MIN_PRUNE_GRACE_SECONDS`. See *The floors that are not settings* in §1.3. |
 | The log filter parses. | `validate_settings` in `src/config/validation.rs`. |
 | The pagination default is positive and the maximum is at least the default. | `validate_settings` in `src/config/validation.rs`. |
 | The rate limit is positive and its window is not zero. | `validate_settings` in `src/config/validation.rs`. |
 | The CORS allowlist contains no wildcard, and every origin is a valid header value. | `validate_cors` in `src/config/validation.rs`. This used to be an assertion in the router. |
 | The pool size is positive, and neither the acquire nor the connect timeout is zero. | `validate_settings` in `src/config/validation.rs`. |
 | The access-token lifetime is positive and the refresh-token lifetime is strictly longer. | `validate_settings` in `src/config/validation.rs`. |
+| The access-token lifetime is at most one day, and the refresh-token lifetime at most one year. | `validate_settings` in `src/config/validation.rs`, as `MAX_ACCESS_TOKEN_TTL_SECONDS` and `MAX_REFRESH_TOKEN_TTL_SECONDS`. See *The floors that are not settings* in §1.3. |
 | The issuer and the audience are not empty. | `validate_settings` in `src/config/validation.rs`. |
 | The Argon2 memory is at least 8 MiB, and the iteration count and the degree of parallelism are at least one. | `validate_settings` in `src/config/validation.rs`. |
 | The password policy has a positive minimum and a maximum that is at least the minimum. | `validate_settings` in `src/config/validation.rs`. |
+| The password minimum is at least twelve characters. | `validate_settings` in `src/config/validation.rs`, as `MIN_PASSWORD_LENGTH`. See *The floors that are not settings* in §1.3. |
+| The clock-skew allowance is positive and at most five minutes. | `validate_settings` in `src/config/validation.rs`, as `MAX_CLOCK_SKEW_SECONDS`. See *The floors that are not settings* in §1.3. |
 | The database can be reached, and the pending migrations can be applied. | `src/main.rs`, before the listener is bound. |
+
+### 1.5 What the operator sees when the start-up fails
+
+A configuration failure stops the process before the socket is bound, and the
+message on stderr names the setting and what was expected. The operator sees
+the **readable** form of the failure, not a debug rendering of an error
+value:
+
+```text
+error: required environment variable DATABASE_URL is missing or empty
+error: environment variable APP_MAX_BODY_BYTES has invalid value 0: expected a positive number of bytes
+error: could not parse the configuration file app.toml: expected an equals, found an equals
+```
+
+The four shapes are the four variants of `ConfigError` in
+[`../../src/config/validation.rs`](../../src/config/validation.rs): a missing
+variable, an unacceptable value, an unreadable file and an unparsable file. A
+rejected secret is reported by its **length**, never by its content:
+
+```text
+error: environment variable APP_JWT_SECRET has invalid value <16 bytes>: expected at least 32 bytes of entropy
+```
+
+The process exits with a non-zero status and never binds a port in a
+partially configured state.
 
 ## 2. Secrets
 
@@ -278,13 +343,18 @@ the database name contains `test`, so it cannot damage a real database.
 
 `APP_MAX_BODY_BYTES` is installed as an Axum `DefaultBodyLimit`, and the
 project's own `api::extract::Json` reads that limit through
-`req.into_limited_body()`. The configured value is therefore **the effective
-cap on a request body**; a body over it is refused with a `413` and the
-standard error envelope.
+`req.into_limited_body()`. The configured value is therefore the ceiling the
+router applies to every request.
 
-There is no second, independent cap. The extractor passes `usize::MAX` to
-`axum::body::to_bytes`, so the layer the router installs is the only limit:
-a configured limit is honoured in full, however large it is.
+There is one further, independent cap. The extractor passes the constant
+`MAX_BODY_BYTES_BACKSTOP` — 4 MiB — to `axum::body::to_bytes`, so a body is
+refused when it exceeds **either** limit. The backstop is a constant in
+`src/config/validation.rs` and not a setting: it is a safety ceiling of the
+parser. The configuration validation therefore **refuses** a
+`max_body_bytes` above 4 MiB, so a deployment that sets
+`APP_MAX_BODY_BYTES` above it does not start at all; the operator sees the
+bound named in the start-up error. The operator-facing rule is therefore:
+keep `app.limits.max_body_bytes` at or below 4 MiB.
 
 ## 5. The production checklist
 
@@ -301,18 +371,18 @@ The API does not enforce most of these itself. They are operator obligations.
 | 7 | **Back up the database, and test the restore.** | The data is the product. |
 | 8 | **Ship the logs somewhere durable.** | The JSON formatter is the production format. |
 | 9 | **Set `APP_ENV=production`.** | It selects `config/environments/production.toml` and enables the placeholder-secret check. |
-| 10 | **Set `APP_CORS_ALLOWED_ORIGINS` to the real origins, or leave it empty.** | A `*` entry aborts the process. |
+| 10 | **Set `APP_CORS_ALLOWED_ORIGINS` to the real origins, or leave it empty.** | The committed default in `config/api.toml` is an empty list, which disables CORS, and the template in [`.env.example`](../../.env.example) ships an empty value too. The environment layer wins over the file layer, so any non-empty value in a `.env` **enables** CORS for those origins. A `*` entry aborts the process. |
 | 11 | **Keep `APP_LOG_FILTER` at `info` or higher in production.** | A `debug` filter logs every rejected request, including the reason. |
 | 12 | **Raise the Argon2 cost for the deployment.** | The defaults are a floor, not a tuned value for the target hardware. |
 | 13 | **Decide whether the API explorer is served.** | `config/environments/production.toml` sets `api.docs_enabled` to `false`. Set `APP_API_DOCS_ENABLED=true` only if the deployment wants the OpenAPI document and the explorer. |
-| 14 | **Size the pool, the timeouts and the body limit for the deployment.** | The production overlay sets `database.max_connections` to 20 and the request timeout to 30 s. The base files hold the body limit (1 MiB) and the acquire and connect timeouts. |
-| 15 | **Keep the session prune grace at its default, or raise it — never shorten it below what reuse detection needs.** | `app.sessions.prune_grace_seconds` is a security window, not a tuning knob. |
+| 14 | **Size the pool, the timeouts and the body limit for the deployment.** | The production overlay sets `database.max_connections` to 20 and the request timeout to 30 s. The base files hold the body limit (1 MiB) and the acquire and connect timeouts. Keep the body limit at or below 4 MiB: a larger setting is refused at start-up, because the extractor applies an independent 4 MiB backstop. See §4. |
+| 15 | **Keep the session prune grace at its default, or raise it — never shorten it below the floor.** | `app.sessions.prune_grace_seconds` is the window in which the row of an expired session is kept, so that a token that expired recently is still recognised as *expired*. The floor is one hour. |
 | 16 | **Set the clock-skew allowance to what the hosts actually need.** | `APP_ACCESS_TOKEN_CLOCK_SKEW_SECONDS` is 30 s by default. Hosts that drift by more than that see unexplained `401` responses. |
 
 `config/environments/production.toml` exists and is applied whenever
-`APP_ENV=production`. It changes six settings: the log filter, the request
-timeout, the session prune interval, `api.docs_enabled`, `api.pagination.max_limit`
-and `database.max_connections`. Every one of them is still overridable by an
+`APP_ENV=production`. It changes five settings: the log filter, the request
+timeout, the session prune interval, `api.docs_enabled` and
+`database.max_connections`. Every one of them is still overridable by an
 environment variable, because the environment variables are the last layer.
 
 ### 5.1 The release process
@@ -325,16 +395,35 @@ in [`../database/migration-policy.md`](../database/migration-policy.md) §5
 describes the intended rollback rule — forward-fix, never edit — and it is the
 constraint a future release process must honour.
 
+### 5.2 The precedence an operator must remember
+
+Three cases trip people up, because the committed file, the committed
+template and the environment overlay do not always agree:
+
+| Setting | The base file says | The template says | What the process does |
+| ------- | ------------------ | ----------------- | --------------------- |
+| `api.cors.allowed_origins` | `[]` — CORS off | empty — CORS off | The same. A `.env` that carries a non-empty value **enables** CORS for those origins, because the environment layer wins. |
+| `api.docs_enabled` | `true` | `true` | The production overlay sets it to `false`, and the template overrides the overlay again, so a `.env` copied from the template **publishes** the OpenAPI document in production unless the value is cleared. |
+| `app.log_filter` | `info` | `info` | The same, unless the overlay or the variable says otherwise. |
+
+The rule is the same in all three cases: **the environment layer wins over the
+file layer, and the file layer wins over the compiled default.** A `.env` is
+not a neutral copy of the committed defaults — it is an override.
+
 ## 6. Observability
 
 ### 6.1 Structured logs
 
 `src/telemetry.rs` installs the tracing subscriber at start-up:
 
-| Build | Formatter |
-| ----- | --------- |
-| Debug (`cargo run`) | Human-readable, with the target and the level. |
-| Release (`cargo build --release`) | JSON, with a flattened event. |
+| `APP_ENV` | Formatter |
+| --------- | --------- |
+| `production` | JSON, with a flattened event. |
+| Anything else | Human-readable, with the target and the level. |
+
+The formatter follows the environment, not the build profile: a release build
+that runs a development deployment gets readable logs, and a debug build that
+runs a production deployment gets JSON.
 
 The filter comes from the configuration: `app.log_filter`, which the
 environment variable `APP_LOG_FILTER` overrides and the environment overlay
@@ -396,7 +485,7 @@ restart the process.
 | Vertical | One Tokio task per connection. The pool size (`database.max_connections`, 10 by default and 20 in the production overlay) bounds the concurrency against the database. |
 | The database | The pool is the bottleneck. `database.acquire_timeout_seconds` bounds how long a request waits for a connection; a request that cannot get one fails with `database_error`. |
 | CPU | The dominant cost is Argon2id, which is deliberately expensive. It is bounded by the password length cap and by the rate limit. |
-| Memory | The connection pool, the in-flight bodies (capped at `APP_MAX_BODY_BYTES` each) and the rate limiter's map, which is pruned on every check. |
+| Memory | The connection pool, the in-flight bodies (capped at `APP_MAX_BODY_BYTES` each) and the rate limiter's map, which is swept of expired clients at most once per window and therefore holds only the clients of the last two windows. |
 
 **The rate limiter is the one component that does not scale horizontally.**
 It is per process, in memory, and its key is the peer address of the

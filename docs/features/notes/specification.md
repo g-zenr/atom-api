@@ -1,7 +1,7 @@
 # Notes — specification
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 > **Feature identifier:** `ATOM-FEAT-NOTE-001`
 > **Feature name:** Personal notes, archiving, full-text search and pagination
@@ -97,7 +97,13 @@ The source of truth is [`project-truth.md`](../../project-truth.md) §4.3.
   omitted parameter both return only active notes. The filter is therefore
   tri-state: there is no way to ask for both at once.
 - `?search=<term>` matches the term against the title and the body. The term
-  is trimmed; an empty term is treated as no search at all.
+  is trimmed; an empty term is treated as no search at all. A term longer
+  than 200 characters is a `422` validation failure that names the `search`
+  field.
+- `?limit=` and `?offset=` follow the shared convention: the configured
+  default page size (20 by default), clamped to the configured maximum page
+  size (100 by default), a non-positive limit falls back to the default and a
+  negative offset falls back to 0.
 - The order is newest first: `created_at DESC`, then `id DESC` as a
   tie-breaker, so the order is total and stable.
 - The response uses the shared list envelope — `items` plus `pagination` with
@@ -159,7 +165,7 @@ A change to this feature is complete when all of the following hold.
 - **The `simple` text-search configuration is used deliberately.** ATOM notes
   are technical and contain identifiers and code fragments; the `simple`
   configuration keeps tokenisation predictable. See
-  [`schema.md`](../../database/schema.md) §5.
+  [`schema.md`](../../database/schema.md) §7.
 - **The search term is not escaped for the user.** It is bound as a
   parameter and passed to `plainto_tsquery`, which handles it safely, but the
   term is matched as words, not as a phrase.

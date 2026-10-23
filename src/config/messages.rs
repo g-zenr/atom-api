@@ -73,8 +73,6 @@ pub struct GeneralMessages {
     pub bad_request: String,
     /// 400, when a path or query parameter cannot be parsed.
     pub malformed_parameter: String,
-    /// 400, when the request body is valid JSON but does not match the contract.
-    pub body_mismatch: String,
     /// 401, when a request needs a bearer token and does not carry one.
     pub unauthorized: String,
     /// 404, when the route does not exist.
@@ -127,12 +125,8 @@ pub struct ValidationMessages {
     pub display_name_length: String,
     /// The value is empty after trimming.
     pub not_empty: String,
-    /// The title is longer than the accepted maximum.
-    pub title_too_long: String,
-    /// The body is longer than the accepted maximum.
-    pub content_too_long: String,
-    /// The description is longer than the accepted maximum.
-    pub description_too_long: String,
+    /// The value is longer than the accepted maximum.
+    pub too_long: String,
 }
 
 /// The messages for a resource that does not exist.
@@ -154,7 +148,13 @@ impl Messages {
     ///
     /// The catalogue lives under the `messages` key so that it never collides
     /// with a section of the same name in another configuration file.
-    pub fn from_toml(contents: &str) -> Result<Self, toml::de::Error> {
+    ///
+    /// The application reads the catalogue through the configuration loader;
+    /// this constructor exists for the tests, which parse the **shipped**
+    /// file so that a unit test asserts against the same templates the
+    /// application serves.
+    #[cfg(test)]
+    pub(crate) fn from_toml(contents: &str) -> Result<Self, toml::de::Error> {
         #[derive(Deserialize)]
         struct Document {
             messages: Messages,
@@ -163,4 +163,16 @@ impl Messages {
         let document: Document = toml::from_str(contents)?;
         Ok(document.messages)
     }
+}
+
+/// The shipped catalogue, parsed once for the tests.
+///
+/// The unit tests assert against the same templates the application serves, so
+/// that renaming or removing a key the code relies on fails a test. The fixture
+/// lives here, next to the type it builds, rather than in each test module
+/// (finding `F-06`).
+#[cfg(test)]
+pub(crate) fn test_messages() -> Messages {
+    Messages::from_toml(include_str!("../../config/messages.toml"))
+        .expect("the message catalogue parses")
 }

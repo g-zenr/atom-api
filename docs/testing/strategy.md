@@ -34,25 +34,24 @@ algorithm.
 They are cheap, they run without a database, and they are where a boundary
 value belongs.
 
-**Current size:** 80 unit tests in 9 modules.
+**Current size:** 111 unit tests in 12 modules, counted on 2026-10-22.
 
 | Module | Tests |
 | ------ | ----- |
-| [`../../src/config/tests.rs`](../../src/config/tests.rs) | 27 |
-| [`../../src/auth/`](../../src/auth/) | 12 |
+| [`../../src/config/tests.rs`](../../src/config/tests.rs) | 50 |
 | [`../../src/users/service.rs`](../../src/users/service.rs) | 9 |
 | [`../../src/tasks/service.rs`](../../src/tasks/service.rs) | 7 |
+| [`../../src/auth/token.rs`](../../src/auth/token.rs) | 7 |
 | [`../../src/auth/password.rs`](../../src/auth/password.rs) | 6 |
-| [`../../src/auth/token.rs`](../../src/auth/token.rs) | 6 |
+| [`../../src/error.rs`](../../src/error.rs) | 5 |
 | [`../../src/notes/service.rs`](../../src/notes/service.rs) | 5 |
 | [`../../src/projects/service.rs`](../../src/projects/service.rs) | 5 |
-| [`../../src/error.rs`](../../src/error.rs) | 5 |
-| [`../../src/helpers/validation.rs`](../../src/helpers/validation.rs) | 3 |
-| [`../../src/pagination.rs`](../../src/pagination.rs) | 3 |
-| [`../../src/ratelimit.rs`](../../src/ratelimit.rs) | 3 |
+| [`../../src/pagination.rs`](../../src/pagination.rs) | 5 |
+| [`../../src/helpers/validation.rs`](../../src/helpers/validation.rs) | 4 |
+| [`../../src/ratelimit.rs`](../../src/ratelimit.rs) | 6 |
 | [`../../src/utils/text.rs`](../../src/utils/text.rs) | 2 |
 
-The configuration module [`../../src/config/`](../../src/config/) has **27**
+The configuration module [`../../src/config/`](../../src/config/) has **50**
 unit tests of its own, in [`../../src/config/tests.rs`](../../src/config/tests.rs).
 They cover the defaults, the precedence between the three layers, the required
 secrets, every validation rule and the message catalogue.
@@ -64,12 +63,12 @@ the real response. They are the only layer that can prove a SQL predicate, a
 database constraint or a `ON DELETE CASCADE` behaves as documented, and they
 are the layer that proves the HTTP contract.
 
-**Current size:** 53 integration tests in 3 files.
+**Current size:** 66 integration tests in 3 files.
 
 | File | Tests | Covers |
 | ---- | ----- | ------ |
-| [`../../tests/auth_api.rs`](../../tests/auth_api.rs) | 26 | Registration, normalization, duplicate registration, the password policy, login, the generic failure, refresh rotation, refresh reuse, logout, credential enforcement, `/auth/me`, cross-account session revocation. |
-| [`../../tests/notes_api.rs`](../../tests/notes_api.rs) | 8 | Note CRUD, cross-account invisibility, the listing scope, search, archiving, an empty title, pagination, a malformed identifier. |
+| [`../../tests/auth_api.rs`](../../tests/auth_api.rs) | 28 | Registration, normalization, duplicate registration, the password policy, login, the generic failure, refresh rotation, the inherited absolute lifetime, refresh reuse, logout, credential enforcement, `/auth/me`, cross-account session revocation. |
+| [`../../tests/notes_api.rs`](../../tests/notes_api.rs) | 9 | Note CRUD, cross-account invisibility, the listing scope, search, an over-long search term, archiving, an empty title, pagination, a malformed identifier. |
 | [`../../tests/projects_tasks_api.rs`](../../tests/projects_tasks_api.rs) | 19 | Project CRUD, cross-account invisibility, task creation and listing, the completion timestamp, filtering, task isolation through a foreign project, task creation in a foreign project, the project delete cascade, an unknown task status. |
 
 ### 1.3 Contract
@@ -96,7 +95,7 @@ There is no separate security test file. The security cases live inside the
 integration files, next to the behaviour they protect, so that a reviewer
 sees them in context.
 
-Twenty of the fifty-three integration tests are dedicated security cases:
+Ten of the fifty-six integration tests are dedicated security cases:
 
 | Test | File |
 | ---- | ---- |
@@ -133,8 +132,14 @@ repository, so it needs coverage of its own:
 | A missing required secret | `DATABASE_URL` or `APP_JWT_SECRET` missing stops the process before it connects to anything. |
 | Each validation rule | Every rule in [`../../src/config/validation.rs`](../../src/config/validation.rs) refuses the value it exists to refuse. |
 
-**At the time of writing the configuration module has no unit test.** The
-cases above are required, and the absence is listed as a gap in §6.
+**The configuration module has its own unit tests.** The cases above are
+covered by the 50 tests in [`../../src/config/tests.rs`](../../src/config/tests.rs),
+which inject the environment into the loader instead of reading the process
+environment, so they neither mutate the environment of the test process nor
+depend on each other. What is still missing is a test of the **resolved**
+configuration as the running server sees it: the harness builds its state from
+`Config::defaults()`, so the environment-variable layer of the precedence is
+covered by the unit tests and not by an end-to-end run.
 
 ## 2. Isolation and the production-safety guard
 
@@ -143,7 +148,7 @@ safe.
 
 **The production-safety guard.** The harness refuses to start unless the
 database name in `TEST_DATABASE_URL` contains the substring `test`. The check
-is an assertion in `test_config()` in
+is an assertion in `test_database_url()` in
 [`../../tests/common/mod.rs`](../../tests/common/mod.rs), and it runs before any
 connection is opened. A production database therefore cannot be reached by an
 accidental `cargo test`, whatever the environment says.
@@ -228,7 +233,7 @@ that an unrelated addition does not break a test.
 | Unit test module | `mod tests` inside `#[cfg(test)]`, next to the code | `#[cfg(test)] mod tests` in [`../../src/users/service.rs`](../../src/users/service.rs) |
 | Async test | `#[tokio::test]` | `#[tokio::test] async fn login_succeeds_with_the_right_password()` |
 | Integration file | The area, with the `_api` suffix | `auth_api.rs`, `notes_api.rs`, `projects_tasks_api.rs` |
-| Shared harness | `tests/common/mod.rs`, imported with `mod common;` | `use common::{app, register_user, request, send, test_state};` |
+| Shared harness | `tests/common/mod.rs`, imported with `pub mod common;` | `use common::{app, register_user, request, send, test_state};` |
 | Test module inside an integration file | The harness is `common`; helpers are imported by name | `use common::{create_project, register_user, request, send, test_state};` |
 | Assertion helper | `expect_status` | `response.expect_status(StatusCode::NOT_FOUND)` |
 
@@ -286,8 +291,13 @@ This list is a to-do list, not a criticism. Each item is a real gap between
 the requirements in [`../project-truth.md`](../project-truth.md) §13 and the
 suite as it stands.
 
-1. **No test of the CORS layer.** Neither the refusal of a `*` origin at
-   start-up nor the rejection of a disallowed origin.
+1. **No HTTP-level test of the CORS layer.** The configuration layer refuses a
+   `*` origin and an origin that is not a valid header value —
+   `a_wildcard_cors_origin_is_refused` and
+   `a_cors_origin_that_is_not_a_valid_header_is_refused` in
+   [`../../src/config/tests.rs`](../../src/config/tests.rs) — but nothing
+   asserts that a request carrying a disallowed `Origin` is answered without
+   the CORS headers.
 2. **No contract test of the OpenAPI document.** Nothing asserts that the
    generated document lists every route, that a documented status code is
    reachable, or that the document can be parsed as OpenAPI.
@@ -303,3 +313,21 @@ suite as it stands.
 6. **No fuzzing of the JSON, path and query extractors.**
 7. **No test that the health endpoints answer when the database is
    unreachable.** The degraded branch of the readiness probe is untested.
+8. **No test that a refresh rotation preserves the absolute deadline.** The
+   rotation must give the replacement session the `expires_at` of the session
+   it replaces, so that the absolute lifetime is measured from the creation of
+   the session and a rotation cannot extend it. The defect that broke this
+   property is `KI-015` in
+   [`../engineering/known-issues.md`](../engineering/known-issues.md).
+   *Covered since 2026-10-22:* `a_rotation_preserves_the_absolute_lifetime_of_the_session`
+   in [`../../tests/auth_api.rs`](../../tests/auth_api.rs) rotates a session
+   and asserts that the replacement row carries the same `expires_at`.
+9. **No test of the `search` length bound.** The shared `validate_search` in
+   [`../../src/helpers/validation.rs`](../../src/helpers/validation.rs)
+   rejects a term longer than 200 characters, and the bound is part of the
+   published contract.
+   *Covered since 2026-10-22:* the unit test
+   `a_search_term_is_trimmed_and_bounded` asserts the bound and the field
+   name, and `a_search_term_over_the_bound_is_refused` in
+   [`../../tests/notes_api.rs`](../../tests/notes_api.rs) asserts the `422`
+   at HTTP level.

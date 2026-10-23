@@ -1,7 +1,7 @@
 # Tasks — specification
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-22
 > **Owner:** maintained by the `docs` agent
 > **Feature identifier:** `ATOM-FEAT-TASK-001`
 > **Feature name:** Tasks, status, priority, ordering and filtering
@@ -31,12 +31,11 @@ The problems this feature solves:
 
 ## 2. Status
 
-**Implemented.** Creation, listing, the status and priority transitions, the
-filtering, the completion timestamp and the cross-account isolation are
-covered by integration tests in `tests/projects_tasks_api.rs`. Reading a
-single task, deleting a single task, the pagination window and the manual
-ordering are all covered by HTTP-level tests, so the feature is `Verified`.
-See [status.md](status.md) for the full evidence.
+**Verified.** Creation, listing, reading, updating, deleting, the status and
+priority transitions, the filtering, the manual ordering, the pagination
+window, the completion timestamp and the cross-account isolation are each
+covered by a named integration test in `tests/projects_tasks_api.rs`. See
+[status.md](status.md) for the full evidence.
 
 ## 3. Scope
 
@@ -180,13 +179,6 @@ A change to this feature is complete when all of the following hold.
 
 ## 9. Known limitations
 
-- **Reading and deleting a single task are not exercised by a test.** Both
-  endpoints exist and are implemented; the cross-account test reaches them
-  only to observe a `404`.
-- **The manual ordering is not exercised by a test.** The `position`
-  default, the explicit `position` and the resulting order are implemented
-  but unasserted.
-- **The pagination window of the task listing is not exercised by a test.**
 - **A task has no due date, assignee or history.** It is a title, a
   description, a status, a priority and a position.
 - **`position` is a `DOUBLE PRECISION`, so it can be a fractional value.**

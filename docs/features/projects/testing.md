@@ -38,7 +38,9 @@ asserts a `201` response.
 | ---- | ---- | -------------- |
 | `src/projects/service.rs` | `names_are_trimmed_and_required` | The name is trimmed and a blank name is rejected. |
 | `src/projects/service.rs` | `oversized_descriptions_are_rejected` | A description of 5 001 characters is rejected. |
-| `src/pagination.rs` | `limit_is_clamped_into_range` | A limit of 5 000 is clamped to 100. |
+| `src/pagination.rs` | `limit_is_clamped_into_range` | A limit of 5 000 is clamped to the configured maximum page size, 100 by default. |
+| `src/pagination.rs` | `the_configured_maximum_is_honoured` | A limit of 5 000 is clamped to the maximum the configuration names, not to a constant. |
+| `src/pagination.rs` | `the_configured_default_is_honoured` | A request without a limit falls back to the default the configuration names. |
 | `src/pagination.rs` | `non_positive_limit_falls_back_to_the_default` | A limit of 0 falls back to 20 and an offset of -3 falls back to 0. |
 | `src/pagination.rs` | `has_more_reflects_the_remaining_items` | `has_more` is true when items remain and false on the last page. |
 
@@ -46,6 +48,7 @@ asserts a `201` response.
 
 | Gap | Why |
 | --- | --- |
+| **A search term longer than 200 characters.** The bound is enforced by the shared `validate_search` in `src/helpers/validation.rs`, but no HTTP-level case asserts the `422`. |
 | **The wildcard characters in a search term.** A `%` or `_` in the search term acts as a wildcard, because the `ILIKE` pattern is not escaped. This is documented in [`specification.md`](specification.md) as a limitation. |
 | **Searching for a term with a space.** A search term must be URL-encoded; a raw space in a query string is not a valid URI. The tests use a single-word term for that reason. |
 | **The order of the project listing.** The listing is `created_at DESC, id DESC`. No test asserts the order of two projects created in the same millisecond. |
