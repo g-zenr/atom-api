@@ -219,8 +219,12 @@ push to `master` or `develop`, then verifies the properties above rather than
 trusting the build. The image is never pushed: publishing is a release decision.
 
 **Verification.** The workflow runs on GitHub-hosted runners, which have a Docker
-daemon; it has not been executed locally, because the development machine has the
-Docker CLI but no running daemon. That is recorded in the change log rather than
+daemon. It has now been observed green on `develop` — run
+[`40019454167`](https://github.com/g-zenr/atom-api/actions/runs/40019454167),
+1m43s — so the build and the five probes (`Config.User`, `uid=10001`, no
+toolchain, `ldd`, start-up without its environment) all executed. It has still
+not been executed on the development machine, which has the Docker CLI but no
+usable daemon (`docker info` answers `500`). That is recorded rather than
 implied by a green tick somewhere else.
 
 **Related.** `KI-005`, [`../architecture/deployment.md`](../architecture/deployment.md)
@@ -666,7 +670,7 @@ test `a_body_limit_above_the_reader_ceiling_is_refused`.
 | `KI-003` | `X-Forwarded-For` is ignored, and nothing replaces it | Open | Medium |
 | `KI-004` | SQLx queries are checked at run time | Open | Low |
 | `KI-005` | There is no CI pipeline | Closed | Medium |
-| `KI-006` | There is no container image for the API | Open | Low |
+| `KI-006` | There is no container image for the API | Closed | Low |
 | `KI-007` | The refresh token is returned in the response body | Open | Low |
 | `KI-008` | The rate limiter fails open on a poisoned lock | Open | Low |
 | `KI-009` | The ordering key is a fraction, and there is no reordering endpoint | Open | Low |
