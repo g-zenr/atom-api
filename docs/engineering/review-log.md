@@ -210,20 +210,16 @@ the drain is bounded when an in-flight request cannot finish. Together they
 distinguish the corrected ordering from the original, which slept inside the
 signal future and then drained without a bound.
 
-They have **not been executed on a unix host**, so this finding is not closed by
-them yet. The file is `#![cfg(unix)]` and the development machine is Windows;
-both routes to a Linux runtime failed (the Docker daemon stopped mid-pull, and a
-cross-compilation check could not link for want of `x86_64-linux-gnu-gcc`). What
-was verified instead is recorded in
-[`known-issues.md`](known-issues.md) `KI-019`: the unix path compiles and lints
-clean under `-D warnings` — which caught a genuine unused-binding defect that
-would have failed the Linux lint — and the in-flight premise was confirmed
-against the real binary with an `Expect: 100-continue` request.
-
-CI runs the suite on `ubuntu`; the finding closes when a run reports `2 passed`
-for `tests/shutdown.rs`. Until then the honest status is *covered by a test that
-has not yet been executed on the platform it targets*, which is not the same as
-verified, and is not written as if it were.
+**Closed by CI, not by assertion.** The file is `#![cfg(unix)]` and the
+development machine is Windows, so the tests were written but could not be run
+there; `KI-019` recorded that gap rather than letting the test's presence imply a
+pass. CI run
+[`40011694171`](https://github.com/g-zenr/atom-api/actions/runs/40011694171) then
+executed them on `ubuntu`: `test result: ok. 2 passed; 0 failed` for
+`tests/shutdown.rs`, with the bounded-drain test logging
+`the shutdown grace elapsed with requests still in flight grace_seconds=2` — the
+deadline being reached with a request in flight, which is exactly the behaviour
+this review could not observe. The finding is closed.
 
 ---
 

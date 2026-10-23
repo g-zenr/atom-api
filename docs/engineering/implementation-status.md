@@ -63,17 +63,16 @@ A feature is never `Verified` because the code exists or compiles.
 | Contract tests against the OpenAPI document | `Implemented` | The document is generated from the handlers in [`../../src/api/routes.rs`](../../src/api/routes.rs), so it cannot list a route that does not exist. **No test asserts its content.** | 2026-10-21 |
 | The disposable test database guard | `Verified` | [`../../tests/common/mod.rs`](../../tests/common/mod.rs) refuses to start unless the database name contains `test` | 2026-10-22 |
 | CI pipeline | `Implemented` | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) - formatting, linting, the test suite, a release build, the documentation check and the OpenCode configuration check. | 2026-10-22 |
-| Container image | `Implemented` | [`../../Dockerfile`](../../Dockerfile) builds a two-stage image: pinned base images, `--locked`, no toolchain in the runtime stage, unprivileged UID 10001, no secret inside. [`../../.github/workflows/container.yml`](../../.github/workflows/container.yml) builds and verifies it on every relevant change. Not `Verified`: the workflow has not been observed running, because this machine has no Docker daemon. | 2026-10-24 |
+| Container image | `Implemented` | [`../../Dockerfile`](../../Dockerfile) builds a two-stage image: pinned base images, `--locked`, no toolchain in the runtime stage, unprivileged UID 10001, no secret inside. [`../../.github/workflows/container.yml`](../../.github/workflows/container.yml) builds and verifies it on every relevant change. **Verified** in run [`40011694239`](https://github.com/g-zenr/atom-api/actions/runs/40011694239): `Config.User=10001:10001`, `uid=10001(atom)`, no `cargo` or `rustc` in the runtime stage, no missing shared library, and the binary exits 1 with `required environment variable DATABASE_URL is missing or empty`, which is the evidence that nothing was baked in. | 2026-10-24 |
 | Compile-time SQLx verification | `Proposed` | Queries are checked at run time. The workflow is documented, not enabled. | — |
 | Edge rate limiting | `Proposed` | The requirement in [`../project-truth.md`](../project-truth.md) §9.10 applies to a production deployment. | — |
 | Everything in the roadmap | `Proposed` | By design. See [`../roadmap.md`](../roadmap.md). | — |
 
-The last full run of the test suite was on 2026-10-24: **179 tests passed on
-Windows** (111 unit, 29 authentication, 2 explorer, 12 notes, 25 projects and
-tasks), 0 failed. A unix host runs two more: `tests/shutdown.rs` is unix-only,
-so CI reports **181**. The two shutdown tests have not yet been observed
-passing — `KI-019` records that, and it is why the shutdown behaviour is
-`Implemented` rather than `Verified`. The
+The last full run of the test suite was on 2026-10-24: **181 tests pass on
+CI's `ubuntu` runner** (111 unit, 29 authentication, 2 explorer, 12 notes,
+25 projects and tasks, 2 shutdown), 0 failed, in run
+[`40011694171`](https://github.com/g-zenr/atom-api/actions/runs/40011694171).
+A Windows host runs 179, because the two shutdown tests are unix-only. The
 run covers the current tree, after the audit remediation recorded in
 [`change-log.md`](change-log.md) under `ATOM-CHANGE-20261022-003`: the
 configuration module contributes 50 unit tests in
