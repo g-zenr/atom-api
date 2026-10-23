@@ -204,6 +204,13 @@ For every queue item:
 If a chain exceeds its budget by 50 percent: PARK it (§7), write the blocker
 with the exact error, and move on. One chain never consumes the day.
 
+**Roll-forward.** When the day's queue is complete, every checkpoint says
+ADVANCE, the tree is committed, and at least 90 minutes of the eight-hour budget
+remain: continue straight into the next day's queue in this same session.
+Record `day N complete, rolling into day N+1` in the ledger, do not repeat the
+preflight, and do repeat the gates. A day with a parked or failing chain never
+rolls forward. This is the only way a night gets past one day; use it.
+
 ## 5. Gates (run them yourself, capture exit codes)
 
 $env:TEST_DATABASE_URL = "postgres://atom:atom@127.0.0.1:5432/atom_test"
