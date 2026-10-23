@@ -1,7 +1,7 @@
 # ATOM change log
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-23
+> **Last updated:** 2026-10-24
 > **Owner:** maintained by the `docs` agent
 
 The chronological record of substantial changes to the ATOM backend, newest
@@ -41,6 +41,167 @@ define the target state. The requirements live in
 5. Run the three quality gates and record their real output.
 
 ## Entries
+
+### ATOM-CHANGE-20261024-001 - The documentation feature, the container image, and the shutdown test
+
+**Date:** 2026-10-24 (UTC)
+**Type:** Fix, performance and process
+**Author:** The ATOM engineering team - the orchestrator with the `rust-backend`,
+`auth-security`, `devops` and `test-engineer` subagents.
+**Status:** Complete, with two items explicitly not verified
+
+#### Summary
+
+Four deferred items were taken up. One became a measured 12 MiB saving, one
+became a reproducible deployment artifact, one became a test (which has not been
+executed on the platform it targets), and one was **reviewed and deliberately not
+changed** with the measurement that justified it. The documentation checker also
+gained a check it was missing.
+
+No API contract changed. No migration was added or edited.
+
+#### What changed
+
+| Area | Change |
+| ---- | ------ |
+| `F-44` | `utoipa-swagger-ui` is now optional behind a default-on `docs` Cargo feature. A production build drops 12.03 MiB of Swagger assets it never serves. |
+| `KI-006` | `Dockerfile` and `.github/workflows/container.yml` add a reproducible container image and a job that verifies it rather than trusting the build. |
+| Shutdown | `tests/shutdown.rs` adds two unix-only tests that deliver a real `SIGTERM`. |
+| `F-45`, `F-46` | Reviewed with SQLx's query logger; both confirmed; neither changed, for the reason below. |
+| Checker | `check_settings_reference` now checks the **second** operator table, in `config/README.md`, in both directions. |
+
+#### `F-44` — measured, not estimated
+
+Two real release builds of the same tree, `strip = "symbols"`, thin LTO,
+`codegen-units = 1`:
+
+| Build | Bytes | MiB |
+| ----- | ----- | --- |
+| default features (`docs` on) | 20,370,432 | 19.43 |
+| `--no-default-features` | 7,760,896 | 7.40 |
+| **removed** | **12,609,536** | **12.03 (62%)** |
+
+`SwaggerUIBundle` is present in the first binary at offset 7,626,840 and absent
+from the second, confirmed by searching the bytes rather than inferring it from
+the size. Both binaries were then **run**: with the feature on, `/api/v1/docs`
+redirects to `/api/v1/docs/` and serves, `swagger-ui.css` serves, and
+`/api/v1/openapi.json` serves; without it, those paths return `404` with the
+standard envelope while `/health/live` still answers.
+
+A build without the feature that is told `api.docs_enabled = true` does not fail
+and does not 404 silently: it logs one warning naming the feature, the two paths
+that will 404, and how to build with it.
+
+**A note on a figure in an earlier record.** The remediation handoff quoted a
+19.35 MB release binary, and the artifact left on disk was 8.68 MiB. Both were
+stale: the 8.68 MiB file had been built during the transient experiment that
+removed `vendored`, so it contained no Swagger assets at all. The numbers above
+replace both.
+
+#### `KI-006` — the container image
+
+Two stages. `rust:1.99.1-slim-bookworm` builds with `--locked` and
+`--no-default-features`; `debian:bookworm-slim` carries the binary and a CA
+bundle. Both base images are pinned by tag **and** digest. Nothing runs as root
+(UID 10001). Neither `config/` nor `migrations/` is copied in, because both are
+embedded in the binary, and a second copy would be a second source of truth. No
+secret is baked in — a build argument would not help, since an argument is
+visible in the image history.
+
+The workflow **verifies** the image rather than trusting it: the declared user is
+not root, `id` reports `uid=10001`, `cargo` and `rustc` are absent, `ldd` reports
+no missing library, and starting the binary with no environment exits non-zero,
+which is the evidence that no configuration was compiled in. It never logs in to
+a registry and never pushes.
+
+#### The shutdown tests, and what they do not prove
+
+Two tests in `tests/shutdown.rs` spawn the real binary, wait for
+`/health/ready`, and send `SIGTERM`:
+
+- with an 8 s grace and nothing in flight, the process must exit within 4 s. The
+  original implementation slept the grace *inside* the signal future, so it would
+  take ~8 s and fail;
+- with a 2 s grace and a request that never completes, the process is still alive
+  500 ms after the signal, proving the request is drained rather than dropped,
+  and exits by the deadline plus a margin. Removing the `select!` bound makes the
+  request end only at the 30 s request timeout.
+
+**They have not been executed on a unix host.** This machine is Windows, the file
+is `#![cfg(unix)]`, and both attempts to obtain a Linux runtime failed — the
+Docker daemon stopped mid-pull and a cross-compilation check could not link
+because `x86_64-linux-gnu-gcc` is absent. What *was* verified is recorded in
+`KI-019`: the unix path compiles and lints clean under `-D warnings` in a scratch
+copy with the gates neutralised (which caught a real unused-binding defect), and
+the in-flight premise was confirmed against the real binary with an
+`Expect: 100-continue` request. CI on `ubuntu` is where these two tests actually
+run; `KI-019` closes when a run reports `2 passed`.
+
+#### `F-45`, `F-46` — reviewed, deliberately not changed
+
+Measured with SQLx's own query logger in a throwaway test, not inferred:
+
+- one authenticated request runs **exactly one** statement on the auth path — a
+  primary-key lookup fetching seven columns, of which `id`, `email` and
+  `is_active` are used (`F-46` confirmed);
+- `GET /auth/me` runs that identical statement **twice** in one request (`F-45`
+  confirmed).
+
+They were left alone because **the two findings pull in opposite directions**: the
+only way to make `/auth/me` a single query is to load the full row on every
+request, which is precisely the over-fetch `F-46` reports. The remaining fix —
+narrowing the projection to `id, email, is_active` — crosses the authentication
+boundary for a three-column instead of seven-column primary-key fetch, and the
+boundary review concluded that does not justify it today. The exact change is
+recorded in [`../audit/remediation-backlog.md`](../audit/remediation-backlog.md)
+under `ATOM-TASK-20261022-020` so nobody re-derives it.
+
+The elapsed times the logger emitted were **not** used as evidence: debug build,
+cold statement, local PostgreSQL.
+
+#### The checker now reads the second table
+
+The project keeps two operator reference tables, one under `docs/architecture/`
+and one in `config/`, and only the first was machine-checked. Both are now
+compared with the keys the four configuration files define, in both directions.
+The check was proved to bite: deleting the `shutdown_grace_seconds` row from
+`config/README.md` makes it fail with
+`does not document the setting app.limits.shutdown_grace_seconds` (exit 1), and
+restoring the row returns it to green. Values are still not compared; that half
+stays deferred, because the reference writes `1 MiB` where the file writes
+`1048576` and a false failure in the gate is worse than a narrower check.
+
+#### Compatibility impact
+
+None for a client. The OpenAPI document and every endpoint contract are
+unchanged; `/api/v1/docs` is not an API endpoint in the document. The release
+build command changed, and the container image uses it.
+
+#### Checks and results
+
+| Command | Result |
+| ------- | ------ |
+| `cargo fmt --all -- --check` | **Passed.** |
+| `cargo clippy --all-targets --all-features -- -D warnings` | **Passed.** |
+| `cargo check --no-default-features --all-targets` | **Passed.** |
+| `cargo test --all-targets` | **Passed.** 179 on Windows: 111 unit, 29 auth, 2 explorer, 12 notes, 25 projects and tasks. `tests/shutdown.rs` reports 0 there; unix reports 181. |
+| `cargo run --bin atom-docs` | **Passed.** `OK (0 warning(s))`. |
+| `cargo run --bin atom-docs -- --strict` | **Passed.** `OK (0 warning(s))`. |
+| Two release builds and both binaries exercised over HTTP | **Passed**, figures above. |
+
+**Not verified:** the container image build (no Docker daemon here; CI verifies
+it), and the two shutdown tests on unix (`KI-019`).
+
+#### Requirements and decisions referenced
+
+| Reference | Subject |
+| --------- | ------- |
+| [`../architecture/deployment.md`](../architecture/deployment.md) §5.1a | The image and the build command. |
+| [`../testing/strategy.md`](../testing/strategy.md) §1.4 | The process layer, and why it is unix-only. |
+| `F-44`, `F-45`, `F-46`, `KI-006`, `KI-019` | The findings and the two remaining gaps. |
+| [`../decisions/ADR-0006-configuration-source-of-truth.md`](../decisions/ADR-0006-configuration-source-of-truth.md) | Why no configuration file is copied into the image. |
+
+---
 
 ### ATOM-CHANGE-20261023-001 - The default OpenCode model, and a validator hint that pointed at nothing
 

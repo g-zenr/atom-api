@@ -202,28 +202,29 @@ warning rather than a silent pass.
 
 ### KI-006 — There is no container image for the API
 
-**Status:** Open · **Severity:** Low
+**Status:** Closed · **Severity:** Low · **Closed:** 2026-10-24
 
-**Description.** [`../../docker-compose.yml`](../../docker-compose.yml) brings
-up PostgreSQL for local development and for the test suite. It states in its
-own header that it "does NOT build an application image". The API runs from
-the source tree with `cargo run`.
+**Description.** [`../../docker-compose.yml`](../../docker-compose.yml) brought up
+PostgreSQL for local development and for the test suite, and stated in its own
+header that it does "NOT build an application image". The API ran from the source
+tree with `cargo run`, so a deployment was defined by the source tree and the
+toolchain rather than by an artifact.
 
-**Impact.** There is no reproducible deployment artefact. A deployment is
-defined by the source tree and the toolchain, which is a larger and less
-pinned surface than an image.
+**Resolution.** `Dockerfile` at the repository root builds the image: a
+two-stage build, base images pinned by tag and digest, `--locked`, no toolchain in
+the runtime stage, and an unprivileged UID 10001.
+[`../../.github/workflows/container.yml`](../../.github/workflows/container.yml)
+builds it on every pull request that touches an input of the build and on every
+push to `master` or `develop`, then verifies the properties above rather than
+trusting the build. The image is never pushed: publishing is a release decision.
 
-**Workaround.** Build the release binary with `cargo build --release` and run
-it with the environment configuration in place.
+**Verification.** The workflow runs on GitHub-hosted runners, which have a Docker
+daemon; it has not been executed locally, because the development machine has the
+Docker CLI but no running daemon. That is recorded in the change log rather than
+implied by a green tick somewhere else.
 
-**Remediation status.** Not started. The pipeline in
-[`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) builds a release
-binary, but it does not build an image. The deployment artefact is still the
-binary, the configuration files in [`../../config/`](../../config/) and the
-environment variables.
-
-**Related.** Requirement [`../project-truth.md`](../project-truth.md) §3;
-`KI-005`.
+**Related.** `KI-005`, [`../architecture/deployment.md`](../architecture/deployment.md)
+§5.1a.
 
 ### KI-007 — The refresh token is returned in the response body
 
@@ -678,3 +679,43 @@ test `a_body_limit_above_the_reader_ceiling_is_refused`.
 | `KI-016` | The configuration accepted a weak password policy and an unbounded clock skew | Closed | Medium |
 | `KI-017` | The configuration accepted a session prune grace shorter than the expired-token window needs | Closed | Medium |
 | `KI-018` | The configured body limit stops at an independent 4 MiB backstop | Closed | Low |
+| `KI-019` | The shutdown drain has a test that has not run on a unix host | Open | Low |
+
+### KI-019 - The shutdown drain has a test that has not run on a unix host
+
+**Status:** Open · **Severity:** Low
+
+**Description.** The independent review
+(`ATOM-REVIEW-20261022-003`) recorded that the shutdown drain was "verified by
+reading the code and by compilation, not by a signal test". Two tests now exist
+in [`../../tests/shutdown.rs`](../../tests/shutdown.rs): one proves the signal
+future resolves immediately instead of sleeping the grace away, the other proves
+the drain is bounded when an in-flight request cannot finish. Together they
+distinguish the corrected implementation from the original, which slept inside the
+signal future and then drained without a bound.
+
+**The gap.** They have **not been executed on a unix host**. The development
+machine is Windows, the file is `#![cfg(unix)]`, so `cargo test` there reports
+`0 tests`. An attempt to obtain a Linux runtime failed: the Docker daemon stopped
+mid-pull, and a cross-compilation check could not link because
+`x86_64-linux-gnu-gcc` is not installed.
+
+**What was verified instead, and labelled as partial in
+[`../testing/strategy.md`](../testing/strategy.md) §1.4:**
+
+- the unix path compiles and lints clean under `-D warnings`, checked by copying
+  the file into a scratch target with the `cfg` gates neutralised. That check
+  found a real defect — an unused binding that would have failed the Linux lint —
+  which was fixed;
+- the premise that a request can be held in flight was confirmed against the real
+  binary: a `POST` with `Content-Length` and `Expect: 100-continue` and no body
+  returns `100 Continue` while the process stays alive.
+
+**Resolution.** CI runs the suite on `ubuntu`, where these two tests execute.
+This entry closes when a run is observed reporting `2 passed` for
+`tests/shutdown.rs`. Until then the behaviour is *Implemented and covered by an
+unexecuted test*, not `Verified`.
+
+**Related.** [`../../tests/shutdown.rs`](../../tests/shutdown.rs),
+[`../testing/strategy.md`](../testing/strategy.md) §1.4,
+`ATOM-REVIEW-20261022-003`.

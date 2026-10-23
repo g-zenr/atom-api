@@ -1,7 +1,7 @@
 # ATOM review log
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-24
 > **Owner:** maintained by the `docs` agent
 
 The record of independent reviews of changes to the ATOM backend: what was
@@ -202,6 +202,28 @@ called a value copy "not a copy".
 Ctrl-C event to a background process on Windows is not something this
 environment can do, so the drain bound is verified by reading the code and by
 compilation, not by a signal test. That is stated rather than implied.
+
+**Follow-up, 2026-10-24 — partially closed.** Two tests now exist in
+[`../../tests/shutdown.rs`](../../tests/shutdown.rs): one proves the signal
+future resolves immediately instead of sleeping the grace away, the other proves
+the drain is bounded when an in-flight request cannot finish. Together they
+distinguish the corrected ordering from the original, which slept inside the
+signal future and then drained without a bound.
+
+They have **not been executed on a unix host**, so this finding is not closed by
+them yet. The file is `#![cfg(unix)]` and the development machine is Windows;
+both routes to a Linux runtime failed (the Docker daemon stopped mid-pull, and a
+cross-compilation check could not link for want of `x86_64-linux-gnu-gcc`). What
+was verified instead is recorded in
+[`known-issues.md`](known-issues.md) `KI-019`: the unix path compiles and lints
+clean under `-D warnings` — which caught a genuine unused-binding defect that
+would have failed the Linux lint — and the in-flight premise was confirmed
+against the real binary with an `Expect: 100-continue` request.
+
+CI runs the suite on `ubuntu`; the finding closes when a run reports `2 passed`
+for `tests/shutdown.rs`. Until then the honest status is *covered by a test that
+has not yet been executed on the platform it targets*, which is not the same as
+verified, and is not written as if it were.
 
 ---
 
