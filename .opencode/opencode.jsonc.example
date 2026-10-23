@@ -20,7 +20,7 @@
   // environment or in OpenCode's own credential store.
 
   // Use a different model without touching the shared configuration.
-  "model": "opencode-go/minimax-m3.1-flash-free",
+  "model": "opencode-go/deepseek-v4.1-flash",
 
   // Add extra ambient instructions for this clone only.
   // "instructions": ["AGENTS.md", "docs/contributing-opencode.md"],
