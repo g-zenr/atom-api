@@ -1,0 +1,111 @@
+name: Container
+
+# Builds the image defined by `Dockerfile` at the repository root.
+#
+# This workflow **builds only**. There is no registry login, no push, no
+# `docker/login-action`, and no secret of any kind: the build must be
+# reproducible by a reviewer on a clean machine with nothing but Docker.
+# Publishing an image is a release decision, and a release is triggered by a
+# human, not by CI. See `docs/architecture/deployment.md`.
+#
+# The job fails when the image does not build. Nothing here is
+# `continue-on-error`.
+
+on:
+  push:
+    # `master` is the production branch and `develop` the integration branch.
+    # A broken image must not reach either unnoticed.
+    branches: [master, develop]
+  pull_request:
+    # Every input of the build, not only `Dockerfile`: a change to the sources,
+    # the lockfile, the embedded `config/` or the embedded `migrations/` can
+    # break the image build without breaking anything else, and the pull
+    # request is the cheapest place to find that out.
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - .github/workflows/container.yml
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - src/**
+      - config/**
+      - migrations/**
+  workflow_dispatch:
+
+# A new push to the same branch supersedes the run in flight.
+concurrency:
+  group: container-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only. The workflow needs the repository and nothing else.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build the container image
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out the repository
+        # Pinned to the exact commit of v4.4.0: a moving major tag would make
+        # the workflow itself unreproducible.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Build the image
+        # A plain `docker build`, rather than a build action: it needs no
+        # registry, no cache backend and no login, and it exits non-zero when
+        # the build fails, which fails the job. The base images are pinned by
+        # digest in the Dockerfile, so this is the same build a reviewer runs
+        # locally.
+        run: docker build --tag atom-api:ci .
+
+      - name: Verify the runtime image
+        # No database is required. Each check reads the image metadata or runs
+        # the binary far enough to prove three things that a successful build
+        # alone would not: that the process is unprivileged, that no toolchain
+        # was carried into the runtime stage, and that nothing is baked in —
+        # the binary refuses to start without `DATABASE_URL`, which is exactly
+        # the evidence that no configuration or secret was compiled in.
+        run: |
+          set -euo pipefail
+
+          echo "== runtime user =="
+          user="$(docker image inspect --format '{{.Config.User}}' atom-api:ci)"
+          echo "Config.User=${user}"
+          if [ -z "${user}" ] || [ "${user}" = "root" ] || [ "${user}" = "0" ]; then
+            echo "the runtime image does not declare an unprivileged user" >&2
+            exit 1
+          fi
+
+          echo "== effective identity =="
+          identity="$(docker run --rm --entrypoint id atom-api:ci)"
+          echo "${identity}"
+          echo "${identity}" | grep -q 'uid=10001'
+
+          echo "== no build tooling =="
+          docker run --rm --entrypoint sh atom-api:ci -c \
+            'command -v cargo >/dev/null && exit 1; command -v rustc >/dev/null && exit 1; echo "no cargo, no rustc"'
+
+          echo "== shared libraries =="
+          libraries="$(docker run --rm --entrypoint ldd atom-api:ci /usr/local/bin/atom-api)"
+          echo "${libraries}"
+          if echo "${libraries}" | grep -q 'not found'; then
+            echo "the runtime image is missing a shared library" >&2
+            exit 1
+          fi
+
+          echo "== start-up without its environment =="
+          set +e
+          output="$(docker run --rm atom-api:ci 2>&1)"
+          status=$?
+          set -e
+          echo "${output}"
+          echo "exit status: ${status}"
+          if [ "${status}" -eq 0 ]; then
+            echo "the binary started with no database URL and no signing secret" >&2
+            exit 1
+          fi
+          echo "${output}" | grep -q 'DATABASE_URL'

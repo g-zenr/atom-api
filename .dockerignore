@@ -1,0 +1,61 @@
+# Build context for the container image.
+#
+# The context is sent to the builder before anything is compiled, so it is kept
+# to the files the build actually reads. Two reasons: a small context is a fast
+# build, and a context that contains no secret cannot leak one into a layer.
+#
+# The build reads exactly these, and nothing here may be ignored:
+#   Cargo.toml, Cargo.lock, rust-toolchain.toml
+#   src/
+#   config/       embedded with `include_str!`
+#   migrations/   embedded with `sqlx::migrate!`
+
+# --- Version control, CI and repository tooling ---
+.git/
+.gitignore
+.gitattributes
+.github/
+.opencode/
+scripts/
+Makefile
+docker-compose.yml
+*.md
+
+# --- Build output ---
+# The image is built from source inside the builder stage. A local target/ is
+# large, and it holds binaries built for the host platform, not for the image.
+target/
+
+# --- Secrets ---
+# A secret must never enter the build context, so a pattern rather than a list.
+# `.env.example` is a template with placeholders only, but the image has no use
+# for it either, so it goes too.
+.env
+.env.*
+*.pem
+*.key
+id_rsa*
+credentials.json
+secrets/
+
+# --- Documentation, tests and coverage ---
+# The image builds no test target and ships no documentation.
+docs/
+tests/
+coverage/
+*.profraw
+tarpaulin-report.html
+
+# --- Local databases and dumps ---
+*.dump
+*.backup
+pgdata/
+
+# --- Editors and OS junk ---
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
