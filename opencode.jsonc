@@ -4,14 +4,28 @@
   // ---------------------------------------------------------------------------
   // Default model
   // ---------------------------------------------------------------------------
-  // `opencode-go/minimax-m3.1-flash-free` is the verified free-tier model of
-  // the OpenCode Go provider. It was confirmed to answer, call tools and
-  // launch subagents with OpenCode v2.0.27.
+  // `opencode-go/deepseek-v4.1-flash` is the default model of the OpenCode Go
+  // provider for this team. It is a **metered** model, not a free tier: the
+  // catalogue prices it at $0.15 per million input tokens and $0.60 per
+  // million output tokens. Running the team against it spends real money.
+  //
+  // `opencode models` lists it on the reference account. The previously
+  // committed `opencode-go/minimax-m3.1-flash-free` dropped out of that
+  // catalogue, which is why `./scripts/validate-opencode.ps1` failed its
+  // model-availability check.
+  //
+  // Tool calling and subagent delegation were observed working on this model
+  // in the orchestrator session on 2026-10-23 under OpenCode v2.0.27: the
+  // session answered, called tools and launched specialists. A full feature
+  // delivery has not yet been run end-to-end on this default, and the model
+  // the subagent sessions resolved for themselves was not recorded. The rule
+  // stands: if a subagent fails to launch, report it rather than silently
+  // switching model.
   //
   // Do NOT edit this line to change the model for your own machine: put the
   // override in `.opencode/opencode.jsonc` (git-ignored) instead. See
   // `docs/contributing-opencode.md` for the full override ladder.
-  "model": "opencode-go/minimax-m3.1-flash-free",
+  "model": "opencode-go/deepseek-v4.1-flash",
 
   // The orchestrator is the only primary agent of the project team. Everything
   // else is a subagent that the orchestrator launches.
