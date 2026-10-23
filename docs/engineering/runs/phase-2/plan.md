@@ -152,10 +152,10 @@ depend on the extension.
 ### The design
 
 1. An `Embedder` trait with three implementations: `Burn` (the owner's chosen
-   pure-Rust framework, CPU backend by default, weights loaded from a local
-   file), `Deterministic` (hash-based, used by every test, no network),
-   `Disabled`. **No second language runtime**: no Python, no Node, no Go, and no
-   external model server such as Ollama.
+   pure-Rust framework, v0.22, **`flex` backend** — pure Rust on the CPU — with
+   weights loaded from a local SafeTensors file), `Deterministic` (hash-based,
+   used by every test, no network), `Disabled`. **No second language runtime**:
+   no Python, no Node, no Go, and no external model server such as Ollama.
 2. Embeddings stored as `REAL[]`.
 3. Search is **hybrid**: the existing lexical search narrows the owner's rows to
    a bounded candidate set, then cosine similarity re-ranks them in Rust. No
@@ -332,3 +332,14 @@ deployment document says so.
 - [The test strategy](../../../testing/strategy.md)
 - [Known issues](../../known-issues.md)
 - [Open questions](../../open-questions.md)
+
+### Reference standards
+
+- [The Rust Style Guide](https://doc.rust-lang.org/style-guide/)
+- [Google's Rust Style Guide](https://google.github.io/styleguide/rustguide.html)
+- [rust-skills](https://github.com/leonardomso/rust-skills)
+- [Burn 0.22 documentation](https://burn.dev/docs/burn/)
+
+They are references, not overrides: `AGENTS.md` §4.12 wins, and
+`rustfmt`/`clippy` decide formatting and lints. Google's `[chrome]`,
+`[fuchsia]` and `google3` rules are Google-internal and do not apply here.

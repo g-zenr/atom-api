@@ -35,7 +35,8 @@ Ledger:     docs/engineering/runs/phase-2/ledger.md
 
 1. Read: AGENTS.md, docs/README.md, docs/project-truth.md, the plan, the ledger,
    the newest change-log entry, known-issues, open-questions, git-workflow.
-   Load the atom-delivery and atom-docs skills.
+   Read the reference standards in AGENTS.md §4.12 before writing Rust or ML
+   code. Load the atom-delivery and atom-docs skills.
 2. Prove no other writer is active:
    Get-Process cargo,rustc,python,atom-api -ErrorAction SilentlyContinue
    git status --short

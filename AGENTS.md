@@ -141,6 +141,23 @@ These are not negotiable and are not stylistic preferences.
     A new setting is added to the file, to the typed structure, to the loader,
     to the validation, to `.env.example`, to the reference table and to the
     tests — **in the same change**.
+12. **Consult the reference standards before writing Rust or ML code.**
+    They are references, not overrides: this file and the published contract
+    win over any guide, and `rustfmt`/`clippy` decide formatting and lints.
+    Where a guide recommends something this repository forbids — `unwrap`, a
+    second error crate, a new abstraction — the repository wins.
+
+    | Reference | Use it for | Read it when |
+    | --------- | ---------- | ------------ |
+    | [The Rust Style Guide](https://doc.rust-lang.org/style-guide/) | the official formatting, naming and documentation conventions; `rustfmt` enforces most of it | a style question is not settled by `rustfmt` |
+    | [Google's Rust Style Guide](https://google.github.io/styleguide/rustguide.html) | API design, ownership, error reporting, naming; ignore its `[chrome]`, `[fuchsia]` and `google3` rules, which are Google-internal | designing a public type, trait or function signature |
+    | [rust-skills](https://github.com/leonardomso/rust-skills) | 265 focused rules across 26 categories: ownership, errors, async, serde, testing, observability; MIT | reviewing Rust for idiom, or when `clippy` is silent but the code feels wrong |
+    | [Burn](https://burn.dev/docs/burn/) | the chosen ML framework, v0.22: `Module`, `Tensor`, backends, `store` | any task touching `src/ml/` |
+
+    For Burn specifically: use the **`flex`** backend (pure Rust, CPU) in
+    Phase 2. Do not add `wgpu`, `cuda` or `tch` without a measurement that
+    justifies it. Store weights with `store`/SafeTensors, never a bespoke
+    format.
 
 ---
 
@@ -169,6 +186,8 @@ task follows this protocol.** The full version lives in
 9. Decide whether the task conflicts with an accepted requirement or an
    unresolved decision. If it does, **stop and say so** instead of silently
    changing product behaviour.
+10. Read the reference standards in §4.12 when the task writes or reviews Rust
+    code or machine learning.
 
 Do not dump every document into context for a small change. Read the canonical
 overview first, then retrieve what the task actually needs.
