@@ -24,6 +24,7 @@ plan and the prompt where they conflict; they do not change `AGENTS.md`.
 | O5 | The concurrent session was **not** identified by the owner. | The runner never kills it. It waits for ten quiet minutes, and aborts if the folder is still busy after sixty. |
 | O6 | **Tech stack: Rust only.** The owner does not want another language runtime. | ML inference must be pure Rust. **Burn is the chosen framework** (owner, 2026-10-24). No Ollama, no Python sidecar, no external model server. Model weights are local files, not a service. PowerShell, `gh` and Docker remain developer tooling. |
 | O7 | **n8n is a later integration**, not Phase 2. | A separate Node service that calls the API; the API never depends on it and it never sits inside the data path of a private record. It stays `Proposed` in `docs/roadmap.md`. It does not violate O6 because it is not part of the API runtime. |
+| O8 | **Full authority granted** (2026-10-24, before sleep): proceed without approval, API only, no frontend, attempt every day. | The runner passes `--auto`. The agent must not pause for confirmation, and must not ask for permission for a tool it already has. Full authority is not permission to fake a result: the anti-cheat rules and the stop conditions still hold. A day that cannot be finished is parked with evidence; the runner then stops rather than build the next day on a broken base. |
 
 ---
 
