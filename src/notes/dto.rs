@@ -6,7 +6,7 @@ use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::notes::models::Note;
-use crate::pagination::{Page, Pagination};
+use crate::pagination::{Page, Pagination, PaginationQuery};
 
 /// Maximum accepted note title length.
 ///
@@ -90,9 +90,9 @@ pub struct UpdateNoteRequest {
 /// Query parameters accepted by `GET /api/v1/notes`.
 ///
 /// Only the feature filters live here. The pagination parameters live in
-/// [`crate::pagination::PaginationQuery`], which the handler extracts
-/// separately: declaring `limit` and `offset` in both places would publish
-/// them twice in the generated OpenAPI document.
+/// [`crate::pagination::PaginationQuery`], and the handler reads both halves
+/// from a single [`NotesListQuery`]: declaring `limit` and `offset` in both
+/// places would publish them twice in the generated OpenAPI document.
 #[derive(Debug, Clone, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct NoteQuery {
@@ -104,6 +104,51 @@ pub struct NoteQuery {
     /// Filter by archive state. When omitted, only active notes are returned.
     /// `true` returns archived notes, `false` returns active notes.
     pub archived: Option<bool>,
+}
+
+/// The whole query string of `GET /api/v1/notes`, deserialized once.
+///
+/// The handler takes a single `Query<…>` extractor over this type. The query
+/// string is therefore parsed exactly once, and [`Self::into_parts`] splits the
+/// result into the pair the service layer already works with.
+///
+/// The fields are written out instead of composing [`NoteQuery`] and
+/// [`PaginationQuery`] with `#[serde(flatten)]`. The extractor deserializes
+/// with `serde_urlencoded`, whose map access yields strings, so a flattened
+/// `Option<i64>` would be asked to deserialize itself from a string and would
+/// fail at run time, on a real request, instead of at compile time. The
+/// duplication is the price of parsing the string once.
+///
+/// It derives `Deserialize` only, and is deliberately absent from the
+/// generated OpenAPI document: the published parameter set stays [`NoteQuery`]
+/// and [`PaginationQuery`], which the handler's `utoipa` attribute names.
+#[derive(Debug, Clone, Deserialize)]
+pub struct NotesListQuery {
+    /// Maximum number of notes to return.
+    pub limit: Option<i64>,
+    /// Number of notes to skip.
+    pub offset: Option<i64>,
+    /// Free-text search over title and content.
+    pub search: Option<String>,
+    /// Filter by archive state.
+    pub archived: Option<bool>,
+}
+
+impl NotesListQuery {
+    /// Splits the parsed query into its filter and pagination halves.
+    pub fn into_parts(self) -> (NoteQuery, PaginationQuery) {
+        let Self {
+            limit,
+            offset,
+            search,
+            archived,
+        } = self;
+
+        (
+            NoteQuery { search, archived },
+            PaginationQuery { limit, offset },
+        )
+    }
 }
 
 /// The response body of `GET /api/v1/notes`.

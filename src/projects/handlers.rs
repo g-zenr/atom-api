@@ -9,7 +9,8 @@ use crate::api::middleware::AuthUser;
 use crate::error::AppResult;
 use crate::pagination::PaginationQuery;
 use crate::projects::dto::{
-    CreateProjectRequest, ProjectPage, ProjectQuery, ProjectResponse, UpdateProjectRequest,
+    CreateProjectRequest, ProjectPage, ProjectQuery, ProjectResponse, ProjectsListQuery,
+    UpdateProjectRequest,
 };
 use crate::state::AppState;
 
@@ -34,9 +35,9 @@ use crate::state::AppState;
 pub async fn list_projects(
     State(state): State<AppState>,
     user: AuthUser,
-    Query(query): Query<ProjectQuery>,
-    Query(pagination): Query<PaginationQuery>,
+    Query(list): Query<ProjectsListQuery>,
 ) -> AppResult<Json<ProjectPage>> {
+    let (query, pagination) = list.into_parts();
     let page = state.projects.list(user.user_id, query, pagination).await?;
     Ok(Json(ProjectPage::from(page)))
 }

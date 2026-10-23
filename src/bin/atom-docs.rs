@@ -22,7 +22,8 @@
 //! 8. `.env.example` and the configuration loader agree about the environment
 //!    variables, in both directions.
 //! 9. The configuration files and the operator reference agree about the
-//!    settings, in both directions.
+//!    settings and about their integer and boolean defaults, in both
+//!    directions.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -521,7 +522,8 @@ fn check_environment_variables(root: &Path, report: &mut Report) {
 /// is a start-up error, because every settings structure refuses unknown
 /// keys.
 fn check_settings_reference(root: &Path, report: &mut Report) {
-    let mut configured: BTreeSet<String> = BTreeSet::new();
+    let mut values: BTreeMap<String, toml::Value> = BTreeMap::new();
+    let mut comparable: BTreeMap<String, SettingValue> = BTreeMap::new();
 
     for file in SETTINGS_FILES {
         let path = root.join(file);
@@ -541,8 +543,10 @@ fn check_settings_reference(root: &Path, report: &mut Report) {
             }
         };
 
-        collect_setting_keys(&table, "", &mut configured);
+        collect_setting_values(&table, "", &mut values, &mut comparable);
     }
+
+    let configured: BTreeSet<String> = values.keys().cloned().collect();
 
     let reference = match fs::read_to_string(root.join(SETTINGS_REFERENCE)) {
         Ok(contents) => contents,
@@ -568,10 +572,8 @@ fn check_settings_reference(root: &Path, report: &mut Report) {
 
     // The second reference table is checked as well. The project keeps two
     // operator tables -- one in `docs/architecture/`, one in `config/` -- and
-    // until now only the first was machine-checked, so the second could drift
-    // in silence. Names only: comparing values would need a normalisation of
-    // `1 MiB` against `1048576`, and a false failure in the gate is worse than
-    // a check that is narrower than it could be.
+    // a second table that disagrees with the first is worse than no second
+    // table, because the reader trusts whichever one they happened to open.
     let secondary = match fs::read_to_string(root.join(SETTINGS_REFERENCE_SECONDARY)) {
         Ok(contents) => contents,
         Err(error) => {
@@ -595,10 +597,134 @@ fn check_settings_reference(root: &Path, report: &mut Report) {
             "{SETTINGS_REFERENCE_SECONDARY} documents the setting {key}, but no configuration file defines it"
         ));
     }
+
+    // Names alone are not enough: `app.limits.shutdown_grace_seconds` was
+    // documented as `100` in `config/README.md` while the file set it to `10`,
+    // and every check above passed. The defaults are compared in both tables.
+    for message in compare_setting_values(SETTINGS_REFERENCE, &comparable, &reference) {
+        report.error(message);
+    }
+
+    for message in compare_setting_values(SETTINGS_REFERENCE_SECONDARY, &comparable, &secondary) {
+        report.error(message);
+    }
 }
 
-/// Collects the leaf key paths of a TOML table.
-fn collect_setting_keys(table: &toml::Table, prefix: &str, keys: &mut BTreeSet<String>) {
+/// Compares the integer and boolean defaults of the configuration files with
+/// the defaults documented in one reference table.
+///
+/// The comparison is deliberately narrow, because a false failure in a gate is
+/// worse than a check that is narrower than it could be:
+///
+/// - Only values [`SettingValue`] can model are compared. A string, a float or
+///   an array has no single documented spelling, so it is never collected.
+/// - A value cell that is not a plain integer or a plain `true`/`false` is
+///   skipped, not reported: several documented defaults are prose, such as
+///   `` `1048576` (1 MiB) `` or `` `900` (15 min) ``.
+/// - A key that appears on more than one row of the same document is skipped
+///   for value in that document. The repeated rows document another layer with
+///   another layer's value -- `app.limits.request_timeout_seconds` is `30` in
+///   the base file and `60` in the development overlay -- and both rows are
+///   correct. The key is still compared in a document where it is unique.
+fn compare_setting_values(
+    document: &str,
+    configured: &BTreeMap<String, SettingValue>,
+    reference: &str,
+) -> Vec<String> {
+    let rows = reference_setting_rows(reference);
+    let mut errors = Vec::new();
+
+    for (key, value) in configured {
+        let Some(cells) = rows.get(key) else {
+            continue;
+        };
+
+        if cells.len() > 1 {
+            continue;
+        }
+
+        let Some(expected) = cells[0] else {
+            continue;
+        };
+
+        if expected == *value {
+            continue;
+        }
+
+        errors.push(format!(
+            "{document} documents the setting {key} as {}, but the configuration file value is {}",
+            expected.render(),
+            value.render()
+        ));
+    }
+
+    errors
+}
+
+/// A setting value, from a configuration file or from a reference table.
+///
+/// Only the two shapes the reference tables write unambiguously are modelled;
+/// everything else is prose and is never compared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SettingValue {
+    Integer(i64),
+    Boolean(bool),
+}
+
+impl SettingValue {
+    /// Reads the comparable form of a TOML leaf, if it has one.
+    fn from_toml(value: &toml::Value) -> Option<Self> {
+        match value {
+            toml::Value::Integer(number) => Some(Self::Integer(*number)),
+            toml::Value::Boolean(flag) => Some(Self::Boolean(*flag)),
+            _ => None,
+        }
+    }
+
+    /// Reads a documented default from a table cell.
+    ///
+    /// The cell must be a plain integer or a plain `true`/`false`, optionally
+    /// wrapped in the backticks the tables use for values. Anything else -- a
+    /// size with a unit, a duration with a comment, a sentence -- is prose and
+    /// yields `None`, so the comparison skips it instead of reporting it.
+    fn from_cell(cell: &str) -> Option<Self> {
+        let trimmed = cell.trim();
+        let text = trimmed
+            .strip_prefix('`')
+            .and_then(|rest| rest.strip_suffix('`'))
+            .unwrap_or(trimmed);
+
+        if let Ok(number) = text.parse::<i64>() {
+            return Some(Self::Integer(number));
+        }
+
+        match text {
+            "true" => Some(Self::Boolean(true)),
+            "false" => Some(Self::Boolean(false)),
+            _ => None,
+        }
+    }
+
+    /// Renders the value for an error message.
+    fn render(self) -> String {
+        match self {
+            Self::Integer(number) => number.to_string(),
+            Self::Boolean(flag) => flag.to_string(),
+        }
+    }
+}
+
+/// Collects the leaf key paths of a TOML table and their values.
+///
+/// The raw value is kept for the key-set comparison, which must see every leaf.
+/// The comparable subset is collected in the same walk, so that the value
+/// comparison can never be handed a value it is unable to judge.
+fn collect_setting_values(
+    table: &toml::Table,
+    prefix: &str,
+    values: &mut BTreeMap<String, toml::Value>,
+    comparable: &mut BTreeMap<String, SettingValue>,
+) {
     for (name, value) in table {
         let path = if prefix.is_empty() {
             name.clone()
@@ -607,20 +733,32 @@ fn collect_setting_keys(table: &toml::Table, prefix: &str, keys: &mut BTreeSet<S
         };
 
         match value {
-            toml::Value::Table(inner) => collect_setting_keys(inner, &path, keys),
+            toml::Value::Table(inner) => {
+                collect_setting_values(inner, &path, values, comparable);
+            }
             _ => {
-                keys.insert(path);
+                if let Some(setting) = SettingValue::from_toml(value) {
+                    comparable.insert(path.clone(), setting);
+                }
+                values.insert(path, value.clone());
             }
         }
     }
 }
 
-/// Extracts the setting keys named in the rows of a Markdown table.
+/// Extracts the setting keys and their documented values from a Markdown
+/// table.
 ///
-/// Only a backticked, dotted, lower-case name is taken, and only one of the
-/// four settings sections. Anything else in a table cell is prose.
-fn reference_setting_keys(contents: &str) -> BTreeSet<String> {
-    let mut keys = BTreeSet::new();
+/// Only a backticked, dotted, lower-case name in the first cell is taken, and
+/// only one of the four settings sections. Anything else in a table cell is
+/// prose. A value cell that is not a plain integer or a plain `true`/`false`
+/// becomes `None`, which the comparison skips.
+///
+/// A key maps to **every** row that mentions it, because a repeated key means
+/// the document describes another layer and cannot be compared by value; see
+/// [`compare_setting_values`].
+fn reference_setting_rows(contents: &str) -> BTreeMap<String, Vec<Option<SettingValue>>> {
+    let mut rows: BTreeMap<String, Vec<Option<SettingValue>>> = BTreeMap::new();
 
     for line in contents.lines() {
         let line = line.trim();
@@ -628,7 +766,8 @@ fn reference_setting_keys(contents: &str) -> BTreeSet<String> {
             continue;
         }
 
-        let Some(cell) = line.split('|').nth(1) else {
+        let mut cells = line.split('|');
+        let Some(cell) = cells.nth(1) else {
             continue;
         };
         let cell = cell.trim();
@@ -657,8 +796,77 @@ fn reference_setting_keys(contents: &str) -> BTreeSet<String> {
             continue;
         }
 
-        keys.insert(key.to_string());
+        let value_cell = cells.next().unwrap_or_default();
+        rows.entry(key.to_string())
+            .or_default()
+            .push(SettingValue::from_cell(value_cell));
     }
 
-    keys
+    rows
+}
+
+/// Extracts the setting keys named in the rows of a Markdown table.
+///
+/// The keys are what the name comparison in [`check_settings_reference`]
+/// needs; the values live next to them in [`reference_setting_rows`].
+fn reference_setting_keys(contents: &str) -> BTreeSet<String> {
+    reference_setting_rows(contents).into_keys().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Parses a TOML snippet the way the checker parses a configuration file.
+    fn configuration(source: &str) -> BTreeMap<String, SettingValue> {
+        let table: toml::Table = source.parse().expect("the test snippet is valid TOML");
+        let mut values = BTreeMap::new();
+        let mut comparable = BTreeMap::new();
+        collect_setting_values(&table, "", &mut values, &mut comparable);
+        comparable
+    }
+
+    #[test]
+    fn a_numeric_default_that_differs_from_the_file_is_reported() {
+        let configured = configuration("[app.limits]\nshutdown_grace_seconds = 10\n");
+        let reference = "| Key | Default | Environment variable |\n\
+                         | --- | ------- | -------------------- |\n\
+                         | `app.limits.shutdown_grace_seconds` | `100` | `APP_SHUTDOWN_GRACE_SECONDS` |\n";
+
+        let errors = compare_setting_values(SETTINGS_REFERENCE_SECONDARY, &configured, reference);
+
+        let expected = format!(
+            "{SETTINGS_REFERENCE_SECONDARY} documents the setting \
+             app.limits.shutdown_grace_seconds as 100, but the configuration file value is 10"
+        );
+        assert_eq!(errors, vec![expected]);
+    }
+
+    #[test]
+    fn a_numeric_default_that_matches_is_not_reported() {
+        let configured = configuration("[app.limits]\nshutdown_grace_seconds = 10\n");
+        let reference = "| Key | Default | Environment variable |\n\
+                         | --- | ------- | -------------------- |\n\
+                         | `app.limits.shutdown_grace_seconds` | `10` | `APP_SHUTDOWN_GRACE_SECONDS` |\n";
+
+        let errors = compare_setting_values(SETTINGS_REFERENCE_SECONDARY, &configured, reference);
+
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    }
+
+    #[test]
+    fn a_boolean_default_that_differs_is_reported() {
+        let configured = configuration("[api]\ndocs_enabled = false\n");
+        let reference = "| Key | Default | Environment variable |\n\
+                         | --- | ------- | -------------------- |\n\
+                         | `api.docs_enabled` | `true` | `APP_API_DOCS_ENABLED` |\n";
+
+        let errors = compare_setting_values(SETTINGS_REFERENCE, &configured, reference);
+
+        let expected = format!(
+            "{SETTINGS_REFERENCE} documents the setting api.docs_enabled as true, \
+             but the configuration file value is false"
+        );
+        assert_eq!(errors, vec![expected]);
+    }
 }

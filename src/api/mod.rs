@@ -79,7 +79,7 @@ pub fn router(state: AppState) -> Router {
     let mut app = Router::new()
         .route("/health/live", get(health::live))
         .route("/health/ready", get(health::ready))
-        .nest("/api/v1", routes::api_routes())
+        .nest(routes::API_PREFIX, routes::api_routes())
         .fallback(middleware::not_found);
 
     if config.api.docs_enabled {

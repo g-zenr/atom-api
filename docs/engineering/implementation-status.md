@@ -1,7 +1,7 @@
 # ATOM implementation status
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-24
 > **Owner:** maintained by the `docs` agent
 
 The current verified state of every part of ATOM Phase 1: what exists, what
@@ -45,7 +45,7 @@ A feature is never `Verified` because the code exists or compiles.
 | Structured logging with request correlation | `Implemented` | [`../../src/telemetry.rs`](../../src/telemetry.rs), [`../../src/api/mod.rs`](../../src/api/mod.rs) | 2026-10-22 |
 | Liveness and readiness endpoints | `Verified` | [`../../src/health.rs`](../../src/health.rs), exercised by an operator run | 2026-10-21 |
 | Versioned REST API under `/api/v1` | `Verified` | [`../../src/api/routes.rs`](../../src/api/routes.rs), exercised by the integration suite | 2026-10-22 |
-| OpenAPI document and a local API explorer | `Implemented` | [`../../src/api/routes.rs`](../../src/api/routes.rs), served at `/api/v1/openapi.json` and `/api/v1/docs/` | 2026-10-22 |
+| OpenAPI document and a local API explorer | `Verified` | [`../../src/api/routes.rs`](../../src/api/routes.rs), served at `/api/v1/openapi.json` and `/api/v1/docs/`; the content is asserted by [`../../tests/openapi_contract.rs`](../../tests/openapi_contract.rs) (operation set, methods, version prefix, list parameter sets) and the serving by [`../../tests/docs_route.rs`](../../tests/docs_route.rs). Response bodies and schemas are not snapshotted. | 2026-10-24 |
 | Documentation tree | `Verified` | [`../`](../) — `cargo run --bin atom-docs` reports no error and no warning | 2026-10-22 |
 | Registration with a unique, normalized email | `Verified` | [`../../src/users/`](../../src/users/), [`../../migrations/0001_users_and_sessions.sql`](../../migrations/0001_users_and_sessions.sql) — the cases in [`../../tests/auth_api.rs`](../../tests/auth_api.rs) | 2026-10-22 |
 | Argon2id hashing and the password policy | `Verified` | [`../../src/auth/password.rs`](../../src/auth/password.rs) — 6 unit tests; [`../../src/users/service.rs`](../../src/users/service.rs) — 9 unit tests; the weak-password case in [`../../tests/auth_api.rs`](../../tests/auth_api.rs) | 2026-10-22 |
@@ -60,7 +60,7 @@ A feature is never `Verified` because the code exists or compiles.
 | Projects CRUD, search, pagination | `Verified` | [`../../src/projects/`](../../src/projects/) — 5 unit tests; the project cases in [`../../tests/projects_tasks_api.rs`](../../tests/projects_tasks_api.rs) | 2026-10-22 |
 | Tasks CRUD, status, priority, filtering, ordering, completion timestamp | `Verified` | [`../../src/tasks/`](../../src/tasks/) — 7 unit tests; the task cases in [`../../tests/projects_tasks_api.rs`](../../tests/projects_tasks_api.rs) | 2026-10-22 |
 | Pagination convention | `Verified` | [`../../src/pagination.rs`](../../src/pagination.rs) — 5 unit tests; the pagination case in [`../../tests/notes_api.rs`](../../tests/notes_api.rs) | 2026-10-22 |
-| Contract tests against the OpenAPI document | `Implemented` | The document is generated from the handlers in [`../../src/api/routes.rs`](../../src/api/routes.rs), so it cannot list a route that does not exist. **No test asserts its content.** | 2026-10-21 |
+| Contract tests against the OpenAPI document | `Verified` | [`../../tests/openapi_contract.rs`](../../tests/openapi_contract.rs) - `the_route_table_and_the_document_describe_the_same_operations` (the tables and the document agree in both directions), `every_route_in_the_table_is_served_by_the_router`, `the_version_prefix_is_declared_once`, `each_list_endpoint_publishes_its_filter_and_pagination_parameters_once` and `each_list_handler_extracts_the_query_string_once`. What is asserted is the operation set, the methods, the version prefix and the list parameter sets; response bodies and schemas are not snapshotted. | 2026-10-24 |
 | The disposable test database guard | `Verified` | [`../../tests/common/mod.rs`](../../tests/common/mod.rs) refuses to start unless the database name contains `test` | 2026-10-22 |
 | CI pipeline | `Implemented` | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) - formatting, linting, the test suite, a release build, the documentation check and the OpenCode configuration check. | 2026-10-22 |
 | Container image | `Implemented` | [`../../Dockerfile`](../../Dockerfile) builds a two-stage image: pinned base images, `--locked`, no toolchain in the runtime stage, unprivileged UID 10001, no secret inside. [`../../.github/workflows/container.yml`](../../.github/workflows/container.yml) builds and verifies it on every relevant change. **Verified** in run [`40011694239`](https://github.com/g-zenr/atom-api/actions/runs/40011694239): `Config.User=10001:10001`, `uid=10001(atom)`, no `cargo` or `rustc` in the runtime stage, no missing shared library, and the binary exits 1 with `required environment variable DATABASE_URL is missing or empty`, which is the evidence that nothing was baked in. | 2026-10-24 |
@@ -68,13 +68,15 @@ A feature is never `Verified` because the code exists or compiles.
 | Edge rate limiting | `Proposed` | The requirement in [`../project-truth.md`](../project-truth.md) §9.10 applies to a production deployment. | — |
 | Everything in the roadmap | `Proposed` | By design. See [`../roadmap.md`](../roadmap.md). | — |
 
-The last full run of the test suite was on 2026-10-24: **181 tests pass on
-CI's `ubuntu` runner** (111 unit, 29 authentication, 2 explorer, 12 notes,
-25 projects and tasks, 2 shutdown), 0 failed, in run
-[`40011694171`](https://github.com/g-zenr/atom-api/actions/runs/40011694171).
-A Windows host runs 179, because the two shutdown tests are unix-only. The
-run covers the current tree, after the audit remediation recorded in
-[`change-log.md`](change-log.md) under `ATOM-CHANGE-20261022-003`: the
+The last full run of the test suite on a Windows host was on 2026-10-24, during
+chain `D0`: **190 tests pass** (111 unit, 3 `atom-docs`, 29 authentication,
+2 explorer, 12 notes, 4 `list_query`, 5 `openapi_contract`, 25 projects and
+tasks, 0 shutdown), 0 failed, `cargo test --all-targets --locked` exit 0. The
+unix-only shutdown tests do not run on Windows, so the same tree is **192** on
+CI's `ubuntu` runner. The run covers the current tree, after the audit
+remediation recorded in
+[`change-log.md`](change-log.md) under `ATOM-CHANGE-20261022-003` and the
+contract work under `ATOM-CHANGE-20261024-002`: the
 configuration module contributes 50 unit tests in
 [`../../src/config/tests.rs`](../../src/config/tests.rs), the shared validators
 four in [`../../src/helpers/validation.rs`](../../src/helpers/validation.rs),

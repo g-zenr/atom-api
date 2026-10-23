@@ -38,7 +38,7 @@ met **and** the verification has been run and recorded.
 | `F-20` | The operator never saw the readable start-up error | 005 | verified | orchestrator |
 | `F-21` | A migration comment described the wrong mechanism | 012 | verified | docs agent |
 | `F-22` | The search filters had no length bound | 006 | verified | orchestrator |
-| `F-23` | The `/api/v1` prefix is written 19 times | 020 | deferred | — |
+| `F-23` | The `/api/v1` prefix is written 19 times | 020 | verified | orchestrator |
 | `F-24` | The `x-request-id` literal was written twice | 014 | verified | orchestrator |
 | `F-25` | The `Path` and `Query` rejection handlers were identical | 014 | verified | subagent |
 | `F-26` | The search normalisation was written twice | 014 | verified | orchestrator |
@@ -64,7 +64,7 @@ met **and** the verification has been run and recorded.
 | `F-46` | The auth lookup over-fetched and discarded a DTO | 020 | reviewed | auth-security |
 | `F-47` | The note-search predicate may not use the GIN index | 017 | verified | efficiency agent |
 | `F-48` | The list conversion cloned the whole page | 017 | verified | efficiency agent |
-| `F-49` | The list handlers parsed the query string twice | 023 | deferred | orchestrator |
+| `F-49` | The list handlers parsed the query string twice | 023 | verified | orchestrator |
 | `F-50` | An empty task list cost an extra round trip | 017 | verified | efficiency agent |
 | `F-51` | The rate limiter swept its whole map per request | 017 | verified | efficiency agent |
 | `F-52` | The token subject crossed the boundary as a `String` | 014 | verified | orchestrator |
@@ -464,13 +464,25 @@ sequence is the evidence; the timing is not.
 ### ATOM-TASK-20261022-021 — Make the OpenAPI document and the route table agree by construction
 
 **Findings:** `F-23` · **Priority:** 8 · **Severity:** Low · **Complexity:** medium
-**Status:** deferred
+**Status:** verified
 **Problem.** The `/api/v1` prefix is written in the route table and in each of
 the eighteen OpenAPI annotations; nothing checks that the two lists agree.
 **Why deferred.** utoipa may not accept a constant expression for the path of
 an annotation, in which case the answer is a contract test, and that needs the
 route table to be enumerable. Deferred until the mechanism is proven: a
 half-applied constant is worse than the duplication.
+
+**Correction (2026-10-24).** The deferral note named the answer and it was
+right: `utoipa` cannot read a constant, so the mechanism is the contract test.
+`src/api/routes.rs` now declares `API_PREFIX`, `ROUTE_TABLE` and
+`UNVERSIONED_ROUTE_TABLE`, the router mounts `routes::API_PREFIX`, and the
+explorer paths are built from it with `format!`.
+`tests/openapi_contract.rs` compares the tables with the document **in both
+directions**, asserts that every table entry is mounted, and asserts that the
+literal `"/api/v1"` appears exactly once in the mounting layer. The nineteen
+annotations still spell the prefix out, which cannot be removed; the drift they
+could allow is closed by assertion rather than by grep. The reasoning is in
+`C-D0` amendments A-C-D0-2, A-C-D0-3 and A-C-D0-4 of the run ledger.
 
 ### ATOM-TASK-20261022-022 — Stop embedding the Swagger bundle in a build that serves no docs
 
@@ -528,16 +540,29 @@ implied.
 ### ATOM-TASK-20261022-023 — Parse the list query string once
 
 **Findings:** `F-49` · **Priority:** 8 · **Severity:** Low · **Complexity:** medium
-**Status:** deferred
+**Status:** verified
 **Problem.** Each list handler takes two extractors, `Query<FeatureQuery>` and
 `Query<PaginationQuery>`, so the URI query string is deserialised twice per
 request.
 **Why deferred.** The fix is a combined extractor carrying both, which changes
-the shape utoipa sees for the OpenAPI `parameters` block — the two
+the shape utoipa sees for the OpenAPI `parameters` block - the two
 `#[into_params]` derivations would have to be reconciled by hand. The cost it
 removes is one deserialisation of a short, already-parsed query string, which is
 not measurable next to the database round trip. Trading a documented OpenAPI
 output for an unmeasurable gain is the wrong direction.
+
+**Correction (2026-10-24).** The objection was right about the risk and wrong
+about the remedy. Each list endpoint now has one query type -
+`NotesListQuery`, `ProjectsListQuery`, `TasksListQuery` - that covers its
+filters and the shared pagination parameters together, and the handler takes
+one `Query<…>` extractor over it. The published OpenAPI output is preserved
+because the query types derive `Deserialize` only and the handler's `utoipa`
+attribute keeps naming the two documented parameter types; nothing new appears
+in the document, and its parameter sets are asserted exactly by
+`each_list_endpoint_publishes_its_filter_and_pagination_parameters_once`. The
+"twice parsed" defect is closed structurally, and
+`each_list_handler_extracts_the_query_string_once` holds it. Reasoning: `C-D0`
+amendments A-C-D0-6 and A-C-D0-7 of the run ledger.
 
 ### ATOM-TASK-20261024-001 — Check the second operator reference table
 

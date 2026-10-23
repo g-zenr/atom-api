@@ -9,7 +9,9 @@ use crate::api::middleware::AuthUser;
 use crate::error::AppResult;
 use crate::pagination::PaginationQuery;
 use crate::state::AppState;
-use crate::tasks::dto::{CreateTaskRequest, TaskPage, TaskQuery, TaskResponse, UpdateTaskRequest};
+use crate::tasks::dto::{
+    CreateTaskRequest, TaskPage, TaskQuery, TaskResponse, TasksListQuery, UpdateTaskRequest,
+};
 
 /// `GET /api/v1/projects/{project_id}/tasks` — list a project's tasks.
 #[utoipa::path(
@@ -33,9 +35,9 @@ pub async fn list_tasks(
     State(state): State<AppState>,
     user: AuthUser,
     Path(project_id): Path<Uuid>,
-    Query(query): Query<TaskQuery>,
-    Query(pagination): Query<PaginationQuery>,
+    Query(list): Query<TasksListQuery>,
 ) -> AppResult<Json<TaskPage>> {
+    let (query, pagination) = list.into_parts();
     let page = state
         .tasks
         .list_for_project(user.user_id, project_id, query, pagination)

@@ -141,7 +141,101 @@ happened.** The first real entry is below.
 
 ---
 
-### ATOM-REVIEW-20261022-003 — The final remediation pass
+### ATOM-REVIEW-20261024-001 - The route table, the document and the setting values
+
+**Date:** 2026-10-24 (UTC)
+**Reviewer:** the `code-reviewer` agent, read-only
+**Change reviewed:** `ATOM-CHANGE-20261024-002` (chain `D0`, contract `C-D0`)
+**Verdict:** **PASS WITH FINDINGS** - no blocking finding against the contract;
+nine non-blocking findings and four documentation findings.
+**Outcome after the follow-up:** every finding fixed in the same change or
+recorded with a reason; the six gates then ran green.
+
+#### What the reviewer confirmed was correct
+
+The route table's 20 versioned entries and 2 unversioned entries match the 22
+`paths(...)` entries in `ApiDoc`, the table order matches the router, and the
+placeholders are in Axum syntax. `"/api/v1"` appears exactly once as a literal in
+the mounting layer, on the `pub const API_PREFIX` line, and `src/api/mod.rs`
+mounts that constant; the two occurrences inside the operator warning carry a
+`/` after `v1` and so are not literals. The explorer paths are built with
+`format!`. All three `into_parts` implementations move every field to the correct
+half - `search`/`archived`, `search`, `status`/`priority` to the feature type and
+`limit`/`offset` to `PaginationQuery` - with no swap and no dropped field. The
+query types derive `Deserialize` only and are absent from the component list, and
+each list handler takes one extractor. No `utoipa` attribute, request type or
+response type was touched, so the published document is unchanged. The value
+comparison was traced by hand over the configuration files against both tables:
+`config/README.md` has 22 integer or boolean rows, all matching after the
+`100`→`10` fix, so the check is not vacuous and would have caught the reported
+drift; `deployment.md` compares 11 unique rows and none mismatch, so it produces
+no false failure on this tree. No `unwrap`/`expect` outside test scope, no
+`allow`, no `ignore`, no `unsafe`, no concatenated SQL, no new dependency, no
+migration.
+
+#### Findings, and what was done
+
+| # | Severity | Finding | Disposition |
+| - | -------- | ------- | ----------- |
+| N-1 | High | Both runner scripts still pointed `$RunDir` at `docs/engineering/runs/phase-2`, which no longer exists: the runner would throw at preflight and the watchdog would silently no-op forever. | Fixed in `scripts/run-phase-2-overnight.ps1` and `scripts/watchdog-phase-2.ps1`. |
+| N-2 | Medium | `docs/README.md` §5 said the checker compares names only and does not read the second table - false since the previous change, and the "values" half false since this one. | Rewritten to state both tables, the value comparison and its exact scope. |
+| N-3 | Medium | `implementation-status.md` said "**No test asserts its content.**" and carried a stale run count. | Row moved to `Verified` citing the five contract tests; the run paragraph now records 190 on Windows and 192 on CI; `Last updated` bumped. |
+| N-4 | Medium | The remediation backlog still reported `F-23` and `F-49` as `deferred`, which is the work this change closes. | Both rows set to `verified`, each with a Correction that names the amendments and the tests. |
+| N-5 | Medium | No change-log entry. | `ATOM-CHANGE-20261024-002` added. |
+| N-6 | Low | `docs/api/README.md` credited the prefix test with checking the explorer paths, which it does not. | Table rewritten: what each test proves, and explicitly what it does not. |
+| N-7 | Low | `conventions.md` said `/api/v1` has one declaration "in the code", which is false against the 20 annotations. | Reworded to "declared exactly once **as a constant**, in the mounting layer", with the annotation reason adjacent. |
+| N-8 | Low | `docs/api/README.md` said the health and OpenAPI routes were the only unauthenticated ones, contradicting the next sentence. | Corrected. |
+| N-9 | Low | The comment above `ROUTE_TABLE` described the agreement test as router-versus-document; the first direction is table-versus-document. | Reworded to say what the two assertions actually hold. |
+| D-1 | Medium | The reason given for `Implemented` on the `project-truth` OpenAPI row was about to become false. | Row moved to `Verified` with the evidence and the scope. |
+| D-2 | Medium | The ledger had no checkpoint and the review log had no entry. | Both written in this change. |
+| D-3 | Low | `config/README.md` step 7 understated the checker. | Corrected. |
+| D-4 | Info | Historical `runs/phase-2/` mentions in the ledger. | Left as written: they record what earlier sessions saw, and rewriting an audit trail is worse. A note in `## Parked` records the rename. |
+
+#### What the reviewer could not verify
+
+It had no shell, so it could not run `git diff`, `git status` or any gate; it
+reviewed the working tree and took the recorded exit codes as given. It could not
+byte-compare the generated document against a pre-change artefact, so "the
+document is unchanged" rests on inspecting every annotation, schema and component
+rather than on a diff of the output.
+
+---
+
+### ATOM-REVIEW-20261024-002 - The evidence behind chain D0
+
+**Date:** 2026-10-24 (UTC)
+**Reviewer:** the `quality-gate` agent, read-only
+**Change reviewed:** `ATOM-CHANGE-20261024-002`
+**Verdict:** **FAIL** on the first pass; **PASS after the repairs below.**
+**Outcome:** all six blocking or required items resolved, then the change was
+re-gated.
+
+#### Why it failed, and what was done
+
+| Category | Item | Disposition |
+| -------- | ---- | ----------- |
+| Blocking | `implementation-status.md` asserted "No test asserts its content" against a tree that now has five such tests, and was not updated by the change. | Rows 48 and 63 moved to `Verified` with the tests named; run counts corrected. |
+| Blocking | `features/notes/architecture.md` and `features/projects/architecture.md` still drew two `Query<…>` extractors in the request path, which is exactly what the chain removed. | Both diagrams now show `Query<NotesListQuery>` / `Query<ProjectsListQuery>` followed by `into_parts()`. |
+| Blocking | The `project-truth` OpenAPI row rested on a claim the same commit would falsify. | Moved to `Verified` with the evidence and an explicit scope note. |
+| Blocking | No reviewer verdict existed for the chain, so scorecard row 10 had no evidence. | `ATOM-REVIEW-20261024-001` written; row 10 cites it. |
+| Required | `I3`, the chain's central invariant, had no test: the three behaviour tests also pass on the two-extractor handler. | `each_list_handler_extracts_the_query_string_once` added, asserting one `Query<` per list handler module and naming the expected type. The ledger states plainly which tests are change-insensitive. |
+| Required | The ledger's queue row cited `71600cb` as the D0 commit - the ledger's own baseline identifies that as the previous docs merge - and still said `TasksListQuery` was outstanding. | Row rewritten: `done`, with the actual state and the resume pointer. |
+
+#### What the gate confirmed was honest
+
+The six recorded exit codes reconcile with the tree: the 190 count matches the
+test functions physically present, the 179 baseline matches the same files minus
+the 11 new ones, the drift the chain exists to fix is genuinely fixed, the
+`--no-default-features` gate is plausible because only `utoipa-swagger-ui` is
+feature-gated, and the formatting state is what a real `cargo fmt` leaves. Its
+own words: no recorded gate was dishonest. What it called over-stated was the
+"prove it can fail" claim, which the ledger now states narrowly - breaking a
+test's own expectation proves the assertion runs, not that the production change
+is what makes it pass.
+
+---
+
+### ATOM-REVIEW-20261022-003 - The final remediation pass
 
 **Date:** 2026-10-22 (UTC)
 **Reviewer:** the `code-reviewer` agent, read-only

@@ -124,7 +124,68 @@ pub fn openapi_document(config: &Config) -> OpenApiDocument {
     document
 }
 
+/// The version prefix every versioned route is mounted under.
+///
+/// It is declared here, once, and everything else derives from it: the router
+/// nests this prefix, and the explorer builds its two paths from it. Typing the
+/// prefix a second time is what lets the router and the generated document
+/// drift apart.
+pub const API_PREFIX: &str = "/api/v1";
+
+/// Every versioned operation, as `(METHOD, path)`.
+///
+/// The method is upper case, and the path is **relative** to [`API_PREFIX`] and
+/// written in axum's syntax, so the path of the operation in the generated
+/// document is [`API_PREFIX`] followed by the path here.
+///
+/// The order is the order in which [`api_routes`] declares the routes, so the
+/// table can be read as the router.
+///
+/// It is maintained by hand next to the router: `utoipa` derives the document
+/// at compile time and cannot read a constant, so neither can be generated from
+/// the other. `tests/openapi_contract.rs` compares the table and the document in
+/// both directions - an entry the table declares but the document does not
+/// describe, and an operation the document describes but the table does not
+/// declare - and separately asserts that every entry is mounted. That pair of
+/// assertions is the guarantee that replaces the generation.
+pub const ROUTE_TABLE: &[(&str, &str)] = &[
+    // --- authentication ---
+    ("POST", "/auth/register"),
+    ("POST", "/auth/login"),
+    ("POST", "/auth/refresh"),
+    ("POST", "/auth/logout"),
+    ("GET", "/auth/me"),
+    // --- notes ---
+    ("GET", "/notes"),
+    ("POST", "/notes"),
+    ("GET", "/notes/{note_id}"),
+    ("PATCH", "/notes/{note_id}"),
+    ("DELETE", "/notes/{note_id}"),
+    // --- projects ---
+    ("GET", "/projects"),
+    ("POST", "/projects"),
+    ("GET", "/projects/{project_id}"),
+    ("PATCH", "/projects/{project_id}"),
+    ("DELETE", "/projects/{project_id}"),
+    // --- tasks ---
+    ("GET", "/projects/{project_id}/tasks"),
+    ("POST", "/projects/{project_id}/tasks"),
+    ("GET", "/tasks/{task_id}"),
+    ("PATCH", "/tasks/{task_id}"),
+    ("DELETE", "/tasks/{task_id}"),
+];
+
+/// Every operation outside [`API_PREFIX`], as `(METHOD, path)`.
+///
+/// The probes live outside the version prefix on purpose: an orchestrator must
+/// be able to call them without knowing which API version is deployed. They are
+/// part of the generated document all the same.
+pub const UNVERSIONED_ROUTE_TABLE: &[(&str, &str)] =
+    &[("GET", "/health/live"), ("GET", "/health/ready")];
+
 /// Builds the versioned API router.
+///
+/// The routes declared here are mirrored by [`ROUTE_TABLE`], in the same order.
 pub fn api_routes() -> Router<AppState> {
     Router::new()
         // --- authentication ---
@@ -172,8 +233,9 @@ pub fn api_routes() -> Router<AppState> {
 ///
 /// `utoipa-swagger-ui` integrates with Axum through `From<SwaggerUi> for
 /// Router<S>`, so the explorer is merged into the application router rather
-/// than used as a handler. The router serves both the UI at `/api/v1/docs` and
-/// the OpenAPI document at `/api/v1/openapi.json`.
+/// than used as a handler. The router serves both the UI and the OpenAPI
+/// document, under [`API_PREFIX`]: the two paths are built from it, so the
+/// prefix is not typed again here.
 ///
 /// This function exists only when the `docs` feature is enabled. The feature
 /// carries the Swagger UI asset bundle — 10.73 MiB embedded in the binary — and
@@ -182,8 +244,11 @@ pub fn api_routes() -> Router<AppState> {
 /// binary was built without it.
 #[cfg(feature = "docs")]
 pub fn swagger_ui(config: &Config) -> Router<AppState> {
-    SwaggerUi::new("/api/v1/docs")
-        .url("/api/v1/openapi.json", openapi_document(config))
+    SwaggerUi::new(format!("{API_PREFIX}/docs"))
+        .url(
+            format!("{API_PREFIX}/openapi.json"),
+            openapi_document(config),
+        )
         .into()
 }
 

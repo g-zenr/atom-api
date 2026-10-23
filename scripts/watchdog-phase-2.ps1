@@ -27,7 +27,7 @@ param(
 $ErrorActionPreference = 'Continue'
 
 $Root = Split-Path -Parent $PSScriptRoot
-$RunDir = Join-Path $Root 'docs/engineering/runs/phase-2'
+$RunDir = Join-Path $Root 'docs/engineering/runs/chain'
 $Ledger = Join-Path $RunDir 'ledger.md'
 $Runner = Join-Path $Root 'scripts/run-phase-2-overnight.ps1'
 $LogDir = Join-Path $Root 'target/overnight'

@@ -1,7 +1,7 @@
 # ATOM documentation
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-24
 > **Owner:** maintained by the `docs` agent
 
 This directory is ATOM's knowledge base. It is written so that a contributor
@@ -102,6 +102,9 @@ A feature is never `Verified` because its code exists or compiles.
 | [`decisions/ADR-0004-documentation-as-project-truth.md`](decisions/ADR-0004-documentation-as-project-truth.md) | The documentation tree is part of the product. Superseded, in the narrow sense, by ADR-0006. |
 | [`decisions/ADR-0005-ownership-enforced-in-sql.md`](decisions/ADR-0005-ownership-enforced-in-sql.md) | Authorization is enforced in SQL, not in handlers. |
 | [`decisions/ADR-0006-configuration-source-of-truth.md`](decisions/ADR-0006-configuration-source-of-truth.md) | The configuration directory is the source of truth; the secrets are held only in the environment. |
+| [`decisions/ADR-0007-money-representation.md`](decisions/ADR-0007-money-representation.md) | Money is `NUMERIC(19,4)` in the database and a four-decimal string on the wire. |
+| [`decisions/ADR-0008-local-pure-rust-ml.md`](decisions/ADR-0008-local-pure-rust-ml.md) | Local, pure-Rust inference with Burn and the `flex` backend; `REAL[]` and a bounded hybrid re-rank instead of pgvector. |
+| [`decisions/ADR-0009-receipt-references.md`](decisions/ADR-0009-receipt-references.md) | A receipt is a reference, not an uploaded file, in Phase 2. |
 
 ### Features
 
@@ -112,6 +115,9 @@ A feature is never `Verified` because its code exists or compiles.
 | [`features/notes/`](features/notes/) | Personal notes, archiving, search, pagination. |
 | [`features/projects/`](features/projects/) | Projects, their lifecycle, and what happens to their tasks. |
 | [`features/tasks/`](features/tasks/) | Tasks, status, priority, ordering, filtering. |
+| [`features/reimbursements/`](features/reimbursements/) | Expense claims, line items, money and the claim lifecycle. `Accepted`, not built. |
+| [`features/job-applications/`](features/job-applications/) | Companies, applications, stages and events. `Accepted`, not built. |
+| [`features/ml/`](features/ml/) | Local embeddings, hybrid search and match ranking. `Accepted`, not built. |
 
 Each feature directory contains the same five documents:
 
@@ -153,7 +159,7 @@ Each feature directory contains the same five documents:
 | [`engineering/review-log.md`](engineering/review-log.md) | Substantive reviews: findings, required fixes, resolution, re-review evidence. |
 | [`engineering/git-workflow.md`](engineering/git-workflow.md) | The branch model, the branch and commit naming rules, the six gates, the pull-request process, and how a review is conducted. |
 | [`engineering/release-and-promotion.md`](engineering/release-and-promotion.md) | How a change moves through DEV, UAT and PROD: the gate at each stage, what is verified, what is recorded, and what infrastructure does not exist yet. |
-| [`engineering/runs/phase-2/`](engineering/runs/phase-2/) | The Phase 2 run: the plan, the self-healing daily prompt and the live ledger for reimbursements, job applications, local ML and the database seeder. |
+| [`engineering/runs/chain/`](engineering/runs/chain/) | The Phase 2 run: the plan, the self-healing daily prompt and the live ledger for reimbursements, job applications, local ML and the database seeder. |
 | [`engineering/known-issues.md`](engineering/known-issues.md) | Confirmed defects, limitations, workarounds and remediation status. |
 | [`engineering/open-questions.md`](engineering/open-questions.md) | Unresolved product or architecture decisions. |
 
@@ -210,14 +216,20 @@ The checker verifies that:
 7. the configuration directory has its required files;
 8. `.env.example` and the configuration loader agree about the environment
    variables, in both directions;
-9. the configuration files and the operator reference in
-   [`architecture/deployment.md`](architecture/deployment.md) agree about the
-   **names** of the settings, in both directions.
+9. the configuration files and **both** operator references — the one in
+   [`architecture/deployment.md`](architecture/deployment.md) and the one in
+   [`../config/README.md`](../config/README.md) — agree about the **names** of
+   the settings, in both directions, and about their **integer and boolean**
+   defaults.
 
-The checker compares names, not values: a setting whose *default* in the
-reference table no longer matches the file is not reported. It also does not
-compare the second reference table, in [`../config/README.md`](../config/README.md);
-that table has to be kept in step by hand.
+The value comparison is deliberately narrow, and the code comment says why. Only
+a plain TOML integer or boolean is compared: a cell that holds prose (`1 MiB`,
+`20 (default)`, `At least 12 characters.`) is skipped rather than reported, and
+a key that appears on more than one row of the same document is not compared for
+value there, because the repeated rows describe the overlay, floor and
+environment layers with a different layer's value. `config/README.md` documents
+each setting once, so the default drift this check exists for is caught there.
+Name coverage is not narrowed by any of this.
 
 The checker cannot tell you whether a sentence is *true*. That is the job of
 the `code-reviewer` and the `quality-gate` agents, and of every human

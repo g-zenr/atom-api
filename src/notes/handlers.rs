@@ -7,7 +7,9 @@ use uuid::Uuid;
 use crate::api::extract::{Json, Path, Query};
 use crate::api::middleware::AuthUser;
 use crate::error::AppResult;
-use crate::notes::dto::{CreateNoteRequest, NotePage, NoteQuery, NoteResponse, UpdateNoteRequest};
+use crate::notes::dto::{
+    CreateNoteRequest, NotePage, NoteQuery, NoteResponse, NotesListQuery, UpdateNoteRequest,
+};
 use crate::pagination::PaginationQuery;
 use crate::state::AppState;
 
@@ -35,9 +37,9 @@ use crate::state::AppState;
 pub async fn list_notes(
     State(state): State<AppState>,
     user: AuthUser,
-    Query(query): Query<NoteQuery>,
-    Query(pagination): Query<PaginationQuery>,
+    Query(list): Query<NotesListQuery>,
 ) -> AppResult<Json<NotePage>> {
+    let (query, pagination) = list.into_parts();
     let page = state.notes.list(user.user_id, query, pagination).await?;
     Ok(Json(NotePage::from(page)))
 }

@@ -42,6 +42,128 @@ define the target state. The requirements live in
 
 ## Entries
 
+### ATOM-CHANGE-20261024-002 - The route table, the document and the setting values are asserted, not assumed
+
+**Date:** 2026-10-24 (UTC)
+**Type:** Fix, test and documentation
+**Author:** The ATOM engineering team - the orchestrator with the `rust-backend`, `test-engineer`, `code-reviewer` and `quality-gate` subagents.
+**Status:** Complete
+
+#### Summary
+
+Two deferred findings were closed by making three things that had only been
+believed into things that are asserted: that the route table and the OpenAPI
+document describe the same operations, that each list endpoint parses its query
+string once, and that the operator reference tables agree with the configuration
+files about the **values** of their integer and boolean defaults, not only about
+their names.
+
+The third check found the drift it was written for. `config/README.md`
+documented `app.limits.shutdown_grace_seconds` as `100`; `config/app.toml` says
+`10`, and the code has always used ten seconds. The reference table was wrong by
+an order of magnitude, and nothing had reported it.
+
+No endpoint, path, method, status code, request body or response schema changed.
+No migration was added or edited. No dependency was added.
+
+#### What changed
+
+| Area | Change |
+| ---- | ------ |
+| `F-23` | `API_PREFIX` is declared once in `src/api/routes.rs`; `src/api/mod.rs` mounts it; the explorer paths are built from it. `ROUTE_TABLE` and `UNVERSIONED_ROUTE_TABLE` publish the 22 operations, and `tests/openapi_contract.rs` compares them with the document in both directions. |
+| `F-49` | Each list endpoint has one query type - `NotesListQuery`, `ProjectsListQuery`, `TasksListQuery` - and one `Query<…>` extractor, split into the existing filter and pagination halves by `into_parts()`. |
+| Checker | `check_settings_reference` now compares integer and boolean defaults against **both** operator reference tables, in addition to the existing name comparison. |
+| `config/README.md` | `app.limits.shutdown_grace_seconds` default `100` → `10`. |
+| Run folder | `docs/engineering/runs/phase-2/` → `docs/engineering/runs/chain/`, and the two scripts that pointed at the old path were corrected. |
+
+#### Why the query types do not change the published contract
+
+The obvious way to combine the two halves is `#[serde(flatten)]`. It fails here:
+axum's `Query` deserializes with `serde_urlencoded`, whose map access yields
+strings, so a flattened `Option<i64>` would be asked to deserialize itself from
+a string and would fail at run time, on a real request, rather than at compile
+time. The fields are therefore written out explicitly in each query type, and the
+module documentation says so.
+
+The second risk was the document. Deriving `IntoParams` on the new types would
+either publish a new schema or drop the two existing parameter types, so they
+derive `Deserialize` only, and the handlers' `#[utoipa::path(params(…))]`
+attributes still name the published types. The published parameter sets are
+asserted exactly - no duplicate, no missing parameter, no extra - by
+`each_list_endpoint_publishes_its_filter_and_pagination_parameters_once`.
+
+#### What is asserted, and what is not
+
+The operation set, the methods, the version prefix and the three list parameter
+sets are asserted. A snapshot of every response body and schema is **not**, and
+the status rows say so. `every_route_in_the_table_is_served_by_the_router`
+distinguishes mounted from unmounted by status, so a wrong verb answers `405` and
+passes it; method agreement is held by the table-versus-document test instead.
+
+The one-parse rule is structural, not behavioural: a handler with two extractors
+over the same URI produces an identical response, so the behaviour tests cannot
+see it. It is held by `each_list_handler_extracts_the_query_string_once`, which
+asserts one `Query<` per list handler module and names the expected type.
+
+#### The checker's new check, and why it is narrow
+
+Only a plain TOML integer or boolean is compared. A reference cell that holds
+prose (`1 MiB`, `20 (default)`, `At least 12 characters.`) is skipped rather than
+reported, and a key that appears on more than one row of the same document is not
+compared for value there, because the repeated rows describe the overlay, floor
+and environment layers with a different layer's value. `deployment.md` documents
+43 setting rows for 28 distinct keys; `config/README.md` documents 28 for 28. A
+false failure in a gate is worse than a check narrower than it could be, and the
+drift this check exists for is a plain integer.
+
+The check was proved to bite: with the cell set back to `100`, `atom-docs` exits
+1 with `ERROR config/README.md documents the setting app.limits.shutdown_grace_seconds as 100, but the configuration file value is 10`; with `10`, it exits 0.
+
+#### Compatibility impact
+
+None for a client. The document describes the same 22 operations with the same
+paths, methods, status codes, request bodies, response schemas and query
+parameters. The behaviour of every endpoint is unchanged; the three new query
+types are an internal seam.
+
+#### Checks and results
+
+Run from the repository root, on the integrated tree:
+
+| Command | Exit | Result |
+| ------- | ---- | ------ |
+| `cargo fmt --all -- --check` | 0 | no diff |
+| `cargo clippy --all-targets --all-features --locked -- -D warnings` | 0 | clean |
+| `cargo test --all-targets --locked` | 0 | **190 passed, 0 failed** in 9 targets (111 lib, 3 `atom-docs`, 29 `auth_api`, 2 `docs_route`, 12 `notes_api`, 4 `list_query`, 5 `openapi_contract`, 25 `projects_tasks_api`, 0 `shutdown` — unix-only) |
+| `cargo check --no-default-features --all-targets --locked` | 0 | clean |
+| `cargo run --quiet --bin atom-docs` | 0 | `OK (0 warning(s))` |
+| `cargo run --quiet --bin atom-docs -- --strict` | 0 | `OK (0 warning(s))` |
+
+The suite grew from 179 to 190 tests: 11 new, matching the 11 the contract named.
+The shutdown tests were not executed: they are unix-only and this host is Windows.
+
+#### Review
+
+`code-reviewer` returned **PASS WITH FINDINGS** with no blocking finding; its
+nine non-blocking and four documentation findings were fixed in this change or
+recorded. `quality-gate` returned **FAIL** on the first pass with four blocking
+and two required items - a false "no test asserts its content" claim, two stale
+request-path diagrams, a missing review record, an untested invariant and a stale
+ledger row - all of which were resolved before the change was committed. Entries:
+[`review-log.md`](review-log.md) `ATOM-REVIEW-20261024-001` and `-002`.
+
+#### Requirements and decisions referenced
+
+| Reference | What it is |
+| --------- | ---------- |
+| `ATOM-TASK-20261022-021` (`F-23`) | The prefix, the route tables and the agreement test. |
+| `ATOM-TASK-20261022-023` (`F-49`) | The one-deserialisation query types. |
+| [`../audit/remediation-backlog.md`](../audit/remediation-backlog.md) | Both rows moved from `deferred` to `verified`, each with a Correction. |
+| [`project-truth.md`](../project-truth.md) | The OpenAPI row moved to `Verified`, with its scope stated. |
+| [`runs/chain/ledger.md`](runs/chain/ledger.md) | `C-D0` and amendments `A-C-D0-1`…`A-C-D0-10`, the evidence and the scorecard. |
+
+---
+
 ### ATOM-CHANGE-20261024-001 - The documentation feature, the container image, and the shutdown test
 
 **Date:** 2026-10-24 (UTC)

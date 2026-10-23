@@ -160,8 +160,8 @@ GET /api/v1/notes?search=release&archived=false&limit=20&offset=0
   ├─ api::router layers, outermost first: CORS, trace, body limit, request id (set, then propagate), timeout, panic guard
   ├─ api::middleware::AuthUser
   │    └─ decode the bearer token → user_id          missing or invalid → 401
-  ├─ api::extract::Query<NoteQuery>                  unparsable → 400
-  ├─ api::extract::Query<PaginationQuery>
+  ├─ api::extract::Query<NotesListQuery>   one parse; unparsable → 400
+  ├─ into_parts() → (NoteQuery, PaginationQuery)
   ├─ notes::handlers::list_notes
   │    └─ notes::service::NoteService::list
   │         ├─ NoteFilters { search, archived }

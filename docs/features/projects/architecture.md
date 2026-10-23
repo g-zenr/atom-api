@@ -155,8 +155,8 @@ GET /api/v1/projects?search=phase&limit=20&offset=0
   ├─ api::router layers, outermost first: CORS, trace, body limit, request id (set, then propagate), timeout, panic guard
   ├─ api::middleware::AuthUser
   │    └─ decode the bearer token → user_id          missing or invalid → 401
-  ├─ api::extract::Query<ProjectQuery>               unparsable → 400
-  ├─ api::extract::Query<PaginationQuery>
+  ├─ api::extract::Query<ProjectsListQuery>               one parse; unparsable → 400
+  ├─ into_parts() → (ProjectQuery, PaginationQuery)
   ├─ projects::handlers::list_projects
   │    └─ projects::service::ProjectService::list
   │         ├─ pagination.effective_limit()          the configured bounds

@@ -713,8 +713,10 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 The warning is the evidence that matters. It is the bounded-drain test reaching
 its deadline with a request still in flight — the behaviour that could not be
 observed on Windows, and the exact path the review found unverified. The
-unix-only suite is therefore **181 tests**, and the shutdown behaviour is
-`Verified`.
+unix-only suite was therefore **181 tests** on the day this was recorded; the
+current count is in
+[`implementation-status.md`](implementation-status.md), and the shutdown
+behaviour is `Verified`.
 
 **Related.** [`../../tests/shutdown.rs`](../../tests/shutdown.rs),
 [`../testing/strategy.md`](../testing/strategy.md) §1.4,

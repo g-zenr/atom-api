@@ -1,15 +1,15 @@
 # Phase 2 — plan
 
-> **Status:** Proposed (planning — becomes `Accepted` only through the Day 1 intake)
+> **Status:** Proposed (planning — becomes `Accepted` only through the Phase 1 intake)
 > **Last updated:** 2026-10-24
 > **Owner:** maintained by the orchestrator
 
 The plan for turning the Phase 1 backend into the personal workspace: notes,
 tasks, reimbursements, job-application tracking and local machine learning, with
 a complete database seeder so the frontend can be built against realistic data
-from the first day.
+from the first phase.
 
-Nothing here is agreed product scope until Day 1 writes it into
+Nothing here is agreed product scope until Phase 1 writes it into
 [the product requirements](../../../project-truth.md) with acceptance criteria.
 The roadmap items remain `Proposed` until then.
 
@@ -51,7 +51,7 @@ Out of scope for Phase 2, and not to be pre-wired:
 
 ## 3. Assumptions to confirm
 
-These are product decisions. Day 1 records the answer and its source; anything
+These are product decisions. Phase 1 records the answer and its source; anything
 unanswered becomes an open question and the behaviour is excluded from the
 specifications.
 
@@ -86,7 +86,7 @@ Every feature meets all of the following, or it is not done:
 
 ## 5. Data model sketch
 
-The architect finalises this on Day 1; the shapes below are the working sketch.
+The architect finalises this on Phase 1; the shapes below are the working sketch.
 
 ### 5.1 Reimbursements
 
@@ -168,7 +168,7 @@ depend on the extension.
 6. Evaluation: 15 fixture queries with expected notes, run with the
    deterministic embedder (proves the plumbing); one recorded manual quality run
    with the real model.
-7. Burn is the framework decision (owner, 2026-10-24). Day 4 opens with a spike
+7. Burn is the framework decision (owner, 2026-10-24). Phase 4 opens with a spike
    that loads a small sentence-embedding model, measures latency and memory on
    this machine, and records the numbers **before** any endpoint depends on it.
    If the spike fails, ML ships as `Disabled` and lexical search is the
@@ -180,7 +180,7 @@ Endpoints: `POST /notes/search` (lexical or semantic), `POST
 
 ## 7. Delivery waves
 
-| Day | Wave | Output | Seeder addition |
+| Phase | Wave | Output | Seeder addition |
 | --- | ---- | ------ | --------------- |
 | 0 | Close Phase 1 | Remediation leftovers verified and merged | — |
 | 1 | Product intake | Accepted requirements, three feature specs, ADR-0007/0008/0009, schema, conventions, test matrix, seeder specification | Specified in `docs/database/seeding.md` |
@@ -190,13 +190,13 @@ Endpoints: `POST /notes/search` (lexical or semantic), `POST
 | 4 | Local ML | ADR, embeddings, hybrid search, evaluation | Embeddings with `--with-embeddings` (S4) |
 | 5 | Hardening | Contract tests, ownership sweep, performance, frontend handover | CI smoke run (S5) |
 
-A day is one run of [prompt.md](prompt.md). A **chain** is one queue item inside
-a day. The seeder is a first-class chain, not an afterthought: a feature that
+A phase is one run of [prompt.md](prompt.md). A **chain** is one queue item inside
+a phase. The seeder is a first-class chain, not an afterthought: a feature that
 adds a table without adding it to the seeder is not complete.
 
-### Day 0 — the close-out checklist
+### Phase 0 — the close-out checklist
 
-Day 0 is the only day that finishes existing work instead of new work. Read
+Phase 0 is the only phase that finishes existing work instead of new work. Read
 [ledger.md](ledger.md) first: part of it may already be done by the session that
 was writing when this plan was created.
 
@@ -303,10 +303,10 @@ deployment document says so.
 
 ## 9. Sequencing rules
 
-- Days run in order; a day starts only when the previous one's checkpoint is
+- Days run in order; a phase starts only when the previous one's checkpoint is
   `ADVANCE`.
-- Within a day, chains run in queue order. The seeder foundation runs first on
-  Day 2, because it depends only on the Phase 1 schema; every feature chain then
+- Within a phase, chains run in queue order. The seeder foundation runs first on
+  Phase 2, because it depends only on the Phase 1 schema; every feature chain then
   extends it in the same chain.
 - Two agents never edit the same file in one wave. `Cargo.toml` is edited once,
   by the orchestrator, before the fan-out that adds a binary.
@@ -314,7 +314,7 @@ deployment document says so.
 
 ## 10. Decisions that block
 
-- A1–A6 above, before Day 1 writes acceptance criteria.
+- A1–A6 above, before Phase 1 writes acceptance criteria.
 - [Open questions](../../open-questions.md) `Q-01` … `Q-12`. None blocks the
   engineering work in this plan; each blocks the product behaviour it describes.
 - pgvector versus `REAL[]`: settled for Phase 2 by the non-superuser finding,

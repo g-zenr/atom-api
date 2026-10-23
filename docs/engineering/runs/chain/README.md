@@ -13,8 +13,8 @@ crash — can resume without the conversation that produced it.
 
 | File | What it is | Read it when |
 | ---- | ---------- | ------------ |
-| [prompt.md](prompt.md) | The self-healing daily prompt. One day per paste. | You are starting a session |
-| [plan.md](plan.md) | Scope, assumptions, data model, ML design and the six-day wave table | You need to know what and why |
+| [prompt.md](prompt.md) | The self-healing daily prompt. One phase per paste. | You are starting a session |
+| [plan.md](plan.md) | Scope, assumptions, data model, ML design and the six-phase wave table | You need to know what and why |
 | [ledger.md](ledger.md) | The live state: baseline, queue, evidence, failures, checkpoints, resume | Always, first |
 
 These four files are created untracked. Commit them before the first preflight:
@@ -26,19 +26,19 @@ tree as a signal to stop and look rather than to plough on.
 1. Open [ledger.md](ledger.md). Read `## Resume` and `## Queue`.
 2. Take the first queue item whose state is not `done`.
 3. Paste [prompt.md](prompt.md) into a fresh session in the repository root,
-   replacing `DAY=<n>` with the day that item belongs to.
+   replacing `PHASE=<n>` with the phase that item belongs to.
 4. Let the preflight run. If it refuses because the tree is dirty or a process
    is running, do not force it: that is the guard working.
 5. When the session ends, the ledger is the handover. Commit it.
 
 ## The order of the work
 
-Phase 1 is not closed yet. The close-out (Day 0) is a separate wave: the
+Phase 1 is not closed yet. The close-out (Phase 0) is a separate wave: the
 documentation feature, the shutdown signal test and the container image were
-being written when this folder was created. Do not start Day 1 until the
+being written when this folder was created. Do not start Phase 1 until the
 close-out is committed and its six gates are green on a clean tree.
 
-| Day | Wave | Output |
+| Phase | Wave | Output |
 | --- | ---- | ------ |
 | 0 | Close Phase 1 | The remediation leftovers, verified and merged |
 | 1 | Product intake | Accepted requirements, feature specs, ADRs, schema — documents only |
@@ -47,7 +47,7 @@ close-out is committed and its six gates are green on a clean tree.
 | 4 | Local ML | ADR, embeddings, hybrid search, tests, evaluation |
 | 5 | Hardening | Contract tests, ownership sweep, performance, frontend handover |
 
-The detail of each day is in [plan.md](plan.md) §7.
+The detail of each phase is in [plan.md](plan.md) §7.
 
 ## The rules that do not change
 

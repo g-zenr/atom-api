@@ -1,7 +1,7 @@
 # ATOM API
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-24
 > **Owner:** maintained by the `docs` agent
 
 This directory holds the HTTP contract of the ATOM API. It describes the
@@ -38,6 +38,31 @@ silently away from the code.
 The document describes the API as it is built. Its `info.version` is the crate
 version from `Cargo.toml` (`0.1.0`), and its `info.title` is the configured
 `api.title` (`ATOM API` by default).
+
+### The document and the routes cannot drift
+
+The document's content is asserted, not merely generated. `tests/openapi_contract.rs`
+compares the route table in `src/api/routes.rs` with the operations in the
+generated document **in both directions**, and separately asserts that every
+table entry is mounted, so a declared operation and the document cannot drift
+apart without a failing test:
+
+| Test | What it proves |
+| ---- | -------------- |
+| `the_route_table_and_the_document_describe_the_same_operations` | Every entry in `ROUTE_TABLE` and `UNVERSIONED_ROUTE_TABLE` is an operation in the document, and every operation in the document is an entry in one of the tables. Either direction failing fails the test. |
+| `every_route_in_the_table_is_served_by_the_router` | Every entry in the tables is actually mounted, so the tables cannot describe a route the API does not serve. It distinguishes mounted from unmounted by status — an unauthenticated probe must not answer the `404` fallback — so it does **not** assert a successful response, and a wrong verb would answer `405` and pass. |
+| `the_version_prefix_is_declared_once` | `/api/v1` is typed exactly once in the mounting layer, on the `pub const API_PREFIX` line, and `src/api/mod.rs` mounts that constant. It does not check the explorer paths; those are asserted by inspection of the code and by `tests/docs_route.rs`. |
+| `each_list_endpoint_publishes_its_filter_and_pagination_parameters_once` | Each list operation publishes its filter and pagination parameters exactly once: no duplicate, no missing parameter, no extra. |
+| `each_list_handler_extracts_the_query_string_once` | Each list handler module declares exactly one `Query<…>` extractor, and it is the combined list query type. A second extractor over the same query string produces an identical response, so only a structural assertion can hold this rule. |
+
+The matching test for the parsed side of the list endpoints is in
+`tests/list_query.rs`; the rules themselves are in
+[`conventions.md`](conventions.md) §1 and §5.
+
+Two consequences for a contributor: adding an operation means adding it to the
+table **and** to the `#[utoipa::path(...)]` annotations, and moving the API to
+another version prefix means changing `API_PREFIX` and nothing else in the
+mounting layer. Both are held by a test, so neither is a matter of remembering.
 
 ## 2. How to regenerate and serve it
 
@@ -93,8 +118,8 @@ is required.
 | `GET` | `/api/v1/openapi.json` | — | `200` | the document itself |
 | `GET` | `/api/v1/docs/` | — | `200` | the explorer |
 
-The health endpoints and the OpenAPI routes are the only routes that do not
-require a credential. `POST /api/v1/auth/register`, `POST /api/v1/auth/login`
+The health endpoints, the OpenAPI routes and the three token endpoints below do
+not require a credential. `POST /api/v1/auth/register`, `POST /api/v1/auth/login`
 and `POST /api/v1/auth/refresh` are unauthenticated by design and are rate
 limited by client IP.
 

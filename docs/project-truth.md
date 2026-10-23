@@ -1,7 +1,7 @@
 # ATOM — project truth
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-24
 > **Owner:** product owner, maintained by the `docs` agent
 > **Authority:** this file defines ATOM's *agreed product requirements*. Source
 > code does not change it. See [`README.md`](README.md) for the full authority
@@ -73,6 +73,12 @@ later phase depends on:
 - unit, integration, security and API tests,
 - documentation good enough for an open-source contributor to use the project.
 
+**Phase 2 — the personal-workspace layer.** It is defined in
+[`roadmap.md`](roadmap.md) §2 and its requirements are in §18 of this file.
+Phase 2 is accepted and **not built**: no Phase 2 endpoint exists in the
+repository today. Its delivery builds on the Phase 1 API, so it starts after
+the Phase 1 close-out, but its requirements are agreed independently of it.
+
 ## 4. Agreed features (Phase 1 scope)
 
 Each item below is **Accepted**. The matching feature documents live under
@@ -143,6 +149,10 @@ Each item below is **Accepted**. The matching feature documents live under
 | `cargo fmt`, `cargo clippy -D warnings` and `cargo test` as quality gates | [verification policy](testing/verification-policy.md) |
 | A disposable test database that cannot be a production database | [testing](testing/strategy.md) |
 
+The Phase 2 requirements — reimbursements, job applications and local machine
+learning — are accepted separately in §18, so that the Phase 1 scope above
+stays a complete and closed description of this phase.
+
 ## 5. Planned future features (roadmap)
 
 These are **not** agreed Phase 1 scope. They are recorded in
@@ -151,29 +161,67 @@ requires it to be accepted first.
 
 | Feature | Depends on | Notes |
 | ------- | ---------- | ----- |
-| n8n workflow automation | projects, tasks, notes | external integration; must not weaken core data security |
-| Job application and client-response tracking | projects, tasks | reuses the task model |
+| n8n workflow automation | projects, tasks, notes | external integration; must not weaken core data security. It stays `Proposed` in [`roadmap.md`](roadmap.md) and is outside Phase 2 (owner decision O7). |
 | Web frontend | the Phase 1 API | separate codebase |
 | Mobile frontend | the Phase 1 API | separate codebase |
 | OpenCode prompt and session knowledge management | notes | stores prompts and session metadata |
-| Local machine learning and RAG | notes | local-first; no vector database service in Phase 1 |
 | Labels, comments, activity history, issue numbers | projects, tasks | modelled on GitHub, not implemented yet |
 | Team membership and shared workspaces | users, projects | Phase 1 is single-owner by design |
 
-## 6. Explicitly excluded from Phase 1
+Two items that were listed here before 2026-10-24 have moved into agreed
+scope: job application tracking is now §18.2, and local machine learning is
+now §18.3. The **client-response automation and scraping** that the job-tracking
+row used to imply is not part of either: it remains excluded by §6.
 
-These are deliberately **not** built now. Their absence is a decision, not an
-oversight.
+## 6. Explicitly excluded
+
+These are deliberately **not** built. Their absence is a decision, not an
+oversight. The list was written for Phase 1; §6.1 records the one amendment
+that Phase 2 makes to it.
 
 - Frontend or mobile user interface.
 - n8n deployment or any n8n integration.
 - OnlineJobs.ph scraping and client-response automation.
 - LLM providers, AI-generated content, or any outbound AI call.
 - Embedding models, a vector database, or retrieval-augmented generation.
+  *(Amended by §6.1: **local** embedding models and local retrieval are
+  permitted from Phase 2. A vector-database **service** and any hosted or paid
+  dependency remain excluded.)*
 - Microservices, message brokers, or event-streaming infrastructure.
 - Billing, subscriptions, and public multi-tenant collaboration.
 - Enterprise abstractions that no current requirement needs.
 - Full-text search over *other* users' data, or any shared note space.
+
+### 6.1 Amendment of 2026-10-24 — local inference is permitted
+
+**This is an amendment, and it is marked as one.** It amends one bullet above,
+states explicitly that a second is unchanged, and leaves every other exclusion
+in force.
+
+| Bullet before the amendment | Reading from 2026-10-24 |
+| --------------------------- | ----------------------- |
+| "Embedding models, a vector database, or retrieval-augmented generation." | **Embedding models are permitted when they run locally in the API process** (§18.3, [`ADR-0008`](decisions/ADR-0008-local-pure-rust-ml.md)). A vector database *service*, and any use of an embedding model through a network call, remain excluded. Retrieval-augmented generation remains excluded, because it would need text generation. |
+| "LLM providers, AI-generated content, or any outbound AI call." | **Unchanged.** It is the reason the ML requirement is local-only. No endpoint may generate text, and no request may leave the machine to obtain one. |
+
+What changed, precisely:
+
+1. **Local inference is allowed.** A model that the process loads from a local
+   file may compute an embedding or a similarity score. This is what §18.3
+   requires.
+2. **Outbound AI calls are still excluded.** No hosted embedding API, no
+   model server, no LLM provider, no paid service, at build time or at run
+   time. This is also §8 ("the build must not require a hosted or paid
+   service") and owner decision O6 in
+   [`engineering/runs/chain/ledger.md`](engineering/runs/chain/ledger.md).
+3. **No second language runtime.** Adding Python, Node, Go or an external
+   model server to the API runtime is excluded, by the same decision.
+4. **Text generation remains excluded**, including cover letters, summaries
+   and "improve this" features in the job-application feature.
+
+The Phase 1 wording above is kept rather than deleted, so that a reader can
+see what was excluded and what the amendment changed. A further change to
+this boundary needs its own amendment and, if it is structural, its own ADR.
+
 
 ## 7. User-facing behaviour and requirements
 
@@ -324,7 +372,15 @@ The API is plain HTTP/1.1 with JSON bodies, so any HTTP client can use it.
 | **Archive** | A soft-delete marker on a note. Archived notes are hidden by default. |
 | **Ownership** | The rule that a resource belongs to exactly one user. |
 | **Modular monolith** | One deployable unit with strict internal module boundaries. |
-| **Phase** | A delivery stage. Phase 1 is the backend foundation. |
+| **Phase** | A delivery stage. Phase 1 is the backend foundation. Phase 2 is the personal-workspace layer (§18). |
+| **Claim** | An expense reimbursement request owned by a user, with one currency and a set of line items (§18.1). |
+| **Line item** | One expense inside a claim, in the claim's currency. |
+| **Application** | A job application: one role at one company, with a stage and a timeline of events (§18.2). |
+| **Application event** | One dated entry in an application's timeline. |
+| **Embedding** | A fixed-length numeric vector computed locally from a note or an application (§18.3). |
+| **Lexical search** | Search by PostgreSQL full-text match. It needs no model. |
+| **Semantic search** | Search by cosine similarity between the query embedding and stored embeddings. |
+| **Hybrid search** | A bounded lexical candidate set re-ranked by cosine similarity in Rust. |
 | **Verified** | Implemented *and* covered by a passing recorded check. |
 
 ## 15. Dependencies between features
@@ -332,15 +388,20 @@ The API is plain HTTP/1.1 with JSON bodies, so any HTTP client can use it.
 ```text
 users ──────────────┬──────────────► auth (sessions, tokens)
                      │
-                     ├──► notes ──────────► (future) prompt/session knowledge
+                     ├──► notes ──────────► (later) prompt/session knowledge
+                     │        │
+                     │        └──────────► (Phase 2) local ML over notes
                      ├──► projects ───────► tasks
-                     │        │                  │
-                     │        └──────────────────┘
+                     │        │               │
+                     │        └───────────────┘
                      │              │
-                     │              └──► (future) n8n automation, job tracking
-                     │
-                     └──► (future) local ML / RAG over notes
+                     │              └──► (later) n8n automation
+                     └──► companies ──────► (Phase 2) job applications
 ```
+
+The Phase 2 edges — claims, applications, events and embeddings — are in
+§15.1; the graph above keeps the Phase 1 shape and marks what each later
+capability attaches to.
 
 Hard dependencies:
 
@@ -351,6 +412,33 @@ Hard dependencies:
 - **`notes` is independent of `projects` and `tasks`** in Phase 1. It must stay
   independent, so that a future "notes attached to a task" does not require a
   schema migration of the notes table.
+
+### 15.1 Phase 2 edges
+
+Phase 2 adds one new required parent — an application belongs to a company —
+two optional links, and one kind of derived data. Every Phase 2 row is still
+scoped by its own `user_id`, and the Phase 1 rule that a foreign row is `404`
+still holds.
+
+```text
+projects ──(optional, ON DELETE SET NULL)──► claims
+tasks    ──(optional, ON DELETE SET NULL)──► applications
+notes    ─────────────────────────────────► embeddings ──► search, match
+applications ─────────────────────────────► embeddings
+companies ────────────────────────────────► applications ──► events
+```
+
+- **Claims depend on nothing.** A claim may reference a project, but a claim
+  without one is a complete claim. Deleting the project clears the reference.
+- **Applications depend on a company**, and the company must have the same
+  owner. Events depend on their application and are deleted with it.
+- **Embeddings depend on their source**, but the source is polymorphic
+  (a note or an application), so the database cannot carry a foreign key to
+  it. Deleting a source deletes its embeddings in the same transaction, and a
+  reindex removes any orphan. The trade-off is recorded in
+  [`ADR-0008`](decisions/ADR-0008-local-pure-rust-ml.md).
+- **Nothing in Phase 2 makes `notes` depend on `projects` or `tasks`**, and
+  nothing makes `tasks` depend on claims or applications.
 
 ## 16. Decisions awaiting confirmation
 
@@ -387,14 +475,17 @@ blocks Phase 1 work that does not depend on the answer.
 | Notes CRUD, archive, search, pagination | Verified | `tests/notes_api.rs` |
 | Projects CRUD, search, pagination | Verified | `tests/projects_tasks_api.rs` |
 | Tasks CRUD, status, priority, filtering, ordering | Verified | `tests/projects_tasks_api.rs` |
-| OpenAPI document and API explorer | Verified | `src/api/routes.rs`, served at `/api/v1/openapi.json` and `/api/v1/docs/`; the document declares every status the handlers return |
+| OpenAPI document and API explorer | Verified | `src/api/routes.rs` derives the document from the handler annotations and serves it at `/api/v1/openapi.json`, with the explorer at `/api/v1/docs/`. The content is asserted, not inferred: `tests/openapi_contract.rs` compares the route table with the document's operations in both directions, asserts every table entry is mounted, pins the version prefix to a single declaration and pins each list operation's published parameter set; `tests/docs_route.rs` covers serving. Scope of the claim: the operation set, the methods and the list parameter sets are asserted, **not** a snapshot of every response body or schema. |
 | Health endpoints | Verified | `src/health.rs`, exercised by an operator run |
 | Structured logging and request correlation | Implemented | `src/telemetry.rs`, `src/api/mod.rs` |
 | Request timeout and body limit | Verified | `src/api/mod.rs`, `src/api/extract.rs`, `tests/auth_api.rs` |
 | Documentation tree | Verified | `docs/` - `cargo run --bin atom-docs` reports no error and no warning |
 | CI pipeline | Implemented | `.github/workflows/ci.yml` - the three quality gates, a release build, the documentation check and the OpenCode configuration check |
 | Container image | Not started | `docker-compose.yml` is provided for local PostgreSQL only |
-| Everything in the roadmap | Not started | by design |
+| Reimbursement tracking | Not started | accepted in §18.1; no code, no migration, no test exists |
+| Job application tracking | Not started | accepted in §18.2; no code, no migration, no test exists |
+| Local machine learning | Not started | accepted in §18.3; no code, no migration, no test exists |
+| Everything else in the roadmap | Not started | by design |
 
 **Known discrepancies and limitations** are recorded in
 [`engineering/known-issues.md`](engineering/known-issues.md). Two are worth
@@ -405,3 +496,107 @@ repeating here:
 - SQLx queries are **checked at run time**, not at compile time. The
   compile-time workflow (`cargo sqlx prepare`) is documented but not enabled,
   because it would make the build depend on a live database.
+
+## 18. Agreed Phase 2 requirements
+
+Phase 2 is the **personal-workspace layer**, delivered on the Phase 1
+foundation: reimbursement tracking, job application tracking, and local
+machine learning over the owner's own notes. The phase itself is defined in
+[`roadmap.md`](roadmap.md) §2.
+
+Every requirement in this section is **`Accepted`** — agreed, and **not
+built**. None of them is `Implemented` or `Verified`; §17 says the same in the
+status table. The feature specifications are:
+
+| Feature | Identifier | Specification |
+| ------- | ---------- | ------------- |
+| Reimbursement tracking | `ATOM-FEAT-REIMB-001` | [`features/reimbursements/specification.md`](features/reimbursements/specification.md) |
+| Job application tracking | `ATOM-FEAT-JOB-001` | [`features/job-applications/specification.md`](features/job-applications/specification.md) |
+| Local machine learning | `ATOM-FEAT-ML-001` | [`features/ml/specification.md`](features/ml/specification.md) |
+
+Three decisions are recorded as accepted ADRs and are part of these
+requirements:
+
+| ADR | Decision |
+| --- | -------- |
+| [`ADR-0007`](decisions/ADR-0007-money-representation.md) | Money is `NUMERIC(19,4)` in PostgreSQL and a string with four decimals in JSON. |
+| [`ADR-0008`](decisions/ADR-0008-local-pure-rust-ml.md) | Inference is local and pure Rust, with Burn and the `flex` backend. |
+| [`ADR-0009`](decisions/ADR-0009-receipt-references.md) | A receipt is a reference, not an uploaded file. |
+
+The **Origin** column names where each requirement comes from. `A1`–`A6` are
+the assumptions in [`engineering/runs/chain/plan.md`](engineering/runs/chain/plan.md)
+§3; **they were never explicitly confirmed by the owner** (owner decision
+O1 in [`engineering/runs/chain/ledger.md`](engineering/runs/chain/ledger.md)).
+They are recorded here as **provisional defaults**, not as owner-approved
+requirements. §18.4 says what that means for a change.
+
+### 18.1 Reimbursement tracking
+
+| ID | Requirement | Acceptance criteria | Origin |
+| -- | ----------- | ------------------- | ------ |
+| `REIMB-R01` | An expense claim has a title, an optional description, one ISO 4217 currency and zero or more line items, each with a description, a non-negative amount, an incurred-on date, an optional category and an optional receipt reference. | A claim created without items returns `201` with `total_amount` `"0.0000"`; an item created on the claim is returned by the claim's detail read; an item carries no currency field of its own. | A1 (provisional) |
+| `REIMB-R02` | Every line item is denominated in its claim's currency, and a claim has exactly one currency for its whole life. | `currency` is required on create and is immutable; a request that tries to change it is `422`; no exchange rate, conversion or second currency exists anywhere in the feature. | A1 (provisional) |
+| `REIMB-R03` | The claim's `total_amount` always equals the sum of its items' amounts. | After every item insert, update and delete the total equals `SUM(amount)` recomputed in the same transaction; deleting the last item leaves `"0.0000"`; the total is returned as a four-decimal string. | A1 (provisional) |
+| `REIMB-R04` | A claim moves through `draft → submitted → approved` or `rejected`, `rejected → draft`, and `approved → paid`; `paid` is terminal. | Each allowed transition returns `200` with the new status and its timestamp; every other transition, including any transition out of `paid`, returns `409 conflict`. | A1 (provisional) |
+| `REIMB-R05` | A claim can be submitted only when it has at least one item and a total greater than zero. | A submission with no items is `422` naming `items`; a submission whose total is `"0.0000"` is `422` naming `total_amount`; a valid submission sets `submitted_at` and the status `submitted`. | A1 (provisional) |
+| `REIMB-R06` | A line item may be created, changed or deleted only while its claim is a `draft`. | On a claim in any other status an item write returns `409 conflict`; a rejected claim must return to `draft` before its items can change. | Derived from R03 and R04 |
+| `REIMB-R07` | Money is stored as `NUMERIC(19,4)` in PostgreSQL and represented in every JSON body as a string with exactly four decimal places. | A JSON number where money is expected is `422`; `"12.5"` and `"12.500"` are `422`; `"12.5000"` round-trips unchanged; no `f32` or `f64` participates in a money path; the largest accepted magnitude is `"999999999999999.9999"`. | A6 (provisional), ADR-0007 |
+| `REIMB-R08` | A receipt is a client-supplied URL or reference on a line item; the API does not accept, store or fetch an uploaded file. | The field is optional, at most 2048 characters, and must be an absolute `http` or `https` URL; a `data:`, `file:` or `javascript:` value is `422`; the API never connects to the URL. | A2 (provisional), ADR-0009 |
+| `REIMB-R09` | A claim may reference one project owned by the same user, and deleting that project clears the reference without deleting the claim. | A foreign project id is `404`; `project_id` is nullable and returned as `null` when absent; after the project is deleted the claim still exists with `project_id` null. | A1 (provisional), A5 (provisional) |
+| `REIMB-R10` | Every read and write of a claim or an item is scoped by the caller's `user_id`, and a claim or item that belongs to another account is `404`. | Every verb and every action on a foreign claim is `404`; no listing contains a foreign claim; an item id from another account's claim is `404`; an item id that belongs to a different claim of the caller is also `404`. | A5 (provisional) |
+
+### 18.2 Job application tracking
+
+| ID | Requirement | Acceptance criteria | Origin |
+| -- | ----------- | ------------------- | ------ |
+| `JOB-R01` | A company has a name that is unique per owner, compared case-insensitively, and optional website and notes. | Creating `Acme` and then `acme` for one owner is `409 conflict`; two owners may each have `Acme`; renaming onto an existing name is `409`. | A3 (provisional) |
+| `JOB-R02` | A job application belongs to exactly one company owned by the same user and records a role title, one of seven stages, and optional source, applied-on date, job URL and description. | A create returns `201`; a company id owned by another account is `404`; a create without a stage records `wishlist`; an unknown stage in the body is `422`. | A3 (provisional), A5 (provisional) |
+| `JOB-R03` | A salary range is optional, expressed in one ISO 4217 currency, with `salary_min ≤ salary_max`, and money follows `REIMB-R07`. | A minimum without a currency is `422`; a minimum above the maximum is `422`; both bounds round-trip as four-decimal strings; no conversion is performed. | A3 (provisional), A6 (provisional) |
+| `JOB-R04` | An application moves `wishlist → applied → screening → interview → offer`; `rejected` and `withdrawn` are reachable from any non-terminal stage; `offer`, `rejected` and `withdrawn` are terminal. | Each listed edge returns `200`; a skipped stage, a backwards move and any move out of a terminal stage return `409 conflict`; `offer` is reachable only from `interview`. | A3 (provisional) |
+| `JOB-R05` | An application event records a kind, an `occurred_at` timestamp and a summary, belongs to one application, and the events of an application are listed newest first by `occurred_at` then `id`. | The order is total and stable; `occurred_at` is required; a future `occurred_at` is accepted, because an interview can be scheduled; an event id under another application of the caller is `404`. | A3 (provisional) |
+| `JOB-R06` | Deleting an application deletes its events, and a company that still has applications cannot be deleted. | Deleting an application returns `204` and its events are gone; deleting a company with at least one application returns `409 conflict`; after the last application is deleted the company deletes with `204`. | A3 (provisional); the refusal is derived |
+| `JOB-R07` | An application may reference one task as its next action; the task must belong to the same user, and deleting the task clears the reference. | A foreign task id is `404`; after the task is deleted the application still exists with `next_action_task_id` null; the link never moves a task or an application between owners. | A3 (provisional) |
+| `JOB-R08` | The feature stores and returns what the owner entered; it never generates text and never calls an outbound AI service. | No endpoint accepts a "generate" request; no HTTP client is added to the module; no response contains text the owner did not store. | A3 (provisional), §6.1 |
+| `JOB-R09` | Every read and write of a company, an application and an event is scoped by the caller's `user_id`, and one that belongs to another account is `404`. | Every verb on a foreign row is `404`; no listing contains a foreign row; a company id belonging to another account cannot be used in a create or an update. | A5 (provisional) |
+
+### 18.3 Local machine learning
+
+| ID | Requirement | Acceptance criteria | Origin |
+| -- | ----------- | ------------------- | ------ |
+| `ML-R01` | All inference runs locally inside the API process; no request is sent to a hosted or paid service and no second language runtime is started. | `src/ml/` contains no outbound HTTP client and spawns no process; the binary builds and serves search with no network available; a test asserts the deterministic embedder performs no I/O. | A4 (provisional), owner decision O6 |
+| `ML-R02` | Embeddings are produced by Burn v0.22 on the `flex` CPU backend, with weights loaded from a local SafeTensors file. | `Cargo.toml` selects `flex` and adds none of `wgpu`, `cuda` or `tch`; the model path is a setting; a missing or unreadable file selects the disabled embedder instead of panicking. | A4 (provisional), O6, ADR-0008 |
+| `ML-R03` | The embedder is a trait with exactly three implementations — `Burn`, `Deterministic` and `Disabled` — and every automated test uses `Deterministic`. | No test loads a model file; `Deterministic` returns the same vector for the same input and reports its dimension; `Disabled` reports that it is unavailable rather than failing. | A4 (provisional), ADR-0008 |
+| `ML-R04` | An embedding is stored as a PostgreSQL `REAL[]` together with its source type, source id, model id and dimension, unique per `(user_id, source_type, source_id, model_id)`. | Re-embedding the same source with the same model leaves one row; a vector whose length differs from its recorded dimension is refused; no PostgreSQL extension is required. | A4 (provisional), ADR-0008 |
+| `ML-R05` | Note search accepts the modes `lexical`, `semantic` and `hybrid`; hybrid builds a bounded lexical candidate set and re-ranks it by cosine similarity in Rust. | Lexical mode returns the notes the full-text match returns and no score; hybrid returns at most the configured candidate bound, each with a score in `[0,1]`; semantic mode never scans beyond the caller's own embeddings. | A4 (provisional), ADR-0008 |
+| `ML-R06` | When ML is disabled or the model file is missing, a semantic or hybrid request returns lexical results with `200` and names the mode that was applied. | The response reports the requested mode, the applied mode `lexical` and a degradation reason; the status is `200`, never `500`; separate tests cover "ML off" and "model missing". | A4 (provisional) |
+| `ML-R07` | A reindex is idempotent, owner-scoped, and refuses with `409 conflict` when ML is disabled. | Running it twice inserts no duplicate row; it never reads or writes another account's rows; the response reports how many rows were written and skipped. | A4 (provisional) |
+| `ML-R08` | Every embedding read and write, every search and every match is scoped by the caller's `user_id`, and a note or application of another account is `404`. | Semantic and hybrid search cannot return a foreign note even if the embedding row exists; a match on a foreign application is `404`; a reindex touches only the caller's rows. | A5 (provisional) |
+| `ML-R09` | The index is evaluated with a fixed set of fixture queries and expected notes under the deterministic embedder, and the real model's quality is recorded by a separate manual run. | The fixture set contains 15 queries; each one asserts an expected note is in the top results; the manual run is recorded in the feature status and is not a CI gate. | A4 (provisional) |
+
+### 18.4 Origin, provisional status and what to do about a revision
+
+| Origin | Requirements | What it means |
+| ------ | ------------ | ------------- |
+| `A1` — claims, line items, one currency, the lifecycle | `REIMB-R01`…`R06`, `R09` | **Provisional default.** The shape is the one the plan works from; the owner has not confirmed it. |
+| `A2` — receipts are references | `REIMB-R08` | **Provisional default**, recorded as a decision in ADR-0009. |
+| `A3` — applications and events, no text generation | `JOB-R01`…`R09` | **Provisional default.** |
+| `A4` — ML is local and never generates text | `ML-R01`…`R09` | **Provisional default.** The *stack* is not provisional: O6 fixes Rust-only, Burn and `flex`. |
+| `A5` — single owner, no sharing | `REIMB-R10`, `JOB-R09`, `ML-R08` | **Provisional default**, and consistent with every Phase 1 requirement. |
+| `A6` — the money representation | `REIMB-R07`, `JOB-R03` | **Provisional default**, recorded as a decision in ADR-0007. |
+| Derived by the intake | `REIMB-R06`, `JOB-R06` (the refusal), the terminal stages in `JOB-R04` | Not in A1–A6 at all. They are consequences of the other requirements, written down so that the implementing change has an answer. |
+
+**A1–A6 are not owner-approved.** The owner said to proceed without confirming
+them (O1), so they are recorded as provisional defaults here and in every
+document that relies on them. If the owner revises one:
+
+1. the affected requirement is amended in this section, in a new change with
+   its own change-log entry;
+2. the feature specification and the affected `api.md` are amended in the same
+   change;
+3. if the revision changes a structure that is expensive to reverse, a new ADR
+   supersedes the old one — ADR-0007, ADR-0008 and ADR-0009 are never edited.
+
+An implementing change that finds a provisional default unworkable stops and
+records the conflict in
+[`engineering/known-issues.md`](engineering/known-issues.md) rather than
+quietly choosing a different answer.

@@ -1,33 +1,33 @@
-# The daily prompt
+# The chain prompt
 
 > **Status:** Accepted (run procedure)
 > **Last updated:** 2026-10-24
 > **Owner:** maintained by the orchestrator
 
 Paste the block below into a fresh session started in the repository root.
-Replace `DAY=<n>` with the day you are running. One paste is one day: the run
-stops at the day's exit criteria or at a stop condition, never by guessing.
+Replace `PHASE=<n>` with the phase you are running. One paste is one phase: the run
+stops at the phase's exit criteria or at a stop condition, never by guessing.
 
 | Parameter | Value |
 | --------- | ----- |
-| `DAY` | the day number from [plan.md](plan.md) §7 |
-| Plan | `docs/engineering/runs/phase-2/plan.md` |
-| Ledger | `docs/engineering/runs/phase-2/ledger.md` |
-| Queue | [plan.md](plan.md) §7 and §9; the default queue is repeated in the prompt |
+| `PHASE` | the phase number from [plan.md](plan.md) §7 |
+| Plan | `docs/engineering/runs/chain/plan.md` |
+| Ledger | `docs/engineering/runs/chain/ledger.md` |
+| Queue | section 3 of this file — the complete queue for every phase |
 
 If a run stopped early, do not re-paste blindly. Read the ledger's `Resume`
 section first, then continue from the first queue item that is not `done`.
 
 ````markdown
-# ATOM PHASE 2 — SELF-HEALING AUTONOMOUS RUN (DAY=<n>)
+# ATOM PHASE 2 — SELF-HEALING AUTONOMOUS RUN (RUN PHASE=<n>)
 
-You are the orchestrator of the ATOM engineering team. This run executes one day
+You are the orchestrator of the ATOM engineering team. This run executes one phase
 of the Phase 2 plan. Every chain is built, tested, documented, verified and
 checkpointed before the next one starts. You have 8 hours.
 
 Repository: C:\Users\Renz\Documents\automation\atom\api
-Plan:       docs/engineering/runs/phase-2/plan.md
-Ledger:     docs/engineering/runs/phase-2/ledger.md
+Plan:       docs/engineering/runs/chain/plan.md
+Ledger:     docs/engineering/runs/chain/ledger.md
 
 ---
 
@@ -41,16 +41,16 @@ Ledger:     docs/engineering/runs/phase-2/ledger.md
    Get-Process cargo,rustc,python,atom-api -ErrorAction SilentlyContinue
    git status --short
    If a build or an agent process is running: STOP, never race another session.
-   The runner already waited for the tree to be quiet before this day started.
+   The runner already waited for the tree to be quiet before this phase started.
    Uncommitted changes are the previous session's work: read them, verify them,
    then commit them or revert them deliberately. Never discard another author's
    work.
-3. If DAY is greater than 0, confirm Day 0 is closed and green. DAY=0 is the
+3. If PHASE is greater than 0, confirm Phase 0 is closed and green. PHASE=0 is the
    close-out itself. Never build Phase 2 on an unverified base.
 4. Git policy: read the `## Owner decisions` block in the ledger and follow it.
-   Default policy is a day branch and a draft pull request. The override
-   recorded for 2026-10-24 is: a day branch for rollback points, merged into
-   `develop` and pushed at each day checkpoint, with no pull request and no
+   Default policy is a phase branch and a draft pull request. The override
+   recorded for 2026-10-24 is: a phase branch for rollback points, merged into
+   `develop` and pushed at each phase checkpoint, with no pull request and no
    force push.
 5. Database:
    $env:TEST_DATABASE_URL = "postgres://atom:atom@127.0.0.1:5432/atom_test"
@@ -155,29 +155,123 @@ Rules of the fan-out:
 Read every diff yourself. You own the merge, the gates and the commit. No
 agent's "done" is evidence.
 
-## 3. Today's queue
+## 3. The queue
 
-Read the row for DAY=<n> in the plan §7. If the plan has no queue for the day,
-use this default (DAY=2) and record that you did:
+This section is the complete queue. Run only the block for `PHASE=<n>`. A phase is
+complete only when every chain in its block has a checkpoint and a commit. The
+detailed contracts, data model and acceptance criteria are in `plan.md`; this is
+the executable order.
 
-  S1  Seeder foundation: `atom-seed` for users, notes, projects and tasks.
-      Guards (production, database name, foreign rows), deterministic ids and
-      timestamps, `--reset`, post-insert verification, `tests/seeder.rs`,
-      docs/database/seeding.md. No new dependency.
-  R1  Reimbursements schema and types: migration 0004 (expense_claims,
-      expense_items, enums, CHECKs, indexes), models, repository skeleton.
-  R2  Claim CRUD: list/create/get/update/delete, ownership, pagination, filters.
-  R3  Items and the total invariant: one transaction, recompute the total,
-      reject a currency mismatch, exact decimals.
-  R4  Lifecycle: submit / approve / reject / mark-paid; guard every transition;
-      decided_at and paid_at.
-  R5  Flow and contract: end-to-end journey test, OpenAPI path/method
-      assertions, ownership sweep with the second seeded account.
-  R6  Close: extend the seeder with claims, finalise the docs, review, gate,
-      commit, evaluate the next chain.
+Two labels, deliberately kept apart: these are **run phases**, not product
+phases. The product's Phase 1 is the backend foundation closed by `PHASE=0`, and
+the product's Phase 2 is the workspace accepted by `PHASE=1`. The ledger and the
+harness label their queue rows `D0`-`D5`; `D<N>` is the same run phase as
+`PHASE=<N>`.
 
-Each entry is one chain. Do not start the next chain until the checkpoint says
-ADVANCE.
+### PHASE=0 — close Phase 1
+
+1. **Reconcile the tree.** `cargo fmt --all`. Fix the `config/README.md`
+   `shutdown_grace_seconds` drift (`100` -> `10`). Decide `docs/audit/handoff.md`
+   (update or delete). Reconcile the OpenAPI explorer status between
+   `project-truth.md` and `implementation-status.md`.
+2. **F-44 / ATOM-TASK-022.** Prove the `docs` feature: `cargo tree
+   --no-default-features` has no `utoipa-swagger-ui`; measure the release binary
+   both ways; record the sizes; document the build flag; update the backlog.
+3. **Shutdown test.** `tests/shutdown.rs` must fail against the old defect and
+   pass after it; get the Linux CI run that executes it.
+4. **ATOM-TASK-027.** Compare setting values, not only names; prove it catches
+   the `100`/`10` drift; no false failures.
+5. **ATOM-TASK-021.** Make the OpenAPI document and the route table agree by
+   construction, or add a contract test that fails when they differ.
+6. **ATOM-TASK-023.** Parse the list query string once without changing the
+   OpenAPI parameters.
+7. **ATOM-TASK-020.** Serve the profile from the row the auth extractor already
+   loaded; keep the per-request account-status check.
+8. **KI-006.** The container image, built and probed in CI.
+9. **Close.** Six gates green; commit; push; tag `phase-1-complete`.
+
+### PHASE=1 — product intake (documents only)
+
+1. `docs/database/seeding.md`: the seeder specification (profiles, guards,
+   determinism, `--reset`, invariants, tests).
+2. `project-truth.md`: accept `REIMB-R01..`, `JOB-R01..`, `ML-R01..` with
+   acceptance criteria; amend section 6 so local inference is permitted and
+   outbound AI calls stay excluded.
+3. `roadmap.md`: define Phase 2 (answers Q-11).
+4. Three feature specifications under `docs/features/reimbursements/`,
+   `job-applications/` and `ml/` - all five documents each.
+5. ADR-0007 money (`NUMERIC(19,4)`, JSON string); ADR-0008 local pure-Rust ML
+   with Burn and the `flex` backend; ADR-0009 receipt references, not uploads.
+6. `docs/database/schema.md`: the proposed tables and invariants.
+7. `docs/api/conventions.md`: money, filtering, search modes.
+8. `docs/testing/strategy.md`: the Phase 2 matrix and the >=150 test target.
+9. Record A1-A6 as provisional (owner decision O1) in every document they touch.
+   Exit: `atom-docs --strict` green, architect review, **zero** `src/`,
+   `migrations/` or `tests/` changes.
+
+### PHASE=2 — seeder foundation, then reimbursements
+
+1. **S1 Seeder foundation.** `atom-seed` for users, notes, projects and tasks:
+   guards (production, database name, foreign rows), deterministic ids and
+   timestamps, `--reset`, post-insert verification, `tests/seeder.rs`,
+   `docs/database/seeding.md`. No new dependency.
+2. **R1 Schema.** Migration `0004`: `expense_claims`, `expense_items`, enums,
+   CHECKs, indexes, ownership columns.
+3. **R2 Claim CRUD.** List/create/get/update/delete, ownership, pagination,
+   filters by status and date.
+4. **R3 Items and the total.** One transaction; recompute the total; reject a
+   currency mismatch; exact decimals.
+5. **R4 Lifecycle.** submit / approve / reject / mark-paid; guard every
+   transition; `decided_at` and `paid_at`.
+6. **R5 Flow and contract.** End-to-end journey test; OpenAPI path and method
+   assertions; ownership sweep with the second seeded account.
+7. **R6 Close.** Extend the seeder with claims (S2); finalise the docs; review;
+   gate; commit.
+
+### PHASE=3 — job applications
+
+1. **J1 Schema.** Migration `0005`: `companies`, `job_applications`,
+   `application_events`, enums, constraints, indexes.
+2. **J2 Companies CRUD**, owner-scoped, unique name per owner.
+3. **J3 Applications CRUD** and the stage machine (`wishlist`, `applied`,
+   `screening`, `interview`, `offer`, `rejected`, `withdrawn`; `offer` terminal).
+4. **J4 Events CRUD**, ordered by `occurred_at`, cascading with the application.
+5. **J5 Flow and contract.** Journey test, OpenAPI assertions, ownership sweep.
+6. **J6 Close.** Extend the seeder with companies and applications (S3); docs;
+   review; gate; commit.
+
+### PHASE=4 — local machine learning
+
+1. **M1 Spike (timeboxed).** Burn v0.22 with the `flex` backend; load a small
+   sentence-embedding model and a tokenizer; measure latency and memory; record
+   the numbers before any endpoint depends on it.
+2. **M2 ADR-0008 finalised** with the measured result. If the spike fails, ML
+   ships as `Disabled` and lexical search is the behaviour.
+3. **M3 Schema and module.** Migration `0006`: `embeddings` (`REAL[]`, unique
+   key, ownership index). `src/ml/`: `Embedder` trait, Burn and deterministic
+   implementations, hybrid rank.
+4. **M4 Endpoints.** `POST /notes/search`, `POST /job-applications/{id}/match`,
+   `POST /ml/reindex`; all owner-scoped.
+5. **M5 Degradation.** ML off or the model missing returns lexical results with
+   `200`, never `500`; test it. Tests use the deterministic embedder; CI never
+   downloads a model.
+6. **M6 Evaluation and close.** 15 fixture queries with expected notes; record
+   the pass/fail; extend the seeder with embeddings (S4); docs; review; gate.
+
+### PHASE=5 — hardening and handover
+
+1. **H1 Contract tests** over every path and method, Phase 1 included.
+2. **H2 Ownership sweep** for every new endpoint with a second account.
+3. **H3 Performance.** 20,000 rows, `ANALYZE`, generic plan; record before and
+   after for the new list and search queries.
+4. **H4 Frontend handover.** `docs/api/frontend-handover.md`: auth flow, error
+   contract, pagination, money format, ML endpoints and degradation, versioning.
+5. **H5 Final review and quality gate** over the whole Phase 2 diff.
+6. **H6 Close.** Tag `phase-2-complete`; update roadmap, implementation status,
+   known issues, open questions, change log; seeder CI smoke (S5).
+
+Each numbered entry is one chain. Do not start the next chain until the
+checkpoint says ADVANCE.
 
 **Seeder rule, every chain:** a chain that adds or changes a table extends the
 seeder in the same chain, and a chain that adds an entity adds its rows to the
@@ -203,14 +297,14 @@ For every queue item:
    and the tests that prove them. Update the ledger in the same commit.
 
 If a chain exceeds its budget by 50 percent: PARK it (§7), write the blocker
-with the exact error, and move on. One chain never consumes the day.
+with the exact error, and move on. One chain never consumes the phase.
 
-**Roll-forward.** When the day's queue is complete, every checkpoint says
+**Roll-forward.** When the phase's queue is complete, every checkpoint says
 ADVANCE, the tree is committed, and at least 90 minutes of the eight-hour budget
-remain: continue straight into the next day's queue in this same session.
-Record `day N complete, rolling into day N+1` in the ledger, do not repeat the
-preflight, and do repeat the gates. A day with a parked or failing chain never
-rolls forward. This is the only way a night gets past one day; use it.
+remain: continue straight into the next phase's queue in this same session.
+Record `phase N complete, rolling into phase N+1` in the ledger, do not repeat the
+preflight, and do repeat the gates. A phase with a parked or failing chain never
+rolls forward. This is the only way a night gets past one phase; use it.
 
 ## 5. Gates (run them yourself, capture exit codes)
 
@@ -232,7 +326,7 @@ Fast loop while a chain is red, never the full suite:
   cargo test --test <feature>
   cargo test --test <feature> <name>
 
-The full `cargo test --all-targets` runs at the checkpoint and at day end.
+The full `cargo test --all-targets` runs at the checkpoint and at phase end.
 
 ## 6. The self-healing ladder
 
@@ -291,7 +385,7 @@ Look-ahead, mandatory before ADVANCE:
 3. If a prerequisite is missing, produce it now when small and in scope, or
    reorder the queue and record why.
 4. Estimate the next chain's budget. If it does not fit the remaining time, park
-   it and close the day cleanly.
+   it and close the phase cleanly.
 5. Write the next chain's starting state into the ledger, with the exact first
    command the next session should run.
 
@@ -325,7 +419,7 @@ tests); seeding production data.
 
 ## 9. The ledger
 
-docs/engineering/runs/phase-2/ledger.md is the only source of truth for
+docs/engineering/runs/chain/ledger.md is the only source of truth for
 resuming. Update it after every chain, never at the end:
 
   ## Baseline   HEAD, branch, gate results, test count
@@ -344,7 +438,7 @@ checkpoints; a gate cannot run and you are tempted to call it passing; disk
 below 1 GB; a product decision is genuinely missing (record it, exclude the
 behaviour, continue); or context is nearly exhausted (commit, update Resume).
 
-## 11. Report at the end of the day
+## 11. Report at the end of the phase
 
 ```
 Outcome      chains done, chains parked, what now works

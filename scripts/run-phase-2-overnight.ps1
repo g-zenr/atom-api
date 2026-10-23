@@ -58,7 +58,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $PSScriptRoot
-$RunDir = Join-Path $Root 'docs/engineering/runs/phase-2'
+$RunDir = Join-Path $Root 'docs/engineering/runs/chain'
 $PromptFile = Join-Path $RunDir 'prompt.md'
 $Ledger = Join-Path $RunDir 'ledger.md'
 $StopFile = Join-Path $Root 'STOP-RUN'
@@ -226,7 +226,7 @@ foreach ($day in $FromDay..$ToDay) {
     }
 
     $briefPath = Join-Path $LogDir ("day-{0}.prompt.md" -f $day)
-    $brief = $body.Replace('DAY=<n>', "DAY=$day")
+    $brief = $body.Replace('PHASE=<n>', "PHASE=$day")
     Write-Utf8NoBom -Path $briefPath -Text $brief
 
     $title = "ATOM Phase 2 Day $day"
@@ -253,9 +253,9 @@ foreach ($day in $FromDay..$ToDay) {
         $outFile = Join-Path $LogDir ("day-{0}-round-{1}-{2}.log" -f $day, $round, $stamp)
 
         if ($sessionId) {
-            $message = "Continue the same task now. You ended your turn with work outstanding: there is no checkpoint and no commit for day $day." + [Environment]::NewLine +
+            $message = "Continue the same task now. You ended your turn with work outstanding: there is no checkpoint and no commit for phase $day." + [Environment]::NewLine +
                 "Do not describe a plan. Execute it." + [Environment]::NewLine +
-                "Before you end this turn you must: (1) wait for and integrate every subagent you started; (2) run the six gates - fmt, clippy with -D warnings, test --all-targets, check --no-default-features, atom-docs, atom-docs --strict; (3) update the ledger queue rows D0 through D$day to done, with the checkpoint scorecard and the real evidence; (4) commit." + [Environment]::NewLine +
+                "Before you end this turn you must: (1) wait for and integrate every subagent you started; (2) run the six gates - fmt, clippy with -D warnings, test --all-targets, check --no-default-features, atom-docs, atom-docs --strict; (3) update the ledger queue rows D0 through D$day (D<N> is phase <N>) to done, with the checkpoint scorecard and the real evidence; (4) commit." + [Environment]::NewLine +
                 "If something genuinely blocks you, park it in the ledger with the exact error. Do not end with a plan; end with a commit or a written blocker."
         }
         else {

@@ -83,7 +83,7 @@ file.
 | `app.limits.max_body_bytes` | `1048576` | `APP_MAX_BODY_BYTES` | The largest accepted request body. It may not be raised above 4 MiB, the ceiling of the body reader: a larger value is refused at start-up. |
 | `app.limits.request_timeout_seconds` | `30` | `APP_REQUEST_TIMEOUT_SECONDS` | How long a request may take before it is abandoned with a `408`. |
 | `app.limits.readiness_probe_timeout_seconds` | `1` | `APP_READINESS_PROBE_TIMEOUT_SECONDS` | How long the readiness probe waits for the database. |
-| `app.limits.shutdown_grace_seconds` | `100` | `APP_SHUTDOWN_GRACE_SECONDS` | How long in-flight requests may finish after the process is asked to stop. A deployment behind a load balancer needs long enough for the balancer to take the instance out of rotation. |
+| `app.limits.shutdown_grace_seconds` | `10` | `APP_SHUTDOWN_GRACE_SECONDS` | How long in-flight requests may finish after the process is asked to stop. A deployment behind a load balancer needs long enough for the balancer to take the instance out of rotation. |
 | `app.sessions.prune_interval_seconds` | `3600` | `APP_SESSION_PRUNE_INTERVAL_SECONDS` | How often expired refresh sessions are pruned. |
 | `app.sessions.prune_grace_seconds` | `86400` | `APP_SESSION_PRUNE_GRACE_SECONDS` | How long an expired session row is kept before it is deleted. It may be raised, but not lowered below one hour. |
 
@@ -210,5 +210,8 @@ them is an error, not a warning:
    validation rule.
 6. Record the change in `docs/engineering/change-log.md`.
 7. Run `cargo run --bin atom-docs`. It compares the keys in the files with the
-   keys in the reference table, in both directions, so a key that is only in
-   one of the two is reported.
+   keys in **both** reference tables — `docs/architecture/deployment.md` and
+   this file — in both directions, so a key that is only in one of them is
+   reported. An integer or a boolean default that no longer matches the file is
+   reported as well; sizes, arrays and prose cells are not compared, and a key
+   that this file documents once is the one that is checked.

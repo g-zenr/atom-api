@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-use crate::pagination::{Page, Pagination};
+use crate::pagination::{Page, Pagination, PaginationQuery};
 use crate::tasks::models::{Task, TaskPriority, TaskStatus};
 
 /// Maximum accepted task title length.
@@ -105,9 +105,9 @@ pub struct UpdateTaskRequest {
 /// Query parameters accepted by `GET /api/v1/projects/{project_id}/tasks`.
 ///
 /// Only the feature filters live here. The pagination parameters live in
-/// [`crate::pagination::PaginationQuery`], which the handler extracts
-/// separately: declaring `limit` and `offset` in both places would publish
-/// them twice in the generated OpenAPI document.
+/// [`crate::pagination::PaginationQuery`], and the handler reads both halves
+/// from a single [`TasksListQuery`]: declaring `limit` and `offset` in both
+/// places would publish them twice in the generated OpenAPI document.
 #[derive(Debug, Clone, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct TaskQuery {
@@ -115,6 +115,51 @@ pub struct TaskQuery {
     pub status: Option<TaskStatus>,
     /// Filter by priority.
     pub priority: Option<TaskPriority>,
+}
+
+/// The whole query string of `GET /api/v1/projects/{project_id}/tasks`,
+/// deserialized once.
+///
+/// The handler takes a single `Query<…>` extractor over this type. The query
+/// string is therefore parsed exactly once, and [`Self::into_parts`] splits the
+/// result into the pair the service layer already works with.
+///
+/// The fields are written out instead of composing [`TaskQuery`] and
+/// [`PaginationQuery`] with `#[serde(flatten)]`: the extractor deserializes
+/// with `serde_urlencoded`, whose map access yields strings, so a flattened
+/// `Option<i64>` would fail at run time. The duplication is the price of
+/// parsing the string once.
+///
+/// It derives `Deserialize` only, and is deliberately absent from the
+/// generated OpenAPI document: the published parameter set stays [`TaskQuery`]
+/// and [`PaginationQuery`], which the handler's `utoipa` attribute names.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TasksListQuery {
+    /// Maximum number of tasks to return.
+    pub limit: Option<i64>,
+    /// Number of tasks to skip.
+    pub offset: Option<i64>,
+    /// Filter by status.
+    pub status: Option<TaskStatus>,
+    /// Filter by priority.
+    pub priority: Option<TaskPriority>,
+}
+
+impl TasksListQuery {
+    /// Splits the parsed query into its filter and pagination halves.
+    pub fn into_parts(self) -> (TaskQuery, PaginationQuery) {
+        let Self {
+            limit,
+            offset,
+            status,
+            priority,
+        } = self;
+
+        (
+            TaskQuery { status, priority },
+            PaginationQuery { limit, offset },
+        )
+    }
 }
 
 /// The response body of `GET /api/v1/projects/{project_id}/tasks`.
