@@ -82,7 +82,11 @@ cargo test --all-targets
 
 ## 3. Making a change
 
-1. **Branch.** `feature/<short-description>` or `fix/<short-description>`.
+1. **Branch from `develop`.** `<type>/<short-description>`, for example
+   `feat/note-tags` or `fix/f-01-configured-pagination`. The allowed types and
+   the full rules are in
+   [`docs/engineering/git-workflow.md`](docs/engineering/git-workflow.md) §2.
+   Never start a task on `develop` itself.
 2. **Keep the tree buildable.** One coherent increment at a time.
 3. **Follow the engineering rules** in [`AGENTS.md`](AGENTS.md) §4. The ones
    that are most often broken:
@@ -99,7 +103,11 @@ cargo test --all-targets
    and a cross-account isolation case. A bug fix needs a regression test.
 5. **Run the gates.** All three commands above must pass.
 6. **Update the documentation.** See §5.
-7. **Open a pull request.** Describe what changed, why, and what you verified.
+7. **Open a pull request against `develop`.** Describe what changed, why, and
+   what you verified. The template is
+   [`.github/pull_request_template.md`](.github/pull_request_template.md).
+   `master` is the production branch and receives release merges only; see
+   [`docs/engineering/release-and-promotion.md`](docs/engineering/release-and-promotion.md).
 
 ## 4. Database changes
 
@@ -178,10 +186,23 @@ local override. The full override ladder — including the global
 ## 7. Commit and pull request conventions
 
 - Conventional-Commit prefixes are used for the subject line:
-  `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `build:`, `ci:`.
+  `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `build:`, `ci:`,
+  `perf:`, `security:`.
 - One logical change per commit.
 - Write the subject in the imperative mood, under 72 characters.
 - Explain *why* in the body when it is not obvious.
+- A commit should compile. When a change is indivisible — a signature several
+  layers share — say so in the body instead of splitting it into commits that do
+  not build.
+- Do not rewrite published history.
+
+The pull request targets **`develop`**, uses a Conventional Commit title, and
+fills in the verification block with real results. The project squash-merges task
+branches, so the title becomes the commit on `develop`.
+
+The full workflow, including the release path, is in
+[`docs/engineering/git-workflow.md`](docs/engineering/git-workflow.md) and
+[`docs/engineering/release-and-promotion.md`](docs/engineering/release-and-promotion.md).
 
 ## 8. Review checklist
 

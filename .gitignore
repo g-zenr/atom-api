@@ -5,8 +5,6 @@
 *.exe
 
 # --- Secrets and local environment ---
-.env
-.env.*
 !.env.example
 *.pem
 *.key
@@ -34,7 +32,6 @@
 
 # --- Editors and OS ---
 .idea/
-.vscode/
 !.vscode/extensions.json
 *.swp
 .DS_Store
@@ -44,3 +41,5 @@ Thumbs.db
 /coverage
 *.profraw
 /tarpaulin-report.html
+config.bat
+node_modules
