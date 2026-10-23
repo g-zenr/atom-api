@@ -21,6 +21,19 @@ path = "src/main.rs"
 name = "atom-docs"
 path = "src/bin/atom-docs.rs"
 
+[features]
+# The API explorer and the OpenAPI document served over HTTP.
+#
+# The Swagger UI bundle is 10.73 MiB of static assets, embedded in the binary
+# by `rust-embed`, and a deployment that sets `api.docs_enabled = false` never
+# serves a byte of it. Turning the dependency off removes the assets from the
+# binary; a production build should therefore pass `--no-default-features`.
+#
+# The feature is on by default so that a plain `cargo build`, `cargo test` and
+# `cargo run` keep the explorer.
+default = ["docs"]
+docs = ["dep:utoipa-swagger-ui"]
+
 [dependencies]
 # --- HTTP stack ---
 axum = "0.8"
@@ -83,10 +96,14 @@ dotenvy = "0.15"
 
 # --- API documentation ---
 utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
-# `vendored` is required: without it the build script downloads the Swagger UI
-# bundle from GitHub at compile time. It is embedded either way, so `vendored`
-# costs nothing in binary size and makes the build reproducible and offline.
-utoipa-swagger-ui = { version = "9", features = ["axum", "vendored"] }
+# Optional: see the `docs` feature. `vendored` is required when the feature is
+# on — without it the build script downloads the Swagger UI bundle from GitHub
+# at compile time. It is embedded either way, so `vendored` costs nothing in
+# binary size and makes the build reproducible and offline.
+utoipa-swagger-ui = { version = "9", features = [
+    "axum",
+    "vendored",
+], optional = true }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

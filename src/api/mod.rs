@@ -83,7 +83,7 @@ pub fn router(state: AppState) -> Router {
         .fallback(middleware::not_found);
 
     if config.api.docs_enabled {
-        app = app.merge(routes::swagger_ui(&config));
+        app = mount_docs(app, &config);
     }
 
     app = app
@@ -105,6 +105,37 @@ pub fn router(state: AppState) -> Router {
     }
 
     app.with_state(state)
+}
+
+/// Mounts the API explorer, when the binary was built with the `docs` feature.
+///
+/// The Swagger UI asset bundle is 10.73 MiB and a deployment that serves no
+/// documentation should not carry it, so the dependency is optional. With the
+/// feature on, the explorer is merged into the application router exactly as
+/// before.
+#[cfg(feature = "docs")]
+fn mount_docs(app: Router<AppState>, config: &Config) -> Router<AppState> {
+    app.merge(routes::swagger_ui(config))
+}
+
+/// Explains, once, why the configured documentation route is not served.
+///
+/// A build without the `docs` feature cannot mount the explorer — the route
+/// and its assets are not compiled in — but the configuration can still ask
+/// for it, because `api.docs_enabled` is a deployment setting. Silently
+/// returning `404` for `/api/v1/docs` would leave an operator guessing whether
+/// the route is misconfigured or the binary is wrong, so the reason is logged
+/// once, at router construction, and start-up continues: a missing explorer is
+/// not a reason to refuse to serve the rest of the API.
+#[cfg(not(feature = "docs"))]
+fn mount_docs(app: Router<AppState>, _config: &Config) -> Router<AppState> {
+    tracing::warn!(
+        "api.docs_enabled is true, but the documentation route is not compiled into this \
+         binary: it was built without the `docs` Cargo feature, so /api/v1/docs and \
+         /api/v1/openapi.json will return 404. Build with the default features, or with \
+         `--features docs`, to serve them."
+    );
+    app
 }
 
 /// Abandons a request that exceeds the configured timeout.

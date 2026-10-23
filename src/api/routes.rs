@@ -5,6 +5,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use utoipa::OpenApi;
 use utoipa::openapi::OpenApi as OpenApiDocument;
+#[cfg(feature = "docs")]
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::auth::handlers;
@@ -173,6 +174,13 @@ pub fn api_routes() -> Router<AppState> {
 /// Router<S>`, so the explorer is merged into the application router rather
 /// than used as a handler. The router serves both the UI at `/api/v1/docs` and
 /// the OpenAPI document at `/api/v1/openapi.json`.
+///
+/// This function exists only when the `docs` feature is enabled. The feature
+/// carries the Swagger UI asset bundle — 10.73 MiB embedded in the binary — and
+/// a build that serves no documentation should not carry it. See `api::router`
+/// for the behaviour when the configuration asks for the explorer but the
+/// binary was built without it.
+#[cfg(feature = "docs")]
 pub fn swagger_ui(config: &Config) -> Router<AppState> {
     SwaggerUi::new("/api/v1/docs")
         .url("/api/v1/openapi.json", openapi_document(config))
