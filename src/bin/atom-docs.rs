@@ -91,6 +91,14 @@ const SETTINGS_FILES: [&str; 4] = [
 /// The document that is the operator's reference for the settings.
 const SETTINGS_REFERENCE: &str = "docs/architecture/deployment.md";
 
+/// The second operator reference, in the configuration directory.
+///
+/// It repeats the same table for a reader who starts in `config/`. A second
+/// table that disagrees with the first is worse than no second table, because
+/// the reader trusts whichever one they happened to open. It is compared with
+/// the settings for the same reason the first one is.
+const SETTINGS_REFERENCE_SECONDARY: &str = "config/README.md";
+
 /// The file that lists the environment variables.
 const ENV_EXAMPLE: &str = ".env.example";
 
@@ -555,6 +563,36 @@ fn check_settings_reference(root: &Path, report: &mut Report) {
     for key in documented.difference(&configured) {
         report.error(format!(
             "{SETTINGS_REFERENCE} documents the setting {key}, but no configuration file defines it"
+        ));
+    }
+
+    // The second reference table is checked as well. The project keeps two
+    // operator tables -- one in `docs/architecture/`, one in `config/` -- and
+    // until now only the first was machine-checked, so the second could drift
+    // in silence. Names only: comparing values would need a normalisation of
+    // `1 MiB` against `1048576`, and a false failure in the gate is worse than
+    // a check that is narrower than it could be.
+    let secondary = match fs::read_to_string(root.join(SETTINGS_REFERENCE_SECONDARY)) {
+        Ok(contents) => contents,
+        Err(error) => {
+            report.error(format!(
+                "could not read {SETTINGS_REFERENCE_SECONDARY}: {error}"
+            ));
+            return;
+        }
+    };
+
+    let repeated = reference_setting_keys(&secondary);
+
+    for key in configured.difference(&repeated) {
+        report.error(format!(
+            "{SETTINGS_REFERENCE_SECONDARY} does not document the setting {key}"
+        ));
+    }
+
+    for key in repeated.difference(&configured) {
+        report.error(format!(
+            "{SETTINGS_REFERENCE_SECONDARY} documents the setting {key}, but no configuration file defines it"
         ));
     }
 }
