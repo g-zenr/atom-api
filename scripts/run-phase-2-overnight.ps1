@@ -259,6 +259,15 @@ foreach ($day in $FromDay..$ToDay) {
 
     $head = (git log --oneline -1 2>&1) -join ' '
     Write-Log ("day {0}: HEAD {1}" -f $day, $head)
+
+    if ($day -lt $ToDay) {
+        Write-Log ("day {0}: settling before day {1}" -f $day, ($day + 1))
+        $settleDeadline = (Get-Date).AddMinutes(10)
+        while ((Get-Process cargo, rustc -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $settleDeadline)) {
+            Start-Sleep -Seconds 30
+        }
+        Start-Sleep -Seconds 120
+    }
 }
 
 Write-Log 'runner finished'

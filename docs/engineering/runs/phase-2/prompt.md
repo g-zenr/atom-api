@@ -36,13 +36,14 @@ Ledger:     docs/engineering/runs/phase-2/ledger.md
 1. Read: AGENTS.md, docs/README.md, docs/project-truth.md, the plan, the ledger,
    the newest change-log entry, known-issues, open-questions, git-workflow.
    Load the atom-delivery and atom-docs skills.
-2. Prove the tree is quiet:
+2. Prove no other writer is active:
    Get-Process cargo,rustc,python,atom-api -ErrorAction SilentlyContinue
    git status --short
-   If anything changed in the last 10 minutes, or any process is running: STOP.
-   Never race another session. Uncommitted changes older than ten minutes are
-   **Day 0 work**, not a reason to stop: read them, verify them, and either
-   commit them or revert them deliberately. Never discard another author's work.
+   If a build or an agent process is running: STOP, never race another session.
+   The runner already waited for the tree to be quiet before this day started.
+   Uncommitted changes are the previous session's work: read them, verify them,
+   then commit them or revert them deliberately. Never discard another author's
+   work.
 3. If DAY is greater than 0, confirm Day 0 is closed and green. DAY=0 is the
    close-out itself. Never build Phase 2 on an unverified base.
 4. Git policy: read the `## Owner decisions` block in the ledger and follow it.
