@@ -1,19 +1,27 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Runs the ATOM Phase 2 plan unattended, one day per session.
+    Runs the ATOM Phase 2 plan unattended, and refuses to advance on a partial day.
 
 .DESCRIPTION
-    Extracts the daily brief from docs/engineering/runs/phase-2/prompt.md, waits
-    for the working tree to go quiet, then runs each day with a fresh OpenCode
-    session. A day that exits non-zero or fails to update the ledger is retried
-    once, then the loop stops. A hard per-day timeout prevents a hung agent from
-    eating the night.
+    One day is one bounded set of chains. A day is only complete when BOTH are
+    true:
 
-    Stop the run at any time by creating the file STOP-RUN in the repository root.
+      1. every ledger queue row for that day and every earlier day says done or
+         verified; and
+      2. the day produced a new commit.
+
+    If the agent ends its turn before that - which it does when it stops to
+    describe a plan instead of executing it - the runner resumes the SAME session
+    with an explicit continuation message, up to MaxRounds times. A day that
+    exhausts its rounds fails; it is not marked done and the next day does not
+    start.
+
+    A separate watchdog (scripts/watchdog-phase-2.ps1) restarts the runner if the
+    process dies.
 
 .PARAMETER FromDay
-    First day to run. Default 0 (the Phase 1 close-out).
+    First day to run. Default 0.
 
 .PARAMETER ToDay
     Last day to run. Default 5.
@@ -22,8 +30,10 @@
     How long the tree must be untouched before the run starts. Default 10.
 
 .PARAMETER MaxWaitMinutes
-    How long to wait for a concurrent session to finish before giving up.
-    Default 60.
+    How long to wait for a concurrent session to finish. Default 60.
+
+.PARAMETER MaxRounds
+    Continuation rounds per day before the day is failed. Default 8.
 
 .PARAMETER DryRun
     Extract the briefs, print the commands, run nothing.
@@ -32,7 +42,7 @@
     pwsh -File scripts/run-phase-2-overnight.ps1 -DryRun
 
 .EXAMPLE
-    pwsh -File scripts/run-phase-2-overnight.ps1 -FromDay 0 -ToDay 1
+    pwsh -File scripts/run-phase-2-overnight.ps1 -FromDay 1 -ToDay 5
 #>
 [CmdletBinding()]
 param(
@@ -40,6 +50,7 @@ param(
     [int]$ToDay = 5,
     [int]$QuietMinutes = 10,
     [int]$MaxWaitMinutes = 60,
+    [int]$MaxRounds = 8,
     [switch]$NoRetry,
     [switch]$DryRun
 )
@@ -53,9 +64,11 @@ $Ledger = Join-Path $RunDir 'ledger.md'
 $StopFile = Join-Path $Root 'STOP-RUN'
 $LogDir = Join-Path $Root 'target/overnight'
 $Summary = Join-Path $LogDir 'summary.txt'
+$State = Join-Path $LogDir 'state.json'
 
 function Write-Log {
     param([string]$Message)
+    New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
     $line = "[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message
     Write-Host $line
     Add-Content -Path (Join-Path $LogDir 'runner.log') -Value $line -Encoding utf8
@@ -142,6 +155,35 @@ function Write-Utf8NoBom {
     [System.IO.File]::WriteAllText($Path, $Text, $encoding)
 }
 
+function Get-Head {
+    return (& git -C $Root rev-parse HEAD 2>$null).Trim()
+}
+
+# True only when every ledger queue row up to and including $Day is done.
+function Test-DayDone {
+    param([int]$Day)
+
+    if (-not (Test-Path $Ledger)) { return $false }
+
+    $rows = Get-Content $Ledger | Where-Object { $_ -match '^\|\s*D[0-9]' }
+    $seen = $false
+
+    foreach ($row in $rows) {
+        $cells = $row.Split('|')
+        if ($cells.Count -lt 5) { continue }
+        if ($cells[1].Trim() -notmatch '^D(\d+)') { continue }
+
+        $number = [int]$matches[1]
+        if ($number -gt $Day) { continue }
+
+        $seen = $true
+        $state = ($cells[3] -replace '\*', '').Trim().ToLowerInvariant()
+        if ($state -notin @('done', 'verified')) { return $false }
+    }
+
+    return $seen
+}
+
 # ---------------------------------------------------------------------------
 # Preflight
 # ---------------------------------------------------------------------------
@@ -149,7 +191,7 @@ function Write-Utf8NoBom {
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 Set-Location $Root
 
-Write-Log ("runner start: days {0}-{1}, dry run {2}" -f $FromDay, $ToDay, [bool]$DryRun)
+Write-Log ("runner start: days {0}-{1}, rounds {2}, dry run {3}" -f $FromDay, $ToDay, $MaxRounds, [bool]$DryRun)
 Write-Log ("repository: {0}" -f $Root)
 
 if (-not (Get-Command opencode -ErrorAction SilentlyContinue)) {
@@ -157,7 +199,7 @@ if (-not (Get-Command opencode -ErrorAction SilentlyContinue)) {
 }
 
 if (Test-Path $StopFile) {
-    Write-Log "STOP-RUN exists; nothing to do"
+    Write-Log 'STOP-RUN exists; nothing to do'
     return
 }
 
@@ -188,78 +230,115 @@ foreach ($day in $FromDay..$ToDay) {
     Write-Utf8NoBom -Path $briefPath -Text $brief
 
     $title = "ATOM Phase 2 Day $day"
-    $message = "Read the brief at $briefPath and execute it exactly as written."
-    $argumentLine = 'run --standalone --agent orchestrator --auto --format default --title "{0}" "{1}"' -f $title, $message
+    $firstMessage = "Read the brief at $briefPath and execute it exactly as written."
+    $headBefore = Get-Head
+    $sessionId = $null
+    $round = 0
+    $completed = $false
+    $dayResult = 'unknown'
 
     if ($DryRun) {
         Write-Host ''
         Write-Host ("--- day {0} ---" -f $day)
         Write-Host ("brief:   {0}" -f $briefPath)
-        Write-Host ("command: opencode {0}" -f $argumentLine)
+        Write-Host ("command: opencode run --standalone --agent orchestrator --auto --format json --title `"{0}`" `"{1}`"" -f $title, $firstMessage)
         Write-Host ("brief head: {0}" -f ($brief.Substring(0, [Math]::Min(160, $brief.Length)) -replace '\s+', ' '))
         $results += "day $day : dry run"
         continue
     }
 
-    $startedUtc = (Get-Item $Ledger).LastWriteTimeUtc
-    $attempt = 0
-    $dayResult = 'unknown'
-
-    while ($true) {
-        $attempt++
+    while ($round -lt $MaxRounds) {
+        $round++
         $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-        $outFile = Join-Path $LogDir ("day-{0}-attempt-{1}-{2}.out.log" -f $day, $attempt, $stamp)
+        $outFile = Join-Path $LogDir ("day-{0}-round-{1}-{2}.log" -f $day, $round, $stamp)
 
-        Write-Log ("day {0}: attempt {1} starting" -f $day, $attempt)
+        if ($sessionId) {
+            $message = "Continue the same task now. You ended your turn with work outstanding: there is no checkpoint and no commit for day $day." + [Environment]::NewLine +
+                "Do not describe a plan. Execute it." + [Environment]::NewLine +
+                "Before you end this turn you must: (1) wait for and integrate every subagent you started; (2) run the six gates - fmt, clippy with -D warnings, test --all-targets, check --no-default-features, atom-docs, atom-docs --strict; (3) update the ledger queue rows D0 through D$day to done, with the checkpoint scorecard and the real evidence; (4) commit." + [Environment]::NewLine +
+                "If something genuinely blocks you, park it in the ledger with the exact error. Do not end with a plan; end with a commit or a written blocker."
+        }
+        else {
+            $message = $firstMessage
+        }
+
+        Write-Log ("day {0}: round {1} starting (session {2})" -f $day, $round, $(if ($sessionId) { $sessionId } else { 'new' }))
 
         try {
             Push-Location $Root
             $previousPreference = $ErrorActionPreference
             $ErrorActionPreference = 'Continue'
-            & opencode run --standalone --agent orchestrator --auto --format default --title $title $message 2>&1 | Tee-Object -FilePath $outFile
+
+            if ($sessionId) {
+                & opencode run --standalone --agent orchestrator --auto --format json --session $sessionId $message 2>&1 |
+                    Tee-Object -FilePath $outFile
+            }
+            else {
+                & opencode run --standalone --agent orchestrator --auto --format json --title $title $message 2>&1 |
+                    Tee-Object -FilePath $outFile
+            }
+
             $code = $LASTEXITCODE
             $ErrorActionPreference = $previousPreference
-            Write-Log ("day {0}: exited with {1}" -f $day, $code)
-            $dayResult = if ($code -eq 0) { 'exit 0' } else { "exit $code" }
         }
         catch {
             Add-Content -Path $outFile -Value ("launcher error: " + $_.Exception.Message) -Encoding utf8
             Write-Log ("day {0}: launcher error: {1}" -f $day, $_.Exception.Message)
-            $dayResult = 'launcher error'
+            $code = -1
         }
         finally {
             $ErrorActionPreference = $previousPreference
             Pop-Location
         }
 
-        $ledgerUtc = (Get-Item $Ledger).LastWriteTimeUtc
-        if ($ledgerUtc -le $startedUtc) {
-            Write-Log ("day {0}: the ledger was not updated; treating as a failed day" -f $day)
-            $dayResult = "$dayResult, ledger unchanged"
+        $match = Select-String -Path $outFile -Pattern '"sessionID":"(ses_[^"]+)"' -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($match) { $sessionId = $match.Matches[0].Groups[1].Value }
+
+        $headAfter = Get-Head
+        $ledgerDone = Test-DayDone -Day $day
+        $committed = ($headAfter -ne $headBefore)
+
+        Write-Log ("day {0}: round {1} exited {2}; ledger done {3}; new commit {4}; session {5}" -f `
+            $day, $round, $code, $ledgerDone, $committed, $(if ($sessionId) { $sessionId } else { 'none' }))
+
+        if ($code -eq 0 -and $ledgerDone -and $committed) {
+            $completed = $true
+            break
         }
 
-        $good = ($dayResult -eq 'exit 0') -and ($ledgerUtc -gt $startedUtc)
-        if ($good) { break }
-        if ($NoRetry -or $attempt -ge 2) { break }
+        if ($code -ne 0) {
+            Write-Log ("day {0}: the agent process failed; stopping the day" -f $day)
+            break
+        }
 
-        Write-Log ("day {0}: retrying in 10 minutes" -f $day)
-        Start-Sleep -Seconds 600
+        Write-Log ("day {0}: not complete; resuming the same session" -f $day)
+        Start-Sleep -Seconds 3
     }
 
-    $results += ("day {0} : {1}" -f $day, $dayResult)
-    Add-Content -Path $Summary -Value ($results[-1]) -Encoding utf8
-
-    if ($dayResult -ne 'exit 0') {
-        Write-Log ("day {0} did not complete cleanly; the run stops here" -f $day)
+    if ($completed) {
+        $dayResult = 'exit 0'
+        $stateObject = [pscustomobject]@{
+            last_completed = $day
+            next_day       = $day + 1
+            head           = (Get-Head)
+            at             = (Get-Date).ToString('o')
+        }
+        $stateObject | ConvertTo-Json | Set-Content -Path $State -Encoding utf8
+        $results += ("day {0} : complete" -f $day)
+        Add-Content -Path $Summary -Value ($results[-1]) -Encoding utf8
+    }
+    else {
+        $dayResult = "incomplete after $round rounds"
+        $results += ("day {0} : {1}" -f $day, $dayResult)
+        Add-Content -Path $Summary -Value ($results[-1]) -Encoding utf8
+        Write-Log ("day {0} did not reach a checkpoint; the run stops here" -f $day)
         break
     }
 
-    $head = (git log --oneline -1 2>&1) -join ' '
-    Write-Log ("day {0}: HEAD {1}" -f $day, $head)
-
     if ($day -lt $ToDay) {
         Write-Log ("day {0}: settling before day {1}" -f $day, ($day + 1))
-        $settleDeadline = (Get-Date).AddMinutes(10)
+        $settleDeadline = (Get-Date).AddMinutes(5)
         while ((Get-Process cargo, rustc -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $settleDeadline)) {
             Start-Sleep -Seconds 30
         }
