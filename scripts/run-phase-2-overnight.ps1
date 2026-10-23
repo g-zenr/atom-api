@@ -100,7 +100,7 @@ function Wait-ForQuietTree {
 
     $deadline = (Get-Date).AddMinutes($MaxWaitMinutes)
     while ($true) {
-        $busy = Get-Process cargo, rustc, docker -ErrorAction SilentlyContinue
+        $busy = Get-Process cargo, rustc -ErrorAction SilentlyContinue
         $idle = Get-TreeIdleMinutes
 
         if (-not $busy -and $idle -ge $QuietMinutes) {
@@ -214,8 +214,11 @@ foreach ($day in $FromDay..$ToDay) {
 
         try {
             Push-Location $Root
-            & opencode run --standalone --agent orchestrator --auto --format default --title $title $message *> $outFile
+            $previousPreference = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            & opencode run --standalone --agent orchestrator --auto --format default --title $title $message 2>&1 | Tee-Object -FilePath $outFile
             $code = $LASTEXITCODE
+            $ErrorActionPreference = $previousPreference
             Write-Log ("day {0}: exited with {1}" -f $day, $code)
             $dayResult = if ($code -eq 0) { 'exit 0' } else { "exit $code" }
         }
@@ -225,6 +228,7 @@ foreach ($day in $FromDay..$ToDay) {
             $dayResult = 'launcher error'
         }
         finally {
+            $ErrorActionPreference = $previousPreference
             Pop-Location
         }
 
