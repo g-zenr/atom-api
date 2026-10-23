@@ -176,9 +176,26 @@ record the output, as described in
 
 **Resolution.** [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
 runs the formatting check, the lint, the test suite, a release build, the
-documentation check and the OpenCode configuration check on every push and
-pull request. The workflow has not yet run on a GitHub runner, because the
-repository has not been published.
+documentation check in both modes and the OpenCode configuration check on every
+push and pull request to `master` or `develop`.
+
+**Verification status.** The repository is published, and the workflow names the
+branches that actually exist. Its trigger previously named `main`, which was
+never the branch in use, so a push could not have started it.
+
+The workflow has now been **observed passing on GitHub-hosted runners**:
+
+| Run | Branch | Both jobs |
+| --- | ------ | --------- |
+| [39761383251](https://github.com/g-zenr/atom-api/actions/runs/39761383251) | `fix/audit-remediation-phase-1` | pass, 4m15s |
+| [39765107169](https://github.com/g-zenr/atom-api/actions/runs/39765107169) | `chore/github-workflow-standards` | pass, 1m25s |
+
+Two defects were found by the first runs and fixed in
+`ATOM-CHANGE-20261022-008`: the validation script was committed without the
+executable bit, so it had never run; and once it ran, agent discovery reported
+every agent missing, because the agents inherit a model from a provider a hosted
+runner has no credentials for. The job now skips exactly those two checks, as a
+warning rather than a silent pass.
 
 **Related.** Requirement [`../project-truth.md`](../project-truth.md) §13.6;
 `KI-004`; `KI-006`.

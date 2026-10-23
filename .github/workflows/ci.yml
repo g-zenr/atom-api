@@ -8,9 +8,21 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # `master` is the production branch and `develop` the integration branch.
+    # Both run the gates, so an integration branch can never drift into a state
+    # that would fail on the way to production.
+    branches: [master, develop]
   pull_request:
+    # Deliberately unfiltered. A pull request whose base is another task branch
+    # (a stacked pull request) is still a change that needs the gates, and a
+    # branch filter would silently skip it.
   workflow_dispatch:
+
+# A new push to the same branch supersedes the run in flight: the older run's
+# result is no longer interesting and would only delay feedback.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -98,11 +110,18 @@ jobs:
       - name: Check the documentation tree
         run: cargo run --quiet --bin atom-docs
 
+      - name: Check the documentation tree in strict mode
+        # Strict mode turns a broken cross-reference into a failure. It is a
+        # separate step so that a failure names which of the two checks broke.
+        run: cargo run --quiet --bin atom-docs -- --strict
+
   opencode:
     name: Validate the OpenCode configuration
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    continue-on-error: true
+    # This job is enforcing. It validated cleanly before `continue-on-error`
+    # was removed, so a failure here is a real regression in the committed
+    # configuration and must be fixed rather than ignored.
 
     steps:
       - name: Check out the repository
@@ -115,5 +134,15 @@ jobs:
         run: npm install -g "@opencode/cli@2"
 
       - name: Validate the configuration
-        # The model check is skipped: CI has no provider credentials.
-        run: ./scripts/validate-opencode.sh --skip-model-check
+        # The model and agent checks need provider credentials, which a hosted
+        # runner does not have: the agents inherit the default model, so without
+        # a provider every one of them would report as missing. Those two checks
+        # are skipped and the skip is printed as a warning. What still runs here
+        # and is enforcing: the configuration parses, the sources are the ones
+        # expected, and the committed configuration contains no credential.
+        #
+        # Invoked through `bash` rather than as `./scripts/...`. The script was
+        # committed with mode 100644, so a direct invocation failed with
+        # "Permission denied" (exit 126) on every run, and `continue-on-error`
+        # hid that for the whole life of the workflow.
+        run: bash ./scripts/validate-opencode.sh --skip-model-check --skip-agent-discovery
