@@ -153,6 +153,7 @@ Each feature directory contains the same five documents:
 | [`engineering/review-log.md`](engineering/review-log.md) | Substantive reviews: findings, required fixes, resolution, re-review evidence. |
 | [`engineering/git-workflow.md`](engineering/git-workflow.md) | The branch model, the branch and commit naming rules, the six gates, the pull-request process, and how a review is conducted. |
 | [`engineering/release-and-promotion.md`](engineering/release-and-promotion.md) | How a change moves through DEV, UAT and PROD: the gate at each stage, what is verified, what is recorded, and what infrastructure does not exist yet. |
+| [`engineering/runs/phase-2/`](engineering/runs/phase-2/) | The Phase 2 run: the plan, the self-healing daily prompt and the live ledger for reimbursements, job applications, local ML and the database seeder. |
 | [`engineering/known-issues.md`](engineering/known-issues.md) | Confirmed defects, limitations, workarounds and remediation status. |
 | [`engineering/open-questions.md`](engineering/open-questions.md) | Unresolved product or architecture decisions. |
 
