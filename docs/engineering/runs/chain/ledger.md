@@ -108,7 +108,7 @@ step deliberately, and the rows are renamed only between runs.
 
 | Item | Wave | State | Commit | Notes |
 | ---- | ---- | ----- | ------ | ----- |
-| D0 | Close Phase 1 | **done** | see `## Resume` | Contract `C-D0` (+ A-C-D0-1..10). **Closed 2026-10-24**: route tables and `API_PREFIX` from the earlier sessions; this session completed `TasksListQuery` + the single-extractor handlers, `nest(routes::API_PREFIX, …)`, the settings **value** comparison in `atom-docs` with three unit tests, the `config/README.md` `100`→`10` fix, `tests/openapi_contract.rs` (5 tests) and `tests/list_query.rs` (4 tests), then six green gates, a review pass and a gate pass. 190 tests. |
+| D0 | Close Phase 1 | **done** | `906d6dc` | Contract `C-D0` (+ A-C-D0-1..10). **Closed 2026-10-24**: route tables and `API_PREFIX` from the earlier sessions; this session completed `TasksListQuery` + the single-extractor handlers, `nest(routes::API_PREFIX, …)`, the settings **value** comparison in `atom-docs` with three unit tests, the `config/README.md` `100`→`10` fix, `tests/openapi_contract.rs` (5 tests) and `tests/list_query.rs` (4 tests), then six green gates, a review pass and a gate pass. 190 tests. |
 | D1 | Product intake | pending | — | Documents only. Blocks D2. `database` owns `docs/database/**` (seeder spec, proposed schema); `docs` owns `project-truth`, `roadmap`, the three feature directories, ADR-0007/8/9, `api/conventions` and `testing/strategy`. Not started yet: the previous session marked it in progress without writing a file. |
 | D2.S1 | Seeder foundation | pending | — | `atom-seed` for users, notes, projects and tasks. Guards, determinism, `--reset`, tests, docs. No new dependency. |
 | D2.R1 | Reimbursements — schema and types | pending | — | |
@@ -677,8 +677,8 @@ chain is recorded as such rather than as a pass.
 
 ## Resume
 
-**State at the end of this session: `D0` is `done` and green; `D1` is the next
-item and has not started.**
+**State at the end of this session: `D0` is `done` and green at commit
+`906d6dc`; `D1` is the next item and has not been started by this session.**
 
 `D0` closed the Phase 1 leftovers the audit had deferred: the version prefix is
 declared once and mounted from that constant, the route table and the OpenAPI
