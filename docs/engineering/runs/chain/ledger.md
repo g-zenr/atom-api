@@ -863,6 +863,18 @@ then `code-reviewer` over both, and `quality-gate` over the evidence in
 `## Checkpoints`. `D2.R1` (the `0004` migration and the reimbursements types)
 may start in parallel, because it touches no file either review reads.
 
+**The unattended automation is gone, deliberately.** `scripts/run-phase-2-overnight.ps1`,
+`scripts/watchdog-phase-2.ps1` and `scripts/watch-phase-2.ps1` were deleted on
+2026-10-24 at the owner's request, together with the `STOP-RUN` sentinel they
+used. A run is now one manual paste of [prompt.md](prompt.md) into a fresh
+session, exactly as §0 of that file describes, with `PHASE=<n>` set to the first
+queue row whose state is not `done`. The reason is in `## Parked`: the watchdog
+relaunched a second orchestrator on the same working tree at 11:24 after this
+session removed the sentinel, which is the collision the sentinel existed to
+prevent. Nothing in `docs/` links to the deleted scripts, so the documentation
+gate is unaffected; `scripts/check-docs.*`, `scripts/create-test-database.sh` and
+`scripts/validate-opencode.*` remain.
+
 `D0` closed the Phase 1 leftovers the audit had deferred: the version prefix is
 declared once and mounted from that constant, the route table and the OpenAPI
 document are asserted against each other in both directions, each list endpoint
