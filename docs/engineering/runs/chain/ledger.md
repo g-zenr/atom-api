@@ -116,7 +116,7 @@ step deliberately, and the rows are renamed only between runs.
 | D2.R3 | Items and the total invariant | **done** (rows 10-11 outstanding) | `93fb2f0` | Three item routes, one transaction per write, `validate_money`. |
 | D2.R4 | Lifecycle actions | **done** (rows 10-11 outstanding) | `93fb2f0` | Four actions, one guarded `UPDATE` each, reopen clears both stamps. |
 | D2.R5 | Flow and contract tests | **done** (rows 10-11 outstanding) | `02c5489` | End-to-end journey, 55-request ownership sweep, 296 -> 299. |
-| D2.R6 | Close: review, gate, commit | pending | — | Also D2.S2: extend the seeder with claims. |
+| D2.R6 | Close: review, gate, commit | **done** | `a9b2db1` | Two independent reviews ran: `code-reviewer` FAIL on documentation plus one rank-1 requirement contradiction, all fixed; `quality-gate` could not execute (shell denied) and reported every gate as not run rather than passing, and its four static findings were fixed. 302 tests. The seeder already carried claims from `R1` (S2), so no seeder work remained. |
 | D3 | Job applications | pending | — | Blocked by D2. |
 | D3.S3 | Seeder: companies and applications | pending | — | Lands with the Day 3 close. |
 | D4 | Local ML | pending | — | Blocked by D3; needs the embedding provider decision from Day 1. |
@@ -1113,11 +1113,11 @@ Contract `C-R3/C-R4` (the `R5` row of `PHASE=2`). Agents: `test-engineer`, `docs
 
 ## Resume
 
-**State at the end of this session: `D0` is `done` at `906d6dc`; `D1` is committed as `ec41105` + `f88733c`; `D2.S1` as `5688de7` + `b635cc7`; `D2.R1` as `908166b`.**
-
-All four advanced on their substantive rows and all four carry the same gap: rows 10-11, the `code-reviewer` and `quality-gate` verdicts.
-
-An independent `code-reviewer` has since read `775dc57..908166b` and returned **FAIL on documentation**: the code, the SQL and the tests were sound, but eight documents stated things the tree falsifies - most of them made false by later chains rather than by mistakes in their own chain. Those repairs are recorded against `ATOM-REVIEW-20261024-005` in [`review-log.md`](../../review-log.md).
+**State at the end of this session: `D0` is `done` at `906d6dc`; `D1` at `ec41105` + `f88733c`;
+`D2.S1` at `5688de7` + `b635cc7`; `D2.R1` at `908166b`; `D2.R2` at `6595c21`; `D2.R3`/`R4` at
+`93fb2f0`; `D2.R5` at `02c5489`; `D2.R6` and the review repairs at `7bacf8f`, `7e920c5`
+and `a9b2db1`. The reimbursement feature is complete: twelve operations, 34 on
+the published surface, **302 tests**, six gates green.**
 `D0` closed the Phase 1 leftovers the audit had deferred: the version prefix is
 declared once and mounted from that constant, the route table and the OpenAPI
 document are asserted against each other in both directions, each list endpoint
