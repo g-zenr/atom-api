@@ -24,6 +24,15 @@ use utoipa::openapi::path::{Operation, ParameterIn, PathItem};
 
 use atom_api::api::routes::{API_PREFIX, ROUTE_TABLE, UNVERSIONED_ROUTE_TABLE, openapi_document};
 
+/// The number of operations the locked contract publishes.
+///
+/// Twenty versioned operations - five authentication, five notes, five projects
+/// and five tasks - plus the two unversioned probes. The two-way comparison
+/// below cannot see an operation that was dropped from the table, the router and
+/// the document together, so the size of the agreed surface is pinned as well:
+/// the contract is that all 22 operations of `/api/v1/openapi.json` still exist.
+const CONTRACT_OPERATIONS: usize = 22;
+
 /// Every operation declared on a path item, as `(METHOD, operation)`.
 ///
 /// `utoipa` stores one optional field per verb, so the list is written out. All
@@ -166,12 +175,11 @@ fn published_parameters(item: &PathItem, operation: &Operation) -> Vec<(String, 
 /// explorer paths (`/api/v1/docs`, `/api/v1/openapi.json`) are router mounts,
 /// not operations, and are therefore not part of either side.
 ///
-/// The size of the agreed surface is not pinned to a number: the tables are the
-/// source and the document is the assertion target, so a surface that grew or
-/// shrank is caught by the two-way set difference rather than by a count that
-/// would have to be edited alongside every deliberate change. Every operation
-/// must declare a success response, so one re-badied to an error-only entry is
-/// a failure too.
+/// The size of the agreed surface is pinned as well, so that an operation
+/// dropped from the table, the router and the document together - which the
+/// two-way comparison cannot see - is still a failure. Every operation must
+/// declare a success response, so one re-badied to an error-only entry is a
+/// failure too.
 #[test]
 fn the_route_table_and_the_document_describe_the_same_operations() {
     let document = openapi_document(&common::test_config());
@@ -206,6 +214,14 @@ fn the_route_table_and_the_document_describe_the_same_operations() {
          described: {described:#?}"
     );
 
+    assert_eq!(
+        served.len(),
+        CONTRACT_OPERATIONS,
+        "the published surface must stay the {CONTRACT_OPERATIONS} operations of the locked \
+         contract, but the route tables now declare {}:\n{served:#?}",
+        served.len()
+    );
+
     let served_but_not_described: Vec<&String> = served.difference(&described).collect();
     let described_but_not_served: Vec<&String> = described.difference(&served).collect();
 
@@ -227,9 +243,10 @@ fn the_route_table_and_the_document_describe_the_same_operations() {
 /// except `404`, which is the router's fallback for a path that is not mounted,
 /// and `405`, which is what an existing path answers for a method it does not
 /// declare. Every other status - `401`, `400`, `415`, `422` or `200` - proves
-/// that this method on this path exists. The test therefore proves mounting,
-/// not authorisation, and deliberately does not assert a success status. The
-/// method comes from the table, not from a hard-coded `GET`.
+/// that this method on this path exists. The versioned routes are therefore
+/// asserted only to be mounted, not to succeed; the two probes outside the
+/// version prefix need no credentials, so those two are asserted to answer
+/// `200`. The method comes from the table, not from a hard-coded `GET`.
 #[tokio::test]
 async fn every_route_in_the_table_is_served_by_the_router() {
     let app = common::app(common::test_state().await);
@@ -255,6 +272,12 @@ async fn every_route_in_the_table_is_served_by_the_router() {
             "{path} still carries a path placeholder the probe cannot fill: {uri}"
         );
 
+        // The probes outside the version prefix need no credentials, so they are
+        // the two operations whose answer is a success rather than a rejection.
+        let unversioned = UNVERSIONED_ROUTE_TABLE
+            .iter()
+            .any(|(_, health)| *health == path.as_str());
+
         let method = Method::from_bytes(method.as_bytes())
             .unwrap_or_else(|error| panic!("{method} is not an HTTP method: {error}"));
 
@@ -272,6 +295,15 @@ async fn every_route_in_the_table_is_served_by_the_router() {
             "{uri} is declared in the route table, but the router does not accept that method on \
              it: the request answered 405"
         );
+
+        if unversioned {
+            assert_eq!(
+                response.status,
+                StatusCode::OK,
+                "{uri} is a probe that needs no credentials, so it must answer 200, not {}",
+                response.status
+            );
+        }
     }
 }
 
@@ -293,6 +325,14 @@ async fn every_route_in_the_table_is_served_by_the_router() {
 fn the_version_prefix_is_declared_once() {
     const LITERAL: &str = "\"/api/v1\"";
     const DECLARATION: &str = "pub const API_PREFIX";
+
+    // The prefix is part of the published contract, so its value is pinned as
+    // well as its single declaration: a rename that kept one declaration would
+    // otherwise be invisible to every generated client.
+    assert_eq!(
+        API_PREFIX, "/api/v1",
+        "the version prefix is part of the published contract"
+    );
 
     let sources = rust_sources();
 
@@ -355,6 +395,24 @@ fn the_version_prefix_is_declared_once() {
         "src/api/mod.rs must mount the prefix it declares, as .nest(routes::API_PREFIX, ...); \
          the router must not type the prefix a second time"
     );
+
+    // A table entry is relative to the prefix: `API_PREFIX` is the only place
+    // the version appears, so an entry that spells it again would mount the
+    // version twice and drift from the document.
+    for (method, path) in ROUTE_TABLE {
+        assert!(
+            path.starts_with('/') && !path.contains("/api/"),
+            "{method} {path} must be relative to {API_PREFIX}; the version prefix may not be \
+             typed inside an entry"
+        );
+    }
+
+    for (method, path) in UNVERSIONED_ROUTE_TABLE {
+        assert!(
+            path.starts_with('/') && !path.contains("/api/"),
+            "{method} {path} is declared unversioned, so it may not carry the version prefix"
+        );
+    }
 }
 
 /// Each list handler extracts the query string once.

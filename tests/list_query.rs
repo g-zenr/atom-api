@@ -348,8 +348,12 @@ async fn a_malformed_list_parameter_is_a_bad_request() {
         .await;
         let body = response.expect_status(StatusCode::BAD_REQUEST);
 
+        // The code comes from its one definition in `error::code`, which is the
+        // same value the other malformed-parameter tests assert; a second
+        // spelling here is how the contract drifts.
         assert_eq!(
-            body["error"]["code"], "bad_request",
+            body["error"]["code"],
+            atom_api::error::code::BAD_REQUEST,
             "a malformed query parameter must use the standard error code for {uri}"
         );
         assert!(
