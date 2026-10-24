@@ -117,8 +117,8 @@ step deliberately, and the rows are renamed only between runs.
 | D2.R4 | Lifecycle actions | **done** (rows 10-11 outstanding) | `93fb2f0` | Four actions, one guarded `UPDATE` each, reopen clears both stamps. |
 | D2.R5 | Flow and contract tests | **done** (rows 10-11 outstanding) | `02c5489` | End-to-end journey, 55-request ownership sweep, 296 -> 299. |
 | D2.R6 | Close: review, gate, commit | **done** | `a9b2db1` | Two independent reviews ran: `code-reviewer` FAIL on documentation plus one rank-1 requirement contradiction, all fixed; `quality-gate` could not execute (shell denied) and reported every gate as not run rather than passing, and its four static findings were fixed. 302 tests. The seeder already carried claims from `R1` (S2), so no seeder work remained. |
-| D3 | Job applications | pending | — | Blocked by D2. |
-| D3.S3 | Seeder: companies and applications | pending | — | Lands with the Day 3 close. |
+| D3 | Job applications | **done** (J6 review outstanding) | `57788a6`, `5a125e5`, `c273f29` | Schema, 14 operations, stage machine, flow. 387 tests. |
+| D3.S3 | Seeder: companies and applications | **done** | `57788a6` | Landed in `J1` as `S3`: companies 5/12/18, applications 1/20/40, events 1/50/100. |
 | D4 | Local ML | pending | — | Blocked by D3; needs the embedding provider decision from Day 1. |
 | D4.S4 | Seeder: embeddings | pending | — | `--with-embeddings` uses the deterministic embedder, never a network call. |
 | D5 | Hardening and handover | pending | — | Blocked by D4. |
@@ -1165,6 +1165,60 @@ One wave, three chains: they share the DTO/repository shape, the ownership predi
 **SEEDER** - no table or column change; `J1` already seeds companies, applications and events.
 
 ---
+
+### D3.J1 - Job applications schema and types, 2026-10-24
+
+| # | Criterion | Evidence | Pass |
+| - | --------- | -------- | ---- |
+| 1 | All six gates green | `fmt=0`, `clippy=0`, `test=0` (314), `nodefault=0`, `docs=0`, `strict=0` | **Pass** |
+| 2 | Acceptance to test | 11 cases in `tests/jobs_schema.rs`, 1 in `tests/seeder.rs` | **Pass** |
+| 3 | New tests | **302 -> 314** | **Pass** |
+| 4 | Flow test | Hand-run on `atom_dev` (companies 5, applications 1, events 1); the automated flow is `J5` | **Pass at the schema layer** |
+| 5 | Ownership 404 | `an_application_cannot_belong_to_another_owners_company` (23503), `a_company_with_applications_cannot_be_deleted` (both halves) | **Pass** |
+| 6 | Docs | reimbursements-style update for job applications: `schema.md`, `seeding.md`, 5 feature docs, `strategy.md` | **Pass** |
+| 7 | Seeder | Mandatory in this chain and done: companies 5/12/18, applications 1/20/40, events 1/50/100; `V4`/`V6` extended | **Pass** |
+| 8 | OpenAPI | Unchanged: no route in `J1` | **Pass** |
+| 9 | No forbidden construct | No `unwrap`/`expect` outside tests; no `format!` SQL | **Pass** |
+| 10 | code-reviewer | **Not run in `J1`** | **Fail** |
+| 11 | quality-gate | **Not run in `J1`** | **Fail** |
+
+**Decision: ADVANCE on rows 1-9.** The `NO ACTION`-not-`RESTRICT` choice is the load-bearing one: both refuse a direct company delete, but only `NO ACTION` lets `DELETE FROM users` succeed, and the test asserts both halves.
+
+### D3.J2/J3/J4 - Companies, applications and events, 2026-10-24
+
+| # | Criterion | Evidence | Pass |
+| - | --------- | -------- | ---- |
+| 1 | All six gates green | `fmt=0`, `clippy=0`, `test=0` (385), `nodefault=0`, `docs=0`, `strict=0` | **Pass** |
+| 2 | Acceptance to test | 51 names in `tests/job_applications_api.rs`; the stage machine enumerated as 12/7/30 over 49 pairs | **Pass** |
+| 3 | New tests | **314 -> 385** | **Pass** |
+| 4 | Flow test | Hand-run on `atom_dev`: the five edges, a self-pair no-op, illegal moves 409, company delete 409 then 204, events ordered, link cleared on task delete | **Pass** |
+| 5 | Ownership 404 | `404` for every foreign row; a foreign company delete is `404` not `409`; a foreign `company_id` and a foreign `next_action_task_id` are `404` | **Pass** |
+| 6 | Docs | the five feature docs, `api/README.md` (48 operations, 50 rows), `schema.md`, `project-truth` §17, `features/README`, `implementation-status` | **Pass** |
+| 7 | Seeder | No table change | **n/a** |
+| 8 | OpenAPI | 14 operations added, surface 34 -> 48, asserted in both directions | **Pass** |
+| 9 | No forbidden construct | No `unwrap`/`expect` outside tests; no `format!` SQL; no `allow` | **Pass** |
+| 10 | code-reviewer | **Not run** | **Fail** |
+| 11 | quality-gate | **Not run** | **Fail** |
+
+**Decision: ADVANCE on rows 1-9.**
+
+### D3.J5 - Flow and sweep, 2026-10-24
+
+| # | Criterion | Evidence | Pass |
+| - | --------- | -------- | ---- |
+| 1 | All six gates green | `fmt=0`, `clippy=0`, `test=0` (387), `nodefault=0`, `docs=0`, `strict=0` | **Pass** |
+| 2 | Acceptance to test | the journey and the sweep | **Pass** |
+| 3 | New tests | **385 -> 387** | **Pass** |
+| 4 | Flow test | `the_whole_job_application_journey_from_lead_to_offer` | **Pass** |
+| 5 | Ownership 404 | `the_second_account_sees_not_found_on_every_job_application_operation`: 13 attempts; a foreign company delete is `404` not `409`, and a foreign application patched onto the attacker's own company is `404` | **Pass** |
+| 6 | Docs | `testing.md`, `status.md`, `strategy.md`, `architecture.md`, change-log `-009` | **Pass** |
+| 7 | Seeder | No table change | **n/a** |
+| 8 | OpenAPI | Unchanged in this chain; 48 still asserted | **Pass** |
+| 9 | No forbidden construct | Test-only change | **Pass** |
+| 10 | code-reviewer | **Not run** | **Fail** |
+| 11 | quality-gate | **Not run** | **Fail** |
+
+**Decision: ADVANCE on rows 1-9.** The sweep covers 13 attempts over 11 distinct operations, not literally all fourteen; the whole-surface enumeration is `tests/openapi_contract.rs`, pinned at 48 and compared in both directions.
 
 ## Parked
 
