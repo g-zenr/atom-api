@@ -7,17 +7,17 @@
 //! [`docs/features/ml/api.md`](../../docs/features/ml/api.md); the build contract
 //! is [`docs/features/ml/architecture.md`](../../docs/features/ml/architecture.md) §12.
 //!
-//! # What exists, and what does not
+//! # What exists
 //!
-//! The boundary ([`Embedder`]), the deterministic embedder, the disabled
-//! embedder, the storage, the three endpoints and the whole degradation rule are
-//! implemented. The **Burn encoder is not**: the spike network in
-//! [`burn_embedder`] runs a lookup, a mean-pool and the wrong projection, and its
-//! vectors are not semantically meaningful, so
-//! [`embedder::select`] reports `Disabled` for `ml.backend = flex` even when a
-//! model file is present. That is the pre-agreed fallback of
-//! [`ADR-0008`](../../docs/decisions/ADR-0008-local-pure-rust-ml.md) §11, and it
-//! is recorded in [`docs/features/ml/status.md`](../../docs/features/ml/status.md).
+//! The boundary ([`Embedder`]), the three implementations, the storage, the
+//! three endpoints and the whole degradation rule are implemented. The `Burn`
+//! implementation is a real encoder: six BERT layers over the local SafeTensors
+//! file, a hand-written WordPiece tokenizer, masked mean pooling and L2
+//! normalisation at write time ([`burn_embedder`], [`tokenizer`]). When it cannot
+//! load — `ml.enabled` is false, or either artifact is missing or unreadable —
+//! [`embedder::select`] reports `Disabled` and every scored request degrades,
+//! which is the pre-agreed fallback of
+//! [`ADR-0008`](../../docs/decisions/ADR-0008-local-pure-rust-ml.md) §11.
 //!
 //! # The `ml` Cargo feature
 //!
@@ -32,6 +32,7 @@ pub mod embedder;
 pub mod handlers;
 pub mod repository;
 pub mod service;
+pub mod tokenizer;
 
 pub mod deterministic;
 pub mod disabled;
@@ -46,8 +47,9 @@ pub use burn_embedder::{BurnEmbedder, WeightSource};
 pub use deterministic::Deterministic;
 pub use disabled::Disabled;
 pub use embedder::{
-    CAUSE_ENCODER_UNAVAILABLE, DEFAULT_DIMENSION, Embedder, EmbedderStatus, MlError,
-    REASON_ML_DISABLED, REASON_MODEL_MISSING, UNIT_NORM_TOLERANCE, l2_norm, normalise, select,
+    DEFAULT_DIMENSION, Embedder, EmbedderStatus, MlError, REASON_ML_DISABLED, REASON_MODEL_MISSING,
+    UNIT_NORM_TOLERANCE, l2_norm, normalise, select,
 };
 pub use repository::{MlRepository, SourceType, StoredVector};
 pub use service::MlService;
+pub use tokenizer::{MAX_TOKENS, WordPieceTokenizer};

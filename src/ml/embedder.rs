@@ -41,15 +41,15 @@ pub const REASON_ML_DISABLED: &str = "ml_disabled";
 /// client". A fifth client-visible code would be a contract change.
 pub const REASON_MODEL_MISSING: &str = "model_missing";
 
-/// The internal cause logged once when the Burn backend has no complete
-/// encoder.
+/// The internal cause logged once when the `flex` embedder is selected but the
+/// network cannot be built from the artifacts the settings name.
 ///
-/// It is **not** a client-visible value: `degraded_reason` is a three-value
-/// enum and adding a fourth is a contract change
+/// It is **not** a client-visible value: `degraded_reason` is a three-value enum
+/// and adding a fourth is a contract change
 /// ([`docs/features/ml/architecture.md`](../../docs/features/ml/architecture.md)
-/// §12.9). It names the reason the `flex` backend is `Disabled` in this build,
-/// which is that the six-layer encoder of §12.3 has not been written.
-pub const CAUSE_ENCODER_UNAVAILABLE: &str = "ml_model_unavailable";
+/// §12.9). The published reason for every unusable-model state stays
+/// `model_missing`; this constant only labels the log line.
+pub const CAUSE_MODEL_UNLOADABLE: &str = "ml_model_unloadable";
 
 /// The tolerance the unit-length invariant is stated with.
 ///
@@ -193,22 +193,12 @@ pub fn normalise(values: &mut [f32], dimension: usize) -> Result<(), MlError> {
 /// §12.2:
 ///
 /// ```text
-/// ml.enabled = false                    -> Disabled("ml_disabled")
-/// ml.enabled = true, backend=deterministic -> Deterministic(dim)
-/// ml.enabled = true, backend=flex, artifacts missing -> Disabled("model_missing")
-/// ml.enabled = true, backend=flex, artifacts present -> see below
+/// ml.enabled = false                         -> Disabled("ml_disabled")
+/// ml.enabled = true, backend=deterministic   -> Deterministic(dim)
+/// ml.enabled = true, backend=flex, artifacts missing or unloadable
+///                                            -> Disabled("model_missing"), cause logged once
+/// ml.enabled = true, backend=flex, artifacts load -> Burn
 /// ```
-///
-/// **The `flex` branch never returns a working embedder in this build.** The
-/// six-layer encoder and the WordPiece tokenizer of §12.3 are not implemented:
-/// the spike network in [`super::burn_embedder`] runs a lookup, a mean-pool and
-/// the wrong projection, and its vectors carry no meaning. Reporting it as
-/// `Ready` would let the service store them as if they did, so the branch
-/// reports `Disabled` with the published `model_missing` code and logs the real
-/// cause, [`CAUSE_ENCODER_UNAVAILABLE`], once. That is the pre-agreed fallback
-/// of [`ADR-0008`](../../docs/decisions/ADR-0008-local-pure-rust-ml.md) §11: the
-/// endpoints exist and degrade correctly, and no requirement is quietly
-/// redefined.
 ///
 /// A missing or unreadable artifact is a **state**, never a start-up failure
 /// ([`ADR-0008`](../../docs/decisions/ADR-0008-local-pure-rust-ml.md) §8.3), so
@@ -230,55 +220,64 @@ pub fn select(settings: &MlSettings) -> Arc<dyn Embedder> {
 
 /// The `flex` branch of [`select`].
 ///
-/// The two artifact checks run first, in the order an operator would make them,
-/// because the cause is logged: "the weights are missing" and "the encoder is
-/// not built into this binary" are different problems with the same client
-/// answer.
+/// The artifacts are resolved first — `ml.model_path`, and the `vocab.txt` beside
+/// it unless `ml.tokenizer_path` names another — and then loaded. A load failure
+/// is the same client-visible state as a missing file, `model_missing`. The
+/// difference is the cause, which is logged once here and never returned.
+#[cfg(feature = "ml")]
 fn select_burn(settings: &MlSettings, dimension: usize) -> Arc<dyn Embedder> {
-    if let Some(cause) = artifact_fault(settings) {
+    let (Some(weights), Some(vocabulary)) = (settings.model_file(), settings.tokenizer_file())
+    else {
         tracing::warn!(
-            cause,
-            "ml.enabled is true and ml.backend is flex, but a model artifact cannot be used; \
-             the embedder is Disabled and every scored request degrades. Start-up continues \
-             (ADR-0008 §8.3)."
+            cause = CAUSE_MODEL_UNLOADABLE,
+            "ml.enabled is true and ml.backend is flex, but ml.model_path is not set or has no \
+             vocabulary; the embedder is Disabled and every scored request degrades. Start-up \
+             continues (ADR-0008 §8.3)."
         );
 
         return Arc::new(Disabled::new(dimension, REASON_MODEL_MISSING));
-    }
+    };
 
+    match super::burn_embedder::BurnEmbedder::from_artifacts(&weights, &vocabulary, dimension) {
+        Ok(embedder) => {
+            tracing::info!(
+                model_id = embedder.model_id(),
+                vocabulary = embedder.vocab_size(),
+                dimension = embedder.dimension(),
+                "the Burn encoder is ready"
+            );
+
+            Arc::new(embedder)
+        }
+        Err(error) => {
+            tracing::warn!(
+                cause = CAUSE_MODEL_UNLOADABLE,
+                %error,
+                "ml.enabled is true and ml.backend is flex, but the model artifacts cannot be \
+                 used; the embedder is Disabled and every scored request degrades. Start-up \
+                 continues (ADR-0008 §8.3)."
+            );
+
+            Arc::new(Disabled::new(dimension, REASON_MODEL_MISSING))
+        }
+    }
+}
+
+/// The `flex` branch when the `ml` feature is compiled out.
+///
+/// `ml.backend = flex` without `burn` cannot produce a vector, so it is the same
+/// disabled state as a missing file. The `ml` feature is on by default; the
+/// build without it exists so a model-stack change cannot break the base API
+/// ([`ADR-0008`](../../docs/decisions/ADR-0008-local-pure-rust-ml.md) §7.3).
+#[cfg(not(feature = "ml"))]
+fn select_burn(_settings: &MlSettings, dimension: usize) -> Arc<dyn Embedder> {
     tracing::warn!(
-        cause = CAUSE_ENCODER_UNAVAILABLE,
-        "ml.enabled is true and both model artifacts are present, but the Burn encoder these \
-         settings describe is not implemented in this build (ADR-0008 §11); the embedder is \
-         Disabled and every scored request degrades to lexical results. Reindex and match \
-         answer 409."
+        cause = CAUSE_MODEL_UNLOADABLE,
+        "ml.backend is flex but this binary was built without the `ml` feature; the embedder is \
+         Disabled and every scored request degrades."
     );
 
     Arc::new(Disabled::new(dimension, REASON_MODEL_MISSING))
-}
-
-/// Describes the first artifact that cannot be used, if any.
-///
-/// The two `is_file` calls are the only file I/O in the module, and they run
-/// once, at start-up, before the socket is bound. No request path reads a file.
-fn artifact_fault(settings: &MlSettings) -> Option<&'static str> {
-    let Some(model) = settings.model_file() else {
-        return Some("ml.model_path is not set");
-    };
-
-    if !model.is_file() {
-        return Some("ml.model_path does not name a readable file");
-    }
-
-    let Some(tokenizer) = settings.tokenizer_file() else {
-        return Some("ml.tokenizer_path is not set and there is no sibling vocab.txt");
-    };
-
-    if !tokenizer.is_file() {
-        return Some("the WordPiece vocabulary does not name a readable file");
-    }
-
-    None
 }
 
 #[cfg(test)]
@@ -366,10 +365,11 @@ mod tests {
     }
 
     #[test]
-    fn both_artifacts_present_still_report_the_disabled_embedder() {
-        // The honest result of this change: the artifact gate passes and the
-        // encoder still does not exist, so the branch stays `Disabled` instead
-        // of returning vectors that mean nothing (ADR-0008 §11).
+    fn both_artifacts_present_but_unloadable_report_the_disabled_embedder() {
+        // The artifact gate passes — two readable files exist — and the network
+        // still cannot be built from them, because "placeholder" is not a
+        // SafeTensors document. The state is `model_missing` to a client, the
+        // cause is logged once, and start-up continues (ADR-0008 §8.3).
         let weights = existing_file("complete-weights.safetensors");
         let vocabulary = existing_file("complete-vocab.txt");
 

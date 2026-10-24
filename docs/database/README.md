@@ -11,6 +11,7 @@ migration workflow and the development seeder.
 | Document | Contents |
 | -------- | -------- |
 | [`schema.md`](schema.md) | Every Phase 1 table with its columns, types, nullability, defaults, constraints, indexes and relationships; the ownership model; the search design; the enum types; the migration that introduced each table; and, in §11, the proposed Phase 2 tables. |
+| [`performance.md`](performance.md) | The Phase 2 list, count, aggregate and embedding statements measured at 20 000 rows across two owners: the plan, buffers and duration of each, where each plan flips as volume grows, and the findings a reviewer must accept or schedule. |
 | [`migration-policy.md`](migration-policy.md) | How migrations are written, applied and reviewed; the rollback policy; the rule that every migration has a matching Rust model change; and the SQLx compile-time check workflow. |
 | [`seeding.md`](seeding.md) | `atom-seed`: the one command, the three profiles, the four safety guards, determinism, idempotency, `--reset`, the post-insert verification, the development credentials and the test list. |
 

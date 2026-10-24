@@ -37,6 +37,16 @@ name = "atom-ml-spike"
 path = "src/bin/atom-ml-spike.rs"
 required-features = ["ml"]
 
+# The M3 re-measurement: the real six-layer encoder and the WordPiece tokenizer.
+# Prints construction, first inference, steady state at 1/10/100 texts, peak RSS,
+# the output norm, determinism, and a five-text/three-query retrieval check.
+# A development tool, not a product binary; it reads a local model file and
+# never downloads one.
+[[bin]]
+name = "atom-ml-bench"
+path = "src/bin/atom-ml-bench.rs"
+required-features = ["ml"]
+
 [features]
 # The API explorer and the OpenAPI document served over HTTP.
 #
@@ -128,12 +138,16 @@ utoipa-swagger-ui = { version = "9", features = [
 
 # --- Local machine learning (feature `ml`) ---
 # ADR-0008: Burn v0.22 on the `flex` CPU backend, pure Rust, no GPU and no
-# second runtime. `std` and `flex` are the whole surface the spike needs;
-# default features would pull `bm`/`fusion`/`train`, which no request uses.
+# second runtime. `std` and `flex` are the compute surface; `safetensors`
+# enables burn-store's SafeTensors reader (and its `store` module), which is
+# how the encoder's weights are loaded. It is the same crate graph `burn`
+# already brings; default features would add `bm`/`fusion`/`train`, which no
+# request uses.
 # Optional: see the `ml` feature.
 burn = { version = "0.22", default-features = false, features = [
     "std",
     "flex",
+    "safetensors",
 ], optional = true }
 
 [dev-dependencies]
