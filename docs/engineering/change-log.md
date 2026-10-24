@@ -42,6 +42,79 @@ define the target state. The requirements live in
 
 ## Entries
 
+### ATOM-CHANGE-20261024-006 - Claim CRUD for reimbursements
+
+**Date:** 2026-10-24 (UTC)
+**Type:** Feature (endpoints)
+**Author:** The ATOM engineering team - the orchestrator with the `rust-backend`, `test-engineer`, `docs` and `database` subagents.
+**Status:** Complete - **chain `D2.R2`, review rows outstanding**
+
+#### Summary
+
+Five claim endpoints answer: list, create, read, partial update and delete. The
+published surface moves from 22 operations to **27**, and
+`tests/openapi_contract.rs` pins the new number. The feature is still
+`Accepted`: items, the lifecycle, and the total invariant are `R3`/`R4`.
+
+#### What changed
+
+| Area | Change |
+| ---- | ------ |
+| Endpoints | `GET`/`POST /api/v1/claims`, `GET`/`PATCH`/`DELETE /api/v1/claims/{claim_id}`; `409` is unreachable in this chain |
+| Module | `src/reimbursements/{dto,service,repository,handlers}.rs`; nine static statements; `ClaimService` on `AppState` |
+| Contract | 22 -> 27 operations, seven components, a `claims` tag, and the claims row in the parameter-set test |
+| Tests | `tests/claims_api.rs` (34), two new contract tests, five unit tests; **225 -> 266** |
+| Docs | reimbursements `status`/`architecture`/`testing`/`api`, `docs/api/README.md`, `docs/testing/strategy.md`, `schema.md`, `docs/README.md` |
+
+#### The three decisions that were not obvious
+
+1. **`project_id` is a tri-state.** `Option<Option<Uuid>>` with plain serde
+   collapses "absent" and `"null"` into `None`, because `serde_json` answers an
+   explicit `null` with `visit_none` on the *outer* `Option`. Without
+   `#[serde(default)]` plus a local `double_option` deserializer, "clear the
+   link" is inexpressible and `PATCH {"project_id": null}` - a published
+   operation - silently does nothing. The unit test deserializes the three
+   bodies rather than constructing them, because construction would not have
+   caught it.
+2. **`currency`, `status` and `total_amount` are accepted and ignored on
+   `PATCH`.** The published `api.md` says so; `schema.md` and `status.md` said
+   "a service rule with a `422`". Rejecting would require *adding* the fields to
+   `UpdateClaimRequest` in order to refuse them, which widens the published
+   request schema and contradicts the same paragraph. Immutability is stronger
+   this way: none of the three appears in any `SET` clause, so what was dropped
+   is the error, not the rule. The three documents now agree on the published
+   behaviour.
+3. **A foreign `project_id` is resolved inside the write statement**, with
+   `WHERE EXISTS (SELECT 1 FROM projects WHERE id = $n AND user_id = $m)`, so it
+   answers `404` without a second round trip. The composite key cannot express
+   it: `ON DELETE SET NULL (col)` needs PostgreSQL 15 and the documented floor
+   is 14.
+
+#### Checks and results
+
+Six gates on the integrated tree: `fmt` 0, `clippy -D warnings` 0,
+`test --all-targets` 0 (**266 tests**, 225 -> 266), `check --no-default-features`
+0, `atom-docs` 0, `atom-docs --strict` 0.
+
+A hand run against a real server on `atom_dev` observed: create `201` with
+`"total_amount":"0.0000"`; read, list and patch `200`; `project_id` set and
+cleared; delete `204`; read after delete `404`. Negatives observed: a foreign
+project `404` on create and patch; another account's claim `404` on every verb;
+`PATCH {"currency":"USD","status":"paid","total_amount":"999.0000"}` `200` with
+all three unchanged; `PATCH {}` `200` with only `updated_at` moved; `422` for a
+blank title, a bad currency and a reversed date range; `400` for a non-JSON
+body, a non-UUID path and a bad list parameter; `401` without a token.
+
+#### What is not verified
+
+`code-reviewer` and `quality-gate` have not read this chain. Items, the
+lifecycle actions and the total-equals-sum invariant are not built, so the
+feature is not `Implemented` and no requirement is `Verified` beyond the claim
+operations the tests exercise. Which listing statement ran is not observable
+from a response, so "the status-filtered list uses the status index" is an index
+decision, not a test result.
+
+
 ### ATOM-CHANGE-20261024-005 - The reimbursements schema and its row types
 
 **Date:** 2026-10-24 (UTC)

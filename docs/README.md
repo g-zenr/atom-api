@@ -115,7 +115,7 @@ A feature is never `Verified` because its code exists or compiles.
 | [`features/notes/`](features/notes/) | Personal notes, archiving, search, pagination. |
 | [`features/projects/`](features/projects/) | Projects, their lifecycle, and what happens to their tasks. |
 | [`features/tasks/`](features/tasks/) | Tasks, status, priority, ordering, filtering. |
-| [`features/reimbursements/`](features/reimbursements/) | Expense claims, line items, money and the claim lifecycle. `Accepted`, not built. |
+| [`features/reimbursements/`](features/reimbursements/) | Expense claims, line items, money and the claim lifecycle. `Accepted`: the schema and claim CRUD exist; items and the lifecycle do not. |
 | [`features/job-applications/`](features/job-applications/) | Companies, applications, stages and events. `Accepted`, not built. |
 | [`features/ml/`](features/ml/) | Local embeddings, hybrid search and match ranking. `Accepted`, not built. |
 

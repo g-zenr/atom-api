@@ -108,6 +108,18 @@ not_empty = "must not be empty"
 # the violation itself, so the message does not have to repeat it.
 too_long = "must be at most {} characters long"
 
+# The currency code is not three letters.
+#
+# The value is trimmed and upper-cased before the check, so the message states
+# the rule that remains: exactly three letters.
+currency_invalid = "must be exactly three letters"
+
+# A submission-date range runs backwards.
+#
+# The violation names `submitted_from`, because that is the field a client can
+# correct.
+date_range_order = "must not be later than submitted_to"
+
 [messages.resources]
 # 404, when the user does not exist.
 user_not_found = "The requested user does not exist."
@@ -120,3 +132,6 @@ project_not_found = "The requested project does not exist."
 
 # 404, when the task does not exist, or is not owned by the caller.
 task_not_found = "The requested task does not exist."
+
+# 404, when the expense claim does not exist, or is not owned by the caller.
+claim_not_found = "The requested expense claim does not exist."

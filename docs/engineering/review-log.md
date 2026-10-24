@@ -182,7 +182,7 @@ green at that commit.
 | 2 | The job-applications documents gave two different orderings for companies. | Resolved in `f88733c`. |
 | 3 | The reimbursements lifecycle did not say which timestamps a reopen clears. | Resolved in `f88733c`. |
 | 4 | The stage-machine arithmetic in the job-applications documents did not add up. | Resolved in `f88733c`. |
-| 5 | The planned malformed-body test claimed a `422` that no request body can produce; only a `400` is reachable. | Resolved in `f88733c`; the current text in [`../features/reimbursements/testing.md`](../features/reimbursements/testing.md) §2.5 states the `400` only. |
+| 5 | The planned malformed-body test claimed a `422` that no request body can produce; only a `400` is reachable. | Resolved in `f88733c`; the current text in [`../features/reimbursements/testing.md`](../features/reimbursements/testing.md) §2.5 stated the `400` only; after `D2.R2` it states both the `400` for malformed JSON and the `422` with field `body` for a well-formed body of the wrong type, because the extractor does both. |
 | 6 | The job-applications test plan had no case for deleting a company. | Resolved in `f88733c`. |
 | 7 | The reimbursements test plan had no case for a claim `PATCH`. | Resolved in `f88733c`; the case is `a_claim_can_be_partially_updated` in the same document. |
 | 8 | The `ml.backend` value set in the documents did not match the configuration contract. | Resolved in `f88733c`. |

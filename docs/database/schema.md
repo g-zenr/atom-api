@@ -5,9 +5,10 @@
 > **Owner:** maintained by the `database` agent
 
 The complete Phase 1 schema of the ATOM database, table by table, as it is
-defined in `migrations/`. Section 11 is the **proposed** Phase 2 schema: its
-first two tables are created by `migrations/0004_expense_claims.sql` and have
-no API, and the rest of it does not exist yet.
+defined in `migrations/`. Section 11 is the Phase 2 schema: its first two tables
+are created by `migrations/0004_expense_claims.sql` and are served by the five
+claim endpoints of chain `R2`, and the rest of it is still proposed and does not
+exist yet.
 
 The conventions the schema follows are in
 [`../project-truth.md`](../project-truth.md) §12. The rules for changing it
@@ -33,8 +34,8 @@ users ──1:N──► refresh_sessions
 | `notes` | `migrations/0002_notes.sql` | One row per note. |
 | `projects` | `migrations/0003_projects_and_tasks.sql` | One row per project. |
 | `tasks` | `migrations/0003_projects_and_tasks.sql` | One row per task. |
-| `expense_claims` | `migrations/0004_expense_claims.sql` | One row per reimbursement claim. No endpoint yet (§11.1). |
-| `expense_items` | `migrations/0004_expense_claims.sql` | One row per claim line item. No endpoint yet (§11.2). |
+| `expense_claims` | `migrations/0004_expense_claims.sql` | One row per reimbursement claim. Read and written by the five `R2` claim endpoints (§11.1). |
+| `expense_items` | `migrations/0004_expense_claims.sql` | One row per claim line item. Read by the claim detail response; no item endpoint until `R3` (§11.2). |
 
 Two enum types are created by `migrations/0003_projects_and_tasks.sql`:
 `task_status` and `task_priority`. `migrations/0004_expense_claims.sql` adds a
@@ -368,17 +369,20 @@ written with that in mind, and the policy in
 
 ## 11. Phase 2 (Proposed)
 
-> **Status:** **Proposed** for the API. Phase 1 of the run — the product
-> intake — writes the accepted requirements in
+> **Status:** **Proposed**, with one exception: `expense_claims` and
+> `expense_items` are served by the five claim endpoints of chain `R2` (§11.1).
+> Phase 1 of the run — the product intake — writes the accepted requirements in
 > [`../project-truth.md`](../project-truth.md) §18. This section records the
-> schema those requirements imply. **No endpoint reads or writes any of it**,
-> no request path can reach it, and nothing here is `Implemented` or
-> `Verified`.
+> schema those requirements imply. Nothing in this section is `Verified` by this
+> document; the API half is covered by the tests the chain records, not here.
 >
-> `migrations/0004_expense_claims.sql` now creates `expense_claim_status`,
+> `migrations/0004_expense_claims.sql` creates `expense_claim_status`,
 > `expense_claims` and `expense_items` with every constraint and index named in
-> §11.1 and §11.2, so those two tables exist while there is still no endpoint
-> and no service for them, and §11.3–§11.6 remain unbuilt.
+> §11.1 and §11.2. Chain `R2` reads and writes `expense_claims` — list, create,
+> read, update and delete — and reads `expense_items` for the claim detail
+> response, writing none of them. There is still no item endpoint (`R3`), no
+> lifecycle action (`R4`) and no route into §11.3–§11.6, and no request path can
+> change a claim's `status`, `currency` or `total_amount`.
 
 Six provisional assumptions underlie this section: **A1** (a claim has one
 currency and there is no FX), **A2** (a receipt is a reference), **A3**
@@ -434,6 +438,27 @@ the total live here, the amounts live in `expense_items`.
 | `expense_claims_lifecycle_timestamps_chk` | Ties each timestamp to the status. See below. |
 | `expense_claims_timestamp_order_chk` | `CHECK ((decided_at IS NULL OR (submitted_at IS NOT NULL AND decided_at >= submitted_at)) AND (paid_at IS NULL OR (decided_at IS NOT NULL AND paid_at >= decided_at)))` |
 
+Two different mechanisms police `currency`, and a test that asserts the wrong one
+will fail:
+
+- **The type rejects an over-long code, before any `CHECK` runs.** `CHAR(3)`
+  raises SQLSTATE `22001` (`value too long for type character(3)`) on a
+  four-character value; the row never reaches `expense_claims_currency_chk`.
+  Measured on PostgreSQL 18.1 and recorded in the `C-R1` checkpoint. An earlier
+  wording of this section credited the `CHECK` with that case, which was wrong:
+  the `CHECK` cannot see a value the type refused. The migration's own comment
+  says the same thing — `CHAR(3)` is chosen "so that an over-long code is a
+  length error at the type and not only in the constraint below".
+- **The `CHECK` rejects the two cases the type accepts.** A lower-case code
+  (`usd`) and a two-character code (`US`, stored blank-padded as `US `) both fit
+  `CHAR(3)`; both fail `^[A-Z]{3}$` with SQLSTATE `23514` naming
+  `expense_claims_currency_chk`. Upper case is the only guarantee the type
+  cannot give, which is why the constraint stays.
+
+Either way the value is unrepresentable, and the API reaches neither mechanism:
+the service trims, upper-cases and length-checks a currency and returns `422`
+before a statement runs.
+
 The lifecycle constraint is the direct analogue of
 `tasks_completion_consistency_chk`: it makes "a submitted claim without a
 submission date" and "a paid claim without a decision" impossible to store,
@@ -463,11 +488,27 @@ The `rejected → draft` reopen clears `submitted_at` **and** `decided_at`;
 contract (`POST .../submit` on a rejected claim reopens without submitting) and
 the schema cannot be read as disagreeing.
 
-`currency` is immutable (`REIMB-R02`). That is a service rule with a `422` and a
-test, not a trigger: the transition rules and the total already live in the
-service, and a trigger would be a second, partial copy of them. A
-`BEFORE UPDATE` trigger that compares `OLD.currency` with `NEW.currency` is the
-database-level alternative if a second writer ever appears.
+`currency` is immutable (`REIMB-R02`). The mechanism is **not** a rejected
+request: `currency` is absent from `UpdateClaimRequest`, so a `PATCH` body that
+carries it — alone or with other fields — is accepted with `200` and the field
+is ignored
+([`../features/reimbursements/api.md`](../features/reimbursements/api.md) §6).
+That is the stronger form of the rule, not a weaker one: the column appears in
+no `SET` clause of any statement, so `currency` has no write path at all rather
+than one that is guarded. What is dropped is the *error*, not the invariant.
+
+The earlier wording of this paragraph — "that is a service rule with a `422` and
+a test" — was the proposal. The published contract resolved it the other way,
+because producing a `422` would require **adding** `currency` to the request
+type only to reject it, which contradicts "they are absent from the request
+contract", and `#[serde(deny_unknown_fields)]` would turn every unknown key into
+a `422`, a breaking change for any client that sends one extra field. The
+disagreement and its resolution are recorded in
+[`../architecture/reimbursements-crud-design.md`](../architecture/reimbursements-crud-design.md)
+§9.1. No trigger is added for the original reason: the transition rules and the
+total already live in the service, and a `BEFORE UPDATE` trigger comparing
+`OLD.currency` with `NEW.currency` would be a second, partial copy of them. It
+remains the database-level alternative if a second writer ever appears.
 
 #### Indexes
 
@@ -479,13 +520,21 @@ database-level alternative if a second writer ever appears.
 | `expense_claims_id_user_id_unique_idx` | `UNIQUE INDEX (id, user_id)` | Not a second key: `id` is already unique. It exists because PostgreSQL requires a unique constraint or index on exactly the columns a composite foreign key references, and `expense_items` references `(id, user_id)` (§11.2). |
 
 The feature also filters by `currency`, by a `submitted_at` range and by a
-title/description search. The first two are optional predicates of the form
-`($n IS NULL OR column = $n)` in the same statement, which the planner cannot
-turn into an index seek; they are applied to the rows the chosen listing index
-has already narrowed to the owner. The search is an `ILIKE`, as in the Phase 1
-project listing, so there is no `tsvector` column and no trigram index. A
-separate index on `currency` would be written on every insert and read by no
-statement — write cost without a read.
+title/description search. `currency` and the date bounds are optional predicates
+of the form `($n IS NULL OR column = $n)` in the same statement, which the
+planner cannot turn into an index seek; they are applied to the rows the chosen
+listing index has already narrowed to the owner. **No index leads on `currency`,
+and none is worth adding**: the predicate is optional, so an index on the column
+alone could not serve the statement, and neither owner-scoped listing index leads
+on `currency`. A separate index would therefore be written on every insert while
+every statement could still only filter on it after the fact — write cost without
+a read, which is the same reason the `submitted_at` bounds have no index either.
+The `status` filter is different: it is not one of those optional predicates but
+the choice of index, which is why the repository holds two listing statement
+shapes, one per index
+([`../architecture/reimbursements-crud-design.md`](../architecture/reimbursements-crud-design.md)
+§6.6). The search is an `ILIKE`, as in the Phase 1 project listing, so there is
+no `tsvector` column and no trigram index.
 
 #### Ownership and deletion
 

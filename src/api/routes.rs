@@ -13,6 +13,7 @@ use crate::config::Config;
 use crate::error::AppError;
 use crate::notes::handlers as note_handlers;
 use crate::projects::handlers as project_handlers;
+use crate::reimbursements::handlers as claim_handlers;
 use crate::state::AppState;
 use crate::tasks::handlers as task_handlers;
 
@@ -48,6 +49,11 @@ use crate::tasks::handlers as task_handlers;
         task_handlers::get_task,
         task_handlers::update_task,
         task_handlers::delete_task,
+        claim_handlers::list_claims,
+        claim_handlers::create_claim,
+        claim_handlers::get_claim,
+        claim_handlers::update_claim,
+        claim_handlers::delete_claim,
     ),
     components(
         schemas(
@@ -78,6 +84,13 @@ use crate::tasks::handlers as task_handlers;
             crate::tasks::dto::UpdateTaskRequest,
             crate::tasks::models::TaskStatus,
             crate::tasks::models::TaskPriority,
+            crate::reimbursements::dto::ClaimResponse,
+            crate::reimbursements::dto::ClaimDetailResponse,
+            crate::reimbursements::dto::ClaimPage,
+            crate::reimbursements::dto::ItemResponse,
+            crate::reimbursements::dto::CreateClaimRequest,
+            crate::reimbursements::dto::UpdateClaimRequest,
+            crate::reimbursements::models::ClaimStatus,
             crate::pagination::Pagination,
         )
     ),
@@ -88,6 +101,7 @@ use crate::tasks::handlers as task_handlers;
         (name = "notes", description = "Personal notes"),
         (name = "projects", description = "Project tracking"),
         (name = "tasks", description = "Tasks belonging to a project"),
+        (name = "claims", description = "Expense claims and their line items"),
     )
 )]
 pub struct ApiDoc;
@@ -173,6 +187,12 @@ pub const ROUTE_TABLE: &[(&str, &str)] = &[
     ("GET", "/tasks/{task_id}"),
     ("PATCH", "/tasks/{task_id}"),
     ("DELETE", "/tasks/{task_id}"),
+    // --- expense claims ---
+    ("GET", "/claims"),
+    ("POST", "/claims"),
+    ("GET", "/claims/{claim_id}"),
+    ("PATCH", "/claims/{claim_id}"),
+    ("DELETE", "/claims/{claim_id}"),
 ];
 
 /// Every operation outside [`API_PREFIX`], as `(METHOD, path)`.
@@ -226,6 +246,17 @@ pub fn api_routes() -> Router<AppState> {
             get(task_handlers::get_task)
                 .patch(task_handlers::update_task)
                 .delete(task_handlers::delete_task),
+        )
+        // --- expense claims ---
+        .route(
+            "/claims",
+            get(claim_handlers::list_claims).post(claim_handlers::create_claim),
+        )
+        .route(
+            "/claims/{claim_id}",
+            get(claim_handlers::get_claim)
+                .patch(claim_handlers::update_claim)
+                .delete(claim_handlers::delete_claim),
         )
 }
 

@@ -15,12 +15,20 @@ features themselves.
 
 The per-feature endpoint references are:
 
-| Feature | Document |
-| ------- | -------- |
-| Authentication | [`../features/authentication/api.md`](../features/authentication/api.md) |
-| Notes | [`../features/notes/api.md`](../features/notes/api.md) |
-| Projects | [`../features/projects/api.md`](../features/projects/api.md) |
-| Tasks | [`../features/tasks/api.md`](../features/tasks/api.md) |
+| Feature | Document | Operations documented |
+| ------- | -------- | -------------------- |
+| Authentication | [`../features/authentication/api.md`](../features/authentication/api.md) | 5 |
+| Notes | [`../features/notes/api.md`](../features/notes/api.md) | 5 |
+| Projects | [`../features/projects/api.md`](../features/projects/api.md) | 5 |
+| Tasks | [`../features/tasks/api.md`](../features/tasks/api.md) | 5 |
+| Reimbursements | [`../features/reimbursements/api.md`](../features/reimbursements/api.md) | 5 of the 12 it specifies — the item and lifecycle operations are not built |
+
+**The document describes 27 operations**: 25 under `/api/v1` and the two health
+probes outside it. The reimbursement feature contributes five of them — list,
+create, read, patch and delete a claim. Its other seven operations (three item
+endpoints and four lifecycle actions) are specified in its `api.md` and are
+**not** in the document, because no handler exists. A reader who counts the
+inventory below must not count them.
 
 ## 1. Where the OpenAPI document lives
 
@@ -59,6 +67,12 @@ The matching test for the parsed side of the list endpoints is in
 `tests/list_query.rs`; the rules themselves are in
 [`conventions.md`](conventions.md) §1 and §5.
 
+The same file also asserts the two schema details the reimbursement contract
+depends on: `the_claim_money_fields_are_strings_in_the_document` (a money field
+is `type: string` with four decimals, never `type: number`) and
+`the_update_claim_request_publishes_a_nullable_project_id` (the tri-state is a
+nullable field in the document, not a missing one).
+
 Two consequences for a contributor: adding an operation means adding it to the
 table **and** to the `#[utoipa::path(...)]` annotations, and moving the API to
 another version prefix means changing `API_PREFIX` and nothing else in the
@@ -90,9 +104,9 @@ curl -s http://127.0.0.1:3000/api/v1/openapi.json
 
 To change the document, change the `#[utoipa::path(...)]` annotations on the
 handlers in `src/auth/handlers.rs`, `src/notes/handlers.rs`,
-`src/projects/handlers.rs`, `src/tasks/handlers.rs` and `src/health.rs`, and
-add any new schema to the `components(schemas(...))` list in
-`src/api/routes.rs`.
+`src/projects/handlers.rs`, `src/tasks/handlers.rs`,
+`src/reimbursements/handlers.rs` and `src/health.rs`, and add any new schema to
+the `components(schemas(...))` list in `src/api/routes.rs`.
 
 ## 3. Endpoint inventory
 
@@ -123,13 +137,31 @@ is required.
 | `GET` | `/api/v1/tasks/{task_id}` | bearer | `200` | tasks |
 | `PATCH` | `/api/v1/tasks/{task_id}` | bearer | `200` | tasks |
 | `DELETE` | `/api/v1/tasks/{task_id}` | bearer | `204` | tasks |
+| `GET` | `/api/v1/claims` | bearer | `200` | reimbursements |
+| `POST` | `/api/v1/claims` | bearer | `201` | reimbursements |
+| `GET` | `/api/v1/claims/{claim_id}` | bearer | `200` | reimbursements |
+| `PATCH` | `/api/v1/claims/{claim_id}` | bearer | `200` | reimbursements |
+| `DELETE` | `/api/v1/claims/{claim_id}` | bearer | `204` | reimbursements |
 | `GET` | `/api/v1/openapi.json` | — | `200` | the document itself |
 | `GET` | `/api/v1/docs/` | — | `200` | the explorer |
+
+The first 27 rows are the operations the document describes and the two route
+tables declare, and `tests/openapi_contract.rs` holds them together in both
+directions. The last two rows are the explorer and the document itself: they are
+served, but they are mounted by `swagger_ui` and are **not** operations in the
+document, so neither table lists them and no contract test compares them.
 
 The health endpoints, the OpenAPI routes and the three token endpoints below do
 not require a credential. `POST /api/v1/auth/register`, `POST /api/v1/auth/login`
 and `POST /api/v1/auth/refresh` are unauthenticated by design and are rate
 limited by client IP.
+
+The five claim operations are the whole of the reimbursement surface that
+answers today. `GET /api/v1/claims/{claim_id}` returns an `items` array, which is
+always empty for a claim this API created: the three item endpoints and the four
+lifecycle actions are specified in
+[`../features/reimbursements/api.md`](../features/reimbursements/api.md) and are
+not built, so a claim stays in `draft` with a total of `"0.0000"`.
 
 ## 4. The request pipeline
 

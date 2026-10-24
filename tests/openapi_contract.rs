@@ -20,18 +20,21 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use axum::http::{Method, StatusCode};
+use serde_json::Value;
+use utoipa::openapi::OpenApi;
 use utoipa::openapi::path::{Operation, ParameterIn, PathItem};
 
 use atom_api::api::routes::{API_PREFIX, ROUTE_TABLE, UNVERSIONED_ROUTE_TABLE, openapi_document};
 
 /// The number of operations the locked contract publishes.
 ///
-/// Twenty versioned operations - five authentication, five notes, five projects
-/// and five tasks - plus the two unversioned probes. The two-way comparison
-/// below cannot see an operation that was dropped from the table, the router and
-/// the document together, so the size of the agreed surface is pinned as well:
-/// the contract is that all 22 operations of `/api/v1/openapi.json` still exist.
-const CONTRACT_OPERATIONS: usize = 22;
+/// Twenty-five versioned operations - five authentication, five notes, five
+/// projects, five tasks and five claims - plus the two unversioned probes. The
+/// two-way comparison below cannot see an operation that was dropped from the
+/// table, the router and the document together, so the size of the agreed
+/// surface is pinned as well: the contract is that all 27 operations of
+/// `/api/v1/openapi.json` still exist.
+const CONTRACT_OPERATIONS: usize = 27;
 
 /// Every operation declared on a path item, as `(METHOD, operation)`.
 ///
@@ -477,7 +480,7 @@ fn each_list_endpoint_publishes_its_filter_and_pagination_parameters_once() {
     let document = openapi_document(&common::test_config());
 
     // path, expected query parameters, expected path parameters.
-    let endpoints: [(&str, &[&str], &[&str]); 3] = [
+    let endpoints: [(&str, &[&str], &[&str]); 4] = [
         (
             "/api/v1/notes",
             &["archived", "limit", "offset", "search"],
@@ -488,6 +491,19 @@ fn each_list_endpoint_publishes_its_filter_and_pagination_parameters_once() {
             "/api/v1/projects/{project_id}/tasks",
             &["limit", "offset", "priority", "status"],
             &["project_id"],
+        ),
+        (
+            "/api/v1/claims",
+            &[
+                "currency",
+                "limit",
+                "offset",
+                "search",
+                "status",
+                "submitted_from",
+                "submitted_to",
+            ],
+            &[],
         ),
     ];
 
@@ -543,4 +559,179 @@ fn each_list_endpoint_publishes_its_filter_and_pagination_parameters_once() {
              published: {in_path:?}\n  expected:  {expected_path:?}"
         );
     }
+}
+
+/// One published component schema, as JSON.
+///
+/// The document is read through its serialized form because the shape `utoipa`
+/// produces for an optional field - a `oneOf` with a `null` branch, a
+/// `nullable` flag, or something else again - is a rendering detail of the
+/// library, while "the field is published and can be `null`" is the contract.
+fn component(document: &OpenApi, name: &str) -> Value {
+    let components = document
+        .components
+        .as_ref()
+        .unwrap_or_else(|| panic!("the document must publish a components section"));
+
+    let schema = components.schemas.get(name).unwrap_or_else(|| {
+        panic!(
+            "the document must publish the `{name}` schema; it publishes {:?}",
+            components.schemas.keys().collect::<Vec<&String>>()
+        )
+    });
+
+    serde_json::to_value(schema)
+        .unwrap_or_else(|error| panic!("the `{name}` schema must serialize: {error}"))
+}
+
+/// One published property of one component, as JSON.
+fn property(document: &OpenApi, component_name: &str, property_name: &str) -> Value {
+    let schema = component(document, component_name);
+
+    schema
+        .get("properties")
+        .and_then(|properties| properties.get(property_name))
+        .cloned()
+        .unwrap_or_else(|| {
+            let published: Vec<String> = schema
+                .get("properties")
+                .and_then(Value::as_object)
+                .map(|properties| properties.keys().cloned().collect())
+                .unwrap_or_default();
+            panic!("`{component_name}` must publish `{property_name}`; it publishes {published:?}")
+        })
+}
+
+/// Whether a published schema node declares `type: <name>`.
+///
+/// A node may carry a single type, or the JSON Schema array form - `utoipa`
+/// renders an optional value as `["string", "null"]` - so both are read.
+fn has_type(map: &serde_json::Map<String, Value>, name: &str) -> bool {
+    match map.get("type") {
+        Some(Value::String(published)) => published == name,
+        Some(Value::Array(published)) => published
+            .iter()
+            .any(|published| published.as_str() == Some(name)),
+        _ => false,
+    }
+}
+
+/// Whether a serialized schema carries a `null` branch anywhere.
+fn carries_null(value: &Value) -> bool {
+    match value {
+        Value::Object(map) => {
+            has_type(map, "null")
+                || map.get("nullable") == Some(&Value::Bool(true))
+                || map.values().any(carries_null)
+        }
+        Value::Array(items) => items.iter().any(carries_null),
+        _ => false,
+    }
+}
+
+/// Whether a serialized schema carries a UUID-string branch anywhere.
+fn carries_uuid(value: &Value) -> bool {
+    match value {
+        Value::Object(map) => {
+            (has_type(map, "string")
+                && map.get("format") == Some(&Value::String("uuid".to_string())))
+                || map.values().any(carries_uuid)
+        }
+        Value::Array(items) => items.iter().any(carries_uuid),
+        _ => false,
+    }
+}
+
+/// Every money field is published as a four-decimal string.
+///
+/// `ADR-0007` makes a money value a JSON **string** at scale four. A generated
+/// client reads the document, not this repository, so a `total_amount`
+/// published as `number` - or as a bare `string` with no scale - is the
+/// contract already broken for that client. The pattern is asserted because
+/// "always four decimals" is the part a type alone cannot say.
+#[test]
+fn the_claim_money_fields_are_strings_in_the_document() {
+    let document = openapi_document(&common::test_config());
+
+    let money_fields = [
+        ("ClaimResponse", "total_amount"),
+        ("ItemResponse", "amount"),
+    ];
+
+    for (component_name, field) in money_fields {
+        let schema = property(&document, component_name, field);
+
+        assert_ne!(
+            schema["type"], "number",
+            "{component_name}.{field} must never be published as a number: {schema}"
+        );
+        assert_eq!(
+            schema["type"], "string",
+            "{component_name}.{field} must be published as a JSON string, because the wire form \
+             of money is a string (ADR-0007): {schema}"
+        );
+
+        let pattern = schema["pattern"].as_str().unwrap_or_else(|| {
+            panic!(
+                "{component_name}.{field} must publish the four-decimal pattern, so that a \
+                 generated client knows the scale: {schema}"
+            )
+        });
+
+        assert!(
+            pattern.starts_with('^') && pattern.ends_with('$'),
+            "{component_name}.{field} must publish an anchored pattern: {pattern:?}"
+        );
+        assert!(
+            pattern.contains("{4}"),
+            "{component_name}.{field} must publish exactly four decimal places: {pattern:?}"
+        );
+        assert!(
+            pattern.contains("\\."),
+            "{component_name}.{field} must publish a mandatory decimal point: {pattern:?}"
+        );
+    }
+}
+
+/// `UpdateClaimRequest.project_id` is published, optional, and nullable.
+///
+/// The tri-state of `C-R2` collapses in the document if the field is missing or
+/// required: a generated client then cannot send `null` to clear the link, and
+/// "absent" and "cleared" become one instruction. Both halves are asserted:
+/// the field is not in `required`, and its schema has a `null` branch and a
+/// UUID-string branch.
+#[test]
+fn the_update_claim_request_publishes_a_nullable_project_id() {
+    let document = openapi_document(&common::test_config());
+
+    let schema = component(&document, "UpdateClaimRequest");
+
+    let project_id = property(&document, "UpdateClaimRequest", "project_id");
+
+    let required: Vec<String> = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|required| {
+            required
+                .iter()
+                .filter_map(|name| name.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    assert!(
+        !required.iter().any(|name| name == "project_id"),
+        "UpdateClaimRequest.project_id must be optional, so that omitting it leaves the link \
+         untouched; the required fields are {required:?}"
+    );
+
+    assert!(
+        carries_null(&project_id),
+        "UpdateClaimRequest.project_id must publish a `null` branch, so that a client can clear \
+         the link: {project_id}"
+    );
+    assert!(
+        carries_uuid(&project_id),
+        "UpdateClaimRequest.project_id must publish the UUID form it accepts: {project_id}"
+    );
 }

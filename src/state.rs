@@ -20,6 +20,8 @@ use crate::notes::service::NoteService;
 use crate::projects::repository::ProjectRepository;
 use crate::projects::service::ProjectService;
 use crate::ratelimit::RateLimiter;
+use crate::reimbursements::repository::ClaimRepository;
+use crate::reimbursements::service::ClaimService;
 use crate::tasks::repository::TaskRepository;
 use crate::tasks::service::TaskService;
 use crate::users::repository::UserRepository;
@@ -42,6 +44,8 @@ pub struct AppState {
     pub projects: ProjectService,
     /// The task use cases.
     pub tasks: TaskService,
+    /// The expense claim use cases.
+    pub reimbursements: ClaimService,
 }
 
 impl AppState {
@@ -100,6 +104,11 @@ impl AppState {
             messages.clone(),
             config.api.pagination,
         );
+        let reimbursements = ClaimService::new(
+            ClaimRepository::new(db.clone()),
+            messages.clone(),
+            config.api.pagination,
+        );
 
         Ok(Self {
             config: Arc::new(config),
@@ -109,6 +118,7 @@ impl AppState {
             notes,
             projects,
             tasks,
+            reimbursements,
         })
     }
 }

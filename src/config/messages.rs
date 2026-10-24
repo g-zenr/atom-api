@@ -127,6 +127,10 @@ pub struct ValidationMessages {
     pub not_empty: String,
     /// The value is longer than the accepted maximum.
     pub too_long: String,
+    /// The currency code is not three letters.
+    pub currency_invalid: String,
+    /// A submission-date range runs backwards.
+    pub date_range_order: String,
 }
 
 /// The messages for a resource that does not exist.
@@ -141,6 +145,8 @@ pub struct ResourceMessages {
     pub project_not_found: String,
     /// 404, when the task does not exist.
     pub task_not_found: String,
+    /// 404, when the expense claim does not exist.
+    pub claim_not_found: String,
 }
 
 impl Messages {
