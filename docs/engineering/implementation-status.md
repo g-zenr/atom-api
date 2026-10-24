@@ -56,33 +56,33 @@ A feature is never `Verified` because the code exists or compiles.
 | Ownership isolation | `Verified` | [`../../src/notes/repository.rs`](../../src/notes/repository.rs), [`../../src/projects/repository.rs`](../../src/projects/repository.rs), [`../../src/tasks/repository.rs`](../../src/tasks/repository.rs); the isolation cases in [`../../tests/notes_api.rs`](../../tests/notes_api.rs) and [`../../tests/projects_tasks_api.rs`](../../tests/projects_tasks_api.rs) | 2026-10-22 |
 | Rate limiting on the authentication endpoints | `Verified` | [`../../src/ratelimit.rs`](../../src/ratelimit.rs) - 3 unit tests for the algorithm; `the_authentication_endpoints_are_rate_limited` in [`../../tests/auth_api.rs`](../../tests/auth_api.rs) | 2026-10-22 |
 | CORS allowlist, body limit, request timeout, panic containment | `Verified` | [`../../src/api/mod.rs`](../../src/api/mod.rs), [`../../src/api/extract.rs`](../../src/api/extract.rs); `an_oversized_body_is_refused` and `an_unknown_route_returns_the_error_envelope` in [`../../tests/auth_api.rs`](../../tests/auth_api.rs), `a_slow_request_is_abandoned_with_the_error_envelope` in [`../../tests/projects_tasks_api.rs`](../../tests/projects_tasks_api.rs) | 2026-10-22 |
-| Notes CRUD, archive, search, pagination | `Verified` | [`../../src/notes/`](../../src/notes/) — 5 unit tests; 9 cases in [`../../tests/notes_api.rs`](../../tests/notes_api.rs) | 2026-10-22 |
+| Notes CRUD, archive, search, pagination | `Verified` | [`../../src/notes/`](../../src/notes/) — 5 unit tests; 12 cases in [`../../tests/notes_api.rs`](../../tests/notes_api.rs) | 2026-10-22 |
 | Projects CRUD, search, pagination | `Verified` | [`../../src/projects/`](../../src/projects/) — 5 unit tests; the project cases in [`../../tests/projects_tasks_api.rs`](../../tests/projects_tasks_api.rs) | 2026-10-22 |
 | Tasks CRUD, status, priority, filtering, ordering, completion timestamp | `Verified` | [`../../src/tasks/`](../../src/tasks/) — 7 unit tests; the task cases in [`../../tests/projects_tasks_api.rs`](../../tests/projects_tasks_api.rs) | 2026-10-22 |
 | Pagination convention | `Verified` | [`../../src/pagination.rs`](../../src/pagination.rs) — 5 unit tests; the pagination case in [`../../tests/notes_api.rs`](../../tests/notes_api.rs) | 2026-10-22 |
 | Contract tests against the OpenAPI document | `Verified` | [`../../tests/openapi_contract.rs`](../../tests/openapi_contract.rs) - `the_route_table_and_the_document_describe_the_same_operations` (the tables and the document agree in both directions), `every_route_in_the_table_is_served_by_the_router`, `the_version_prefix_is_declared_once`, `each_list_endpoint_publishes_its_filter_and_pagination_parameters_once` and `each_list_handler_extracts_the_query_string_once`. What is asserted is the operation set, the methods, the version prefix and the list parameter sets; response bodies and schemas are not snapshotted. | 2026-10-24 |
 | The disposable test database guard | `Verified` | [`../../tests/common/mod.rs`](../../tests/common/mod.rs) refuses to start unless the database name contains `test` | 2026-10-22 |
 | Development database seeder (`atom-seed`) | `Verified` | [`../../src/bin/atom-seed.rs`](../../src/bin/atom-seed.rs) and [`../../tests/seeder.rs`](../../tests/seeder.rs) — 18 integration tests and 6 unit tests in the binary, passing in the 225-test run recorded under `ATOM-CHANGE-20261024-005`. Development tooling, not product behaviour: the chain's review rows (`D2.S1` rows 10–11) are outstanding. | 2026-10-24 |
-| Reimbursements schema and row types (no endpoint) | `Implemented` | [`../../migrations/0004_expense_claims.sql`](../../migrations/0004_expense_claims.sql), [`../../src/reimbursements/`](../../src/reimbursements/) (`mod.rs` and `models.rs` only) — 10 cases in [`../../tests/claims_schema.rs`](../../tests/claims_schema.rs) prove the constraints they name, but there is no handler, service, repository, DTO or route, so `/api/v1/openapi.json` is unchanged. The **feature** stays `Accepted` and is not `Verified`: no request can exercise it. | 2026-10-24 |
+| Reimbursements: claims, items and the lifecycle | `Implemented` | [`../../migrations/0004_expense_claims.sql`](../../migrations/0004_expense_claims.sql), [`../../src/reimbursements/`](../../src/reimbursements/) (six modules) — 34 operations on the surface, `CONTRACT_OPERATIONS = 34`; 55 cases in [`../../tests/claims_api.rs`](../../tests/claims_api.rs), 3 in [`../../tests/claims_flow.rs`](../../tests/claims_flow.rs) and 10 in [`../../tests/claims_schema.rs`](../../tests/claims_schema.rs). Not `Verified`: the chains`D2.R2`-`R5` have no `code-reviewer` or `quality-gate` verdict. | 2026-10-24 |
 | CI pipeline | `Implemented` | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) - formatting, linting, the test suite, a release build, the documentation check and the OpenCode configuration check. | 2026-10-22 |
 | Container image | `Implemented` | [`../../Dockerfile`](../../Dockerfile) builds a two-stage image: pinned base images, `--locked`, no toolchain in the runtime stage, unprivileged UID 10001, no secret inside. [`../../.github/workflows/container.yml`](../../.github/workflows/container.yml) builds and verifies it on every relevant change. **Verified** in run [`40011694239`](https://github.com/g-zenr/atom-api/actions/runs/40011694239): `Config.User=10001:10001`, `uid=10001(atom)`, no `cargo` or `rustc` in the runtime stage, no missing shared library, and the binary exits 1 with `required environment variable DATABASE_URL is missing or empty`, which is the evidence that nothing was baked in. | 2026-10-24 |
 | Compile-time SQLx verification | `Proposed` | Queries are checked at run time. The workflow is documented, not enabled. | — |
 | Edge rate limiting | `Proposed` | The requirement in [`../project-truth.md`](../project-truth.md) §9.10 applies to a production deployment. | — |
 | The rest of the roadmap | `Proposed` | By design, apart from the seeder and the reimbursements schema above. See [`../roadmap.md`](../roadmap.md). | — |
 
-The last full run of the test suite on a Windows host was on 2026-10-24, during
-chain `D2.R1`: **225 tests pass** — 117 unit, 3 `atom-docs`, 29 authentication,
-2 explorer, 12 notes, 4 `list_query`, 5 `openapi_contract`, 25 projects and
-tasks, 10 `claims_schema`, 18 `seeder`, 0 shutdown — 0 failed,
-`cargo test --all-targets` exit 0, recorded in
-[`change-log.md`](change-log.md) under `ATOM-CHANGE-20261024-005`. The
-unix-only shutdown tests do not run on Windows, so the same tree is **227** on
-CI's `ubuntu` runner. The run covers the current tree, after the contract work
-under `ATOM-CHANGE-20261024-002`, the seeder under `ATOM-CHANGE-20261024-004`
-and the reimbursements schema under `ATOM-CHANGE-20261024-005`: the
-configuration module contributes 50 unit tests in
+The last full run of the test suite on a Windows host was on 2026-10-24, at
+commit `02c5489` (chain `D2.R5`): **299 tests pass** — 124 unit, 3 `atom-docs`,
+6 `atom-seed`, 29 authentication, 55 claims, 3 claims flow, 10 `claims_schema`,
+2 explorer, 4 `list_query`, 12 notes, 8 `openapi_contract`, 25 projects and
+tasks, 18 `seeder`, 0 shutdown — 0 failed. The split is the one the six
+gates printed.
+On CI's `ubuntu` runner the same tree is **301**, because the two unix-only
+shutdown tests run there. The run covers the current tree, including the claim
+CRUD under `ATOM-CHANGE-20261024-006`, items and the lifecycle under `-007`, and
+the flow and sweep under the `D2.R5` commit. The configuration module
+contributes 50 unit tests in
 [`../../src/config/tests.rs`](../../src/config/tests.rs), the shared validators
-four in [`../../src/helpers/validation.rs`](../../src/helpers/validation.rs),
+seven in [`../../src/helpers/validation.rs`](../../src/helpers/validation.rs),
 the pagination convention five in
 [`../../src/pagination.rs`](../../src/pagination.rs), and the seeder binary six
 in [`../../src/bin/atom-seed.rs`](../../src/bin/atom-seed.rs). That is why the

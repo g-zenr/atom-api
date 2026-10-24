@@ -42,6 +42,59 @@ define the target state. The requirements live in
 
 ## Entries
 
+### ATOM-CHANGE-20261024-008 - The reimbursement journey and the ownership sweep
+
+**Date:** 2026-10-24 (UTC)
+**Type:** Test (cross-cutting)
+**Author:** The ATOM engineering team - the orchestrator with the `test-engineer` and `docs` subagents.
+**Status:** Complete - **chain `D2.R5`, review rows outstanding**
+
+#### Summary
+
+Three tests that the per-operation suite cannot replace, taking the suite from
+**296 to 299**. No production code changed.
+
+#### What changed
+
+| Test | What it proves that nothing else did |
+| ---- | ------------------------------------ |
+| `the_whole_reimbursement_journey_from_registration_to_payment` | The twelve operations agree about state across one account's whole journey. It asserts which of the three lifecycle stamps is set at each step, the stored total against an independently computed `i128` sum, item order by `incurred_on` while posting out of order, and full-JSON equality after each refusal at `paid` |
+| `the_second_account_sees_not_found_on_every_reimbursement_operation` | The whole surface is enumerated: five claims (one per status) times eleven claim-addressed operations, 55 requests, all `404`, then all five of the owner's details must equal their pre-sweep JSON exactly |
+| `the_seeded_claims_are_readable_through_the_api` | The seeded dataset read through HTTP, which no earlier test did; it skips with a printed reason when the seeder has not run |
+
+#### Three gaps the flow found that the per-operation tests had missed
+
+1. **`409` versus ownership precedence on a terminal claim.** A second account
+   acting on a *paid* claim gets `404`, not `409` - the ownership check runs
+   before the state check. Nothing had asserted that ordering.
+2. **`paid` was terminal for four actions, not seven.** The *add* path was
+   already covered on a paid claim, but `PATCH` and `DELETE` of an item were
+   never checked against one; the journey now asserts all three.
+3. **"A refused write changes nothing" was never asserted as byte equality.**
+   The earlier tests compared four named fields; comparing the whole detail JSON
+   also catches a moved `updated_at` or a mutated description.
+
+#### A brief that was wrong, and was refused
+
+The orchestrator's brief asked the sweep to assert `404` on all twelve
+operations including `GET /claims`. That operation publishes `200` with the
+caller's own set, so asserting `404` would either fail or be a lie. The
+`test-engineer` refused and asserted an empty page with `total: 0` instead, with
+the reason in the test's own doc comment. The deviation is recorded here because
+it is the correct response to a wrong brief.
+
+#### Checks and results
+
+`fmt` 0, `clippy -D warnings` 0, `test --all-targets` 0 (**299**),
+`check --no-default-features` 0, `atom-docs` 0, `atom-docs --strict` 0.
+
+#### What is not verified
+
+No reviewer has read the reimbursement chains. The seeded case is opportunistic:
+on a fresh database it skips, because the seeder has not run, so it is covered
+when a seeder run has touched the database, not on every run. The `408`/`500`
+paths on these routes remain unexercised.
+
 ### ATOM-CHANGE-20261024-007 - Item endpoints and the claim lifecycle
 
 **Date:** 2026-10-24 (UTC)
@@ -103,11 +156,23 @@ the total to `153.9000`; a delete moved it to `129.9000`; `submit`, `approve` an
 items `422` naming `items`; `"12.5"` `422` naming `amount`; a `javascript:`
 receipt `422`; an item under the wrong claim `404`.
 
+#### Correction (2026-10-24) — the flow layer, and which item writes
+
+Two statements in this entry were overtaken by the next chain or were wider than
+the truth:
+
+- "the flow test lands in `R5`" is now historical. It landed:
+  `ATOM-CHANGE-20261024-008` records it, with the suite at 299.
+- Gap 2 says the item writes were never checked against a paid claim. The **add**
+  path was: `an_item_cannot_be_added_to_a_submitted_claim` loops over
+  `submitted`, `approved`, `rejected` and `paid`. What was unchecked is `PATCH`
+  and `DELETE` on a paid claim, which the journey now asserts. The narrower claim
+  is the correct one.
+
 #### What is not verified
 
 No reviewer has read this chain. The `408`/`500` paths on these routes are
-unexercised, the flow test lands in `R5`, and the seeded dataset has not been
-read through the API.
+unexercised, and the flow layer is `ATOM-CHANGE-20261024-008`.
 
 ### ATOM-CHANGE-20261024-006 - Claim CRUD for reimbursements
 

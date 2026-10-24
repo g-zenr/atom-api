@@ -112,10 +112,10 @@ step deliberately, and the rows are renamed only between runs.
 | D1 | Product intake | **done (checkpoint PARKED: review outstanding)** | `ec41105` | Documents only. **Committed 2026-10-24**: `project-truth.md` §18 (18.1 reimbursements `REIMB-R01`…`R10`, 18.2 job applications, 18.3 local ML, 18.4 the provisional-status note), three feature directories with five documents each, `ADR-0007`/`0008`/`0009`, the proposed schema, `docs/database/seeding.md`, the money convention, the test matrix, `Q-11` answered and `Q-13` opened for `A1`–`A6`. The only code change is the checker's `FEATURES` list, 4 → 7. Nothing in it is `Implemented` or `Verified`. Rows 10 and 11 of its checkpoint did not run — see `## Checkpoints` and `## Parked`. |
 | D2.S1 | Seeder foundation | **done (checkpoint rows 10-11 outstanding)** | `5688de7` (+ `b635cc7`, `77a9b79`) | `atom-seed` for users, notes, projects and tasks: guards, determinism, `--reset`, 16 integration and 6 unit tests, docs. No new dependency. **Not pushed.** The two follow-ups were written after the checkpoint record and are not yet in it: `b635cc7` serialises the seeder suite with a PostgreSQL advisory lock and adds two assertions, `77a9b79` pins the 22-operation surface and asserts the canonical error code. |
 | D2.R1 | Reimbursements - schema and types | **done** (rows 10-11 outstanding) | `908166b` | Contract `C-R1`. `migrations/0004_expense_claims.sql`, `src/reimbursements/{mod,models}.rs`, seeder S2 (claims 1/25/50, items 0/48/98), `tests/claims_schema.rs`, 213 -> 225 tests, six gates green. No endpoint: `openapi.json` unchanged. |
-| D2.R2 | Claim CRUD | **done** (rows 10-11 outstanding) | pending commit | Five claim endpoints, 27 operations, 266 tests. |
+| D2.R2 | Claim CRUD | **done** (rows 10-11 outstanding) | `6595c21` | Five claim endpoints, 27 operations, 266 tests. |
 | D2.R3 | Items and the total invariant | **done** (rows 10-11 outstanding) | `93fb2f0` | Three item routes, one transaction per write, `validate_money`. |
 | D2.R4 | Lifecycle actions | **done** (rows 10-11 outstanding) | `93fb2f0` | Four actions, one guarded `UPDATE` each, reopen clears both stamps. |
-| D2.R5 | Flow and contract tests | pending | — | Uses the second seeded account for the ownership sweep. |
+| D2.R5 | Flow and contract tests | **done** (rows 10-11 outstanding) | `02c5489` | End-to-end journey, 55-request ownership sweep, 296 -> 299. |
 | D2.R6 | Close: review, gate, commit | pending | — | Also D2.S2: extend the seeder with claims. |
 | D3 | Job applications | pending | — | Blocked by D2. |
 | D3.S3 | Seeder: companies and applications | pending | — | Lands with the Day 3 close. |
@@ -800,6 +800,27 @@ happens to contain the missing files.
 
 ---
 
+### Break-and-restore proofs for `D2.R2`-`D2.R5`
+
+Each was performed by the agent that owned the test, by changing the test's own
+expectation, observing red, restoring, observing green. The honest limit is the
+one recorded for `D0`: breaking a test's own expectation proves the assertion is
+evaluated, not that the production change is what makes it green. What it adds
+is the observed response, which is quoted in each case.
+
+| Chain | Test | Break | Red | Green |
+| ----- | ---- | ----- | --- | ----- |
+| `R2` | `a_claim_of_another_user_is_invisible` | expected `403` instead of `404` | `left: 404 right: 403`, body `{"error":{"code":"not_found",...}}` | ok |
+| `R2` | `the_claim_status_is_not_patchable` | expected `"paid"` instead of `"draft"` | `left: String("draft") right: "paid"` | ok |
+| `R3`/`R4` | `every_forbidden_transition_is_refused` | expected `200` instead of `409` | `left: 409 right: 200`, body `{"error":{"code":"conflict","message":"The claim's current status does not allow this action."}}` | ok |
+| `R3`/`R4` | `the_claim_total_equals_the_sum_of_its_items` | perturbed the computed sum by one unit | `left: "125.8000" right: "125.7999"` — the stored total, not the mutating response | ok |
+| `R5` | `the_whole_reimbursement_journey_from_registration_to_payment` | expected `"submitted"` at the payment step | `left: String("paid") right: "submitted"` | ok |
+| `R5` | `the_seeded_claims_are_readable_through_the_api` | pointed the seeded email at an address that does not exist | the skip path printed its reason and passed, which is what it is for | ok |
+
+`quality-gate` could not reproduce any of these: its shell was denied, so it
+reported them as unverified rather than accepting them. That is recorded in its
+scorecard row above, not papered over.
+
 ## Failures
 
 One line per repair, so the next chain does not repeat it.
@@ -1054,6 +1075,26 @@ Contract `C-R3/C-R4`. Agents: `rust-backend`, `test-engineer`, `docs`.
 - Item writes and the total recompute are one transaction, so `REIMB-R03` cannot be violated by a partial failure.
 - The lifecycle is one guarded `UPDATE` per action, so two concurrent actions cannot both win; the transition table is consulted on the error path to choose `409` versus the submit `422`.
 - Lifecycle stamps use `clock_timestamp()`, not `NOW()`: `NOW()` is the transaction start, which after waiting on the row lock can predate the `submitted_at` it is compared against, and `expense_claims_timestamp_order_chk` would then reject a correct approval as `23514`. That is a defect the hand-run would have surfaced as an intermittent 500.
+
+### D2.R5 - Flow and contract, 2026-10-24
+
+Contract `C-R3/C-R4` (the `R5` row of `PHASE=2`). Agents: `test-engineer`, `docs`.
+
+| # | Criterion | Evidence | Pass |
+| - | --------- | -------- | ---- |
+| 1 | All six gates green | `fmt=0`, `clippy=0`, `test=0`, `nodefault=0`, `docs=0`, `strict=0`, run by the orchestrator at `02c5489` | **Pass** |
+| 2 | Every acceptance criterion maps to a test | Three cases in `tests/claims_flow.rs`, one per published behaviour the per-operation suite cannot reach | **Pass** |
+| 3 | New tests at least the contract's target | **296 -> 299** | **Pass** |
+| 4 | A flow test exercises the chain end to end | `the_whole_reimbursement_journey_from_registration_to_payment`: register, login, project, claim, three items, submit, approve, pay, list, then the second account | **Pass** |
+| 5 | Ownership: the second account gets 404 | `the_second_account_sees_not_found_on_every_reimbursement_operation`: five claims, one per status, eleven claim-addressed operations each, 55 requests, all `404`; `GET /claims` is asserted as an empty page with `total: 0` because it publishes `200`, and asserting `404` there would be a false test | **Pass** |
+| 6 | Docs updated | reimbursements `status`/`testing`/`specification`/`architecture`, `strategy.md`, `implementation-status.md`, `docs/README.md`, `docs/api/README.md` | **Pass** |
+| 7 | Seeder updated for every new table | No table change. The seeded dataset is read through the API by `the_seeded_claims_are_readable_through_the_api`, which **skips with a printed reason** when the seeder has not run: covered when a seeder run has touched the database, not guaranteed on a clean CI run | **Pass with caveat** |
+| 8 | OpenAPI changed only as intended | No operation added in this chain; 34 still asserted in both directions | **Pass** |
+| 9 | No forbidden construct added | Test-only change plus documents; no `unwrap`/`expect` outside a test, no `allow`, no `ignore` | **Pass** |
+| 10 | code-reviewer pass on the chain diff | **Not run.** | **Fail** |
+| 11 | quality-gate pass on the evidence | **Attempted and could not execute**: its shell was denied, so it read the tree statically and reported every gate as `not run` rather than passing. Its static findings are recorded below and were fixed. | **Fail** |
+
+**Decision: ADVANCE on rows 1-9; rows 10-11 outstanding.** The gate's own report is the evidence that the review rows are not decoration: it refused to record a pass for a command it could not run, and it found four ledger and document defects that this session then fixed.
 
 ## Parked
 
