@@ -74,11 +74,12 @@ impl Embedder for Deterministic {
             hasher.update(text.as_bytes());
             let digest = hasher.finalize();
 
-            for chunk in digest.chunks_exact(4) {
+            let chunks = digest.as_slice().as_chunks::<4>().0;
+            for chunk in chunks {
                 if vector.len() == self.dimension {
                     break;
                 }
-                let raw = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                let raw = u32::from_le_bytes(*chunk);
                 // Map the unsigned value onto [-1, 1).
                 vector.push((raw as f32 / u32::MAX as f32) * 2.0 - 1.0);
             }

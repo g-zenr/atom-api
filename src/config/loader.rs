@@ -431,12 +431,12 @@ pub(super) fn discover_directory(
         return Ok(Some(path));
     }
 
-    if let Ok(executable) = std::env::current_exe() {
-        if let Some(parent) = executable.parent() {
-            let candidate = parent.join("config");
-            if candidate.is_dir() {
-                return Ok(Some(candidate));
-            }
+    if let Ok(executable) = std::env::current_exe()
+        && let Some(parent) = executable.parent()
+    {
+        let candidate = parent.join("config");
+        if candidate.is_dir() {
+            return Ok(Some(candidate));
         }
     }
 

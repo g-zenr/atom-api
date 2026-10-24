@@ -892,3 +892,37 @@ outstanding.
 **Related.** [`../../docker-compose.yml`](../../docker-compose.yml),
 [`../../scripts/create-test-database.sh`](../../scripts/create-test-database.sh),
 `KI-006`, `KI-020`.
+
+### KI-022 - The default build now compiles Burn, which costs 21 minutes and 12.9 GB
+
+**Status:** Open (accepted for Phase 2) · **Severity:** Low
+
+**Description.** `ADR-0008` §7.3 puts `burn` behind an `ml` Cargo feature that
+is **on by default**, so that a plain `cargo build` and `cargo test` exercise
+the path a deployment uses. The consequence is that every default build of
+[`../../Cargo.toml`](../../Cargo.toml) now compiles the Burn graph
+(`burn-core`, `burn-tensor`, `burn-nn`, `burn-linalg`) on the pure-Rust `flex`
+backend, and burn 0.22 declares an MSRV of **rustc 1.95**.
+
+**Impact.** Measured on the development machine (Windows, `x86_64-pc-windows-msvc`,
+`--release`): a clean build of the burn graph took **21 m 31 s**, and
+`target/` reached **12.9 GB**. A contributor on an older toolchain gets an
+MSRV error rather than a working build; the development machine's `stable` was
+1.92.0 and had to be updated to 1.99.1. Nothing about a *request* is affected:
+the spike measured 0.0414 ms per text and 93.6 MiB of peak RSS at steady state.
+
+**Workaround.** `cargo build --no-default-features` and `cargo test
+--no-default-features` build and test the whole API without Burn; the
+`atom-ml-spike` binary declares `required-features = ["ml"]`, so it is skipped
+rather than reported as broken. A production build that does not enable ML
+should pass `--no-default-features`, as the `docs` feature already expects.
+
+**Remediation status.** Accepted, not scheduled to change: turning `ml` off by
+default would defeat the reason it is on (`ADR-0008` §7.3). The cost is recorded
+so that CI cache sizing and contributor expectations are set deliberately. If
+the build cost becomes a problem, the decision to revisit is the default value
+of the feature, not the dependency.
+
+**Related.** [`../../Cargo.toml`](../../Cargo.toml),
+[`../decisions/ADR-0008-local-pure-rust-ml.md`](../decisions/ADR-0008-local-pure-rust-ml.md) §7.3,
+`ATOM-CHANGE-20261024-010`.

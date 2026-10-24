@@ -1350,7 +1350,7 @@ async fn seed_items(
 
             // Some rows carry a receipt and some do not, so both branches of
             // `expense_items_receipt_url_chk` have data behind them.
-            let receipt_url = if item_index % 3 == 0 {
+            let receipt_url = if item_index.is_multiple_of(3) {
                 Some(format!(
                     "https://receipts.atom.local/atom-seed/expense-items/{item_index}.pdf"
                 ))

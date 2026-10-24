@@ -236,33 +236,33 @@ fn link_targets(text: &str) -> Vec<String> {
 
     while index < bytes.len() {
         // Inline link: [label](target)
-        if bytes[index] == b'[' {
-            if let Some(close) = text[index..].find("](") {
-                let after = index + close + 2;
-                if let Some(end) = text[after..].find(')') {
-                    let target = text[after..after + end].trim();
-                    targets.push(target.to_string());
-                    index = after + end + 1;
-                    continue;
-                }
+        if bytes[index] == b'['
+            && let Some(close) = text[index..].find("](")
+        {
+            let after = index + close + 2;
+            if let Some(end) = text[after..].find(')') {
+                let target = text[after..after + end].trim();
+                targets.push(target.to_string());
+                index = after + end + 1;
+                continue;
             }
         }
 
         // Reference link: [label]: target
-        if bytes[index] == b'[' {
-            if let Some(close) = text[index..].find("]:") {
-                let after = index + close + 2;
-                let line_end = text[after..]
-                    .find('\n')
-                    .map(|offset| offset + after)
-                    .unwrap_or(text.len());
-                let target = text[after..line_end].trim();
-                if !target.is_empty() {
-                    targets.push(target.to_string());
-                }
-                index = line_end;
-                continue;
+        if bytes[index] == b'['
+            && let Some(close) = text[index..].find("]:")
+        {
+            let after = index + close + 2;
+            let line_end = text[after..]
+                .find('\n')
+                .map(|offset| offset + after)
+                .unwrap_or(text.len());
+            let target = text[after..line_end].trim();
+            if !target.is_empty() {
+                targets.push(target.to_string());
             }
+            index = line_end;
+            continue;
         }
 
         index += 1;

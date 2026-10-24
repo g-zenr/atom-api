@@ -106,6 +106,65 @@ The spike measures **throughput and memory**, not **embedding quality**. Whether
 these vectors retrieve the right notes is `M6`'s 15-query evaluation, and no
 number here speaks to it.
 
+#### Correction (2026-10-24) — the timing row, and the toolchain
+
+Two corrections, both recorded rather than edited away.
+
+1. **The latency figures above were not taken on an idle machine.** That run
+   overlapped a release build of this same crate on the same host, so the CPU
+   was shared. A repeat run of the committed source, in `--release`, on an
+   otherwise idle machine measured:
+
+   | Measurement | Contended run (above) | Idle run (quote this one) |
+   | ----------- | --------------------- | ------------------------- |
+   | Model construction | 422 ms | **96 ms** |
+   | First inference | 1.69 ms | **0.1933 ms** |
+   | Steady state, 1 text | 1.15 ms | **0.0170 ms** mean (0.0140 min, 0.2262 max) |
+   | Steady state, 10 texts | 1.85 ms | **0.0178 ms** mean (0.0117 min) |
+   | Steady state, 100 texts | 2.98 ms | **0.0198 ms** mean (0.0123 min) |
+   | Peak RSS | 93.8 MiB | **93.5 MiB** |
+
+   Run-to-run variance on an idle machine is roughly a factor of two: an earlier
+   idle build of the same code measured 0.0365 / 0.0476 / 0.0414 ms. The table
+   quotes the final build.
+
+   The verdict does not depend on which row is quoted — both are two to three
+   orders of magnitude inside the 2 s `ml.timeout_seconds` default — but the
+   idle figures are the honest steady-state cost. Determinism (bit-identical
+   for the same input, different for a different input), the `Disabled` error
+   `ml_disabled`, the file-free `Deterministic` path, the 384 dimensions and the
+   `0.059342` L2 norm were identical in both runs.
+
+2. **`rust-version` is now `1.95`, not `1.85`.** `burn` 0.22 declares an MSRV of
+   1.95, and the `ml` feature is on by default, so the old claim was false for
+   any plain build. The development machine's `stable` was 1.92.0 and had to be
+   updated to 1.99.1 to build the dependency at all; CI tracks
+   `dtolnay/rust-toolchain@stable`, so CI was already at or above 1.95. The
+   discipline this exposes is recorded as `KI-022`.
+
+3. **The latency above is a lower bound, not a MiniLM forward pass.** The
+   measured network is an embedding lookup over the real
+   `embeddings.word_embeddings.weight`, a mean-pool, and a 384-to-384
+   projection using the real `pooler.dense` tensors. **No attention, no
+   feed-forward block and no LayerNorm ran**, and the tokenizer is a stable
+   stand-in (whitespace plus a hash into the vocabulary), not WordPiece. So the
+   numbers measure the *plumbing* - that Burn, `flex`, a real 86.66 MB
+   SafeTensors file and a forward pass work in-process on this machine - and
+   they **understate** what a six-layer encoder costs. `M3` must re-measure with
+   the encoder before anything plans a timeout around this figure. The vectors
+   themselves are not meaningful for retrieval; that is `M6`'s fixture
+   evaluation, and no number here speaks to it.
+
+**Verified in this session, by the `rust-backend` subagent, from the repository
+root on Windows:** `cargo fmt --all` (0), `cargo clippy --all-targets
+--all-features -- -D warnings` (0), `cargo check --no-default-features
+--all-targets --locked` (0, with `burn` absent from the graph — `cargo tree
+--no-default-features` lists no `burn*` crate), `cargo test --lib --locked`
+(144 passed, 0 failed). A clean `cargo build --release` of the burn graph took
+**21 m 31 s** and the tree grew to **12.9 GB** under `target/`; the release
+spike binary is **2.21 MiB**. The full `--all-targets` suite and `atom-docs`
+were **not** re-run in this session and the `387` above is not re-asserted here.
+
 ### ATOM-CHANGE-20261024-009 - Job application tracking: schema, endpoints, stage machine and flow
 
 **Date:** 2026-10-24 (UTC)

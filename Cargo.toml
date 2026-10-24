@@ -2,7 +2,9 @@
 name = "atom-api"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+# The minimum is set by `burn` 0.22, which the default `ml` feature enables and
+# which declares rustc 1.95. CI tracks `stable`, so this matches what it uses.
+rust-version = "1.95"
 description = "ATOM — API-first personal workspace platform (Phase 1 backend)"
 # The licence has not been chosen yet. `publish = false` keeps the crate
 # from being published to a registry by accident. See CONTRIBUTING.md.

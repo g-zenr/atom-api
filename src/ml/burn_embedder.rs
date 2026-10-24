@@ -382,7 +382,7 @@ fn read_header(file: &mut File) -> Result<(HashMap<String, TensorInfo>, u64), Ml
 /// Read one tensor as `f32`, skipping everything else in the file.
 fn read_f32(file: &mut File, data_start: u64, info: &TensorInfo) -> Result<Vec<f32>, MlError> {
     let byte_len = info.end.saturating_sub(info.start);
-    if byte_len % 4 != 0 {
+    if !byte_len.is_multiple_of(4) {
         return Err(MlError::Model {
             message: format!("tensor byte length {byte_len} is not a multiple of four"),
         });
@@ -400,8 +400,8 @@ fn read_f32(file: &mut File, data_start: u64, info: &TensorInfo) -> Result<Vec<f
         })?;
 
     let mut values = Vec::with_capacity(byte_len / 4);
-    for chunk in buffer.chunks_exact(4) {
-        values.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+    for chunk in buffer.as_chunks::<4>().0 {
+        values.push(f32::from_le_bytes(*chunk));
     }
 
     Ok(values)

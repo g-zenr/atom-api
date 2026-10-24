@@ -16,6 +16,16 @@ plan, recorded so that the implementing change has a shape to follow. It is
 **accepted but not built**, and the text is corrected whenever the
 implementation and this plan disagree.
 
+**Correction (2026-10-24, chain `D4.M1`).** `src/ml/` now exists, but only as
+the spike surface: `embedder.rs` (the trait and the error type), `disabled.rs`,
+`deterministic.rs` and `burn_embedder.rs` (the `flex` experiment). There is
+still **no** `service.rs`, `repository.rs`, `dto.rs`, no `embeddings`
+migration, no route and no `ml.*` setting; every reference to them below is
+still the plan. The whole module is gated behind the `ml` Cargo feature. The
+measurements that let `M3` proceed are in
+[`../../engineering/change-log.md`](../../engineering/change-log.md) under
+`ATOM-CHANGE-20261024-010`.
+
 ## 1. Responsibilities
 
 | Module | Responsibility |
