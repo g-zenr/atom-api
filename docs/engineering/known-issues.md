@@ -1,7 +1,7 @@
 # ATOM known issues
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-25
 > **Owner:** maintained by the `docs` agent
 
 Confirmed defects, limitations and gaps: things that are known to be wrong, to
@@ -686,7 +686,7 @@ test `a_body_limit_above_the_reader_ceiling_is_refused`.
 | `KI-019` | The shutdown drain has a test that has not run on a unix host | Closed | Low |
 | `KI-020` | The seeder's database-name guard refused the repository's own default database | Closed | Medium |
 | `KI-021` | The compose volume was mounted where PostgreSQL 18 no longer keeps its data | Closed | High |
-
+| `KI-023` | The quality gate cannot execute a gate, so no chain has a verdict | Open | High |
 ### KI-019 — The shutdown drain had a test that had not run on a unix host
 
 **Status:** Closed · **Severity:** Low · **Closed:** 2026-10-24
@@ -926,3 +926,51 @@ of the feature, not the dependency.
 **Related.** [`../../Cargo.toml`](../../Cargo.toml),
 [`../decisions/ADR-0008-local-pure-rust-ml.md`](../decisions/ADR-0008-local-pure-rust-ml.md) §7.3,
 `ATOM-CHANGE-20261024-010`.
+
+---
+
+### KI-023 - The quality gate cannot execute a gate, so no chain has ever had a verdict
+
+**Status:** Open - **Severity:** High - **Recorded:** 2026-10-25
+
+**Description.** `.opencode/agents/quality-gate.md` denies `shell` with a
+catch-all and then allows a short list: `git status *`, `git diff *`,
+`git log *`, `cargo fmt --check *`, `cargo clippy *`, `cargo check *`,
+`cargo test *`, `cargo build *`. The patterns match a **whole command string**.
+A gate that needs a test database cannot be written as a bare `cargo test`; it
+has to be run as a script that sets the variable first, which the pattern does
+not match. `cargo run` is absent entirely, so the documentation checker cannot
+be run at all, and `psql` and `gh` are absent, so no database or CI evidence can
+be gathered.
+
+**Impact.** Every `quality-gate` attempt in the Phase 2 run reported all six
+gates as **not run**. To its credit each one said so rather than recording a
+pass, and two of them still found real defects by reading the tree. But a gate
+that cannot run a gate is not a gate, and the consequence is visible in the
+record: **no chain in the run has a verdict**, so nothing is `Verified`, and
+three features sit at `Implemented` with 483 passing tests and no independent
+evidence.
+
+**Workaround used in the run.** The orchestrator ran the six gates itself and
+recorded the raw exit codes in the ledger. That is honest but it is
+self-verification, which is exactly what the gate exists to avoid.
+
+**Recommended fix, in order.**
+
+1. Add `cargo run *` and `psql *` to the allow-list, so `atom-docs` and the
+   database evidence are reachable.
+2. Let the gate set the test URL without a shell wrapper: either read
+   `TEST_DATABASE_URL` from the agent's own environment, or add an allow entry
+   for the exact compound form the team standardises on, for example
+   `$env:TEST_DATABASE_URL*`.
+3. If neither is acceptable, give the gate a single read-only entry point - one
+   `scripts/gate.ps1` that runs all six and prints the exit codes - and allow
+   only that. A gate with one allowed command is easier to reason about than a
+   glob list, and it cannot be widened by accident.
+
+**Not a documentation defect.** Nothing in `docs/` is wrong because of this; what
+is missing is evidence, and no amount of prose substitutes for it.
+
+**Related.** [`.opencode/agents/quality-gate.md`](../../.opencode/agents/quality-gate.md),
+[`../testing/verification-policy.md`](../testing/verification-policy.md),
+[`runs/chain/ledger.md`](runs/chain/ledger.md) `## Checkpoints`.
