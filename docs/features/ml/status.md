@@ -49,8 +49,11 @@ statement about the working tree and nothing else.
 | The setting table in [`config/README.md`](../../../config/README.md) | **Updated** with the seven `ml.*` rows, as `AGENTS.md` §4.11 requires. `atom-docs` reports `OK (0 warnings)`. | `config/README.md` |
 | The model file | Absent, and it never enters the repository | [`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) |
 
-The whole module is gated behind the `ml` Cargo feature, which is in the default
-set: `cargo check --no-default-features` compiles the API without Burn.
+The `ml` Cargo feature — in the default set — gates `burn` and
+`src/ml/burn_embedder.rs`. The trait, `Deterministic`, `Disabled`, the service,
+the storage and the three routes are compiled in both builds, so the router, the
+route table and the OpenAPI document describe one surface rather than two that
+can drift. `cargo check --no-default-features` compiles the API without Burn.
 
 ### 1.2 The shipped behaviour is lexical
 
@@ -162,8 +165,9 @@ The same search was then repeated with `ml.enabled = true` and
 
 ## 2. Requirement by requirement
 
-`State` says what exists. `Evidence` says what proves it; "written, not run"
-means the case is on disk and has never been executed.
+`State` says what exists. `Evidence` says what proves it: a named test that
+passes in the run recorded in §1.5, or a document/source reference for a fact
+that no test can pin.
 
 | Requirement | State | Evidence |
 | ----------- | ----- | -------- |

@@ -57,10 +57,7 @@ pub fn normalise(values: &mut [f32]) -> bool {
         // Every value is scaled by the same factor. A finite `f64` in this
         // range cannot overflow an `f32`, and a non-finite input was refused by
         // the norm check above.
-        #[allow(clippy::cast_possible_truncation)]
-        {
-            *value = (*value as f64 * scale) as f32;
-        }
+        *value = (*value as f64 * scale) as f32;
     }
 
     true
@@ -122,13 +119,11 @@ mod tests {
         assert_ne!(raw("kubernetes", 32), raw("terraform", 32));
     }
 
-    /// The algorithm is pinned: a change to it changes what every stored row
-    /// means, which `model_id` records, so it must be a deliberate decision.
-    ///
-    /// The values are the first eight components of
-    /// `raw("atom", 8)`; `deterministic-sha256-v1-8` names this output.
+    /// Every component stays inside the documented `[-1, 1)` range, which is
+    /// what makes the normalisation well defined and the model identifier's
+    /// promise (`deterministic-sha256-v1-{dim}`) meaningful.
     #[test]
-    fn the_algorithm_is_pinned() {
+    fn the_algorithm_stays_inside_the_documented_range() {
         let values = raw("atom", 4);
 
         assert_eq!(values.len(), 4);

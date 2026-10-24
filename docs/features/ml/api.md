@@ -41,10 +41,11 @@ All three are authenticated. There is no anonymous operation in this feature,
 and a request without a valid token is `401 unauthorized`.
 
 `POST /notes/search` is owned by this module even though it lives under
-`/notes`. The router has a dynamic segment `{note_id}` there, so
-`GET /api/v1/notes/search` is matched by the note read and answers `400`,
-because `search` is not a UUID; it is not answered by this operation. A
-contract test pins that fact rather than claiming the path is unserved.
+`/notes`. The router also has a dynamic segment `{note_id}` there, and axum
+gives a **static** path precedence over a dynamic one, so `GET
+/api/v1/notes/search` is answered `405 Method Not Allowed` by the search route
+itself - not by the note read, and not `400`. A contract test pins that, because
+it is the fact that proves the note read does not shadow the operation.
 
 ## 2. Shared shapes
 
