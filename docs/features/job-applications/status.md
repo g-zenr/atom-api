@@ -1,4 +1,4 @@
-**Status:** Accepted
+**Status:** Implemented
 
 # Job applications — status
 
@@ -8,97 +8,144 @@
 
 ## 1. The status
 
-The feature is **`Accepted`**. The requirements `JOB-R01`…`R09` are agreed in
-[`project-truth.md`](../../project-truth.md) §18.2, with acceptance criteria.
-Chain `C-J1` built the **schema half** on 2026-10-24; the **behaviour half** has
-not been started.
+The feature is **`Implemented`**, with the **endpoint layer complete**: the
+fourteen operations of [api.md](api.md) are mounted in `src/api/routes.rs` and
+published in `/api/v1/openapi.json`, which now describes **48 operations**
+(34 before this chain). The module's five layers are in the tree, and the
+requirement table in §1.2 names, for each of `JOB-R01`…`R09`, the code that
+exists and the test that asserts it.
 
-Exactly what is now true: `migrations/0005_job_applications.sql` creates the two
-enum types `job_application_status` and `application_event_kind` and the three
-tables `companies`, `job_applications` and `application_events`, with every
-constraint, index and `ON DELETE` action that
-[`schema.md`](../../database/schema.md) §11.3–§11.5 defines;
-`src/job_applications/` holds `mod.rs` and `models.rs` only — the two enums and
-the `Company`, `JobApplication` and `ApplicationEvent` row structs — and is
-declared in `src/lib.rs`; and the seeder writes companies, applications and
-events (the `dev` profile inserts 20 applications, 12 companies and 50 events;
-`minimal` 1 / 5 / 1 and `demo` 40 / 18 / 100), with `--reset` deleting the three
-tables by `user_id`.
+It is **not `Verified`**, and this document says so deliberately:
 
-**No endpoint exists.** There is no handler, service, repository or DTO, no
-route is registered, and `/api/v1/openapi.json` still lists **34 operations**.
-Nothing in this feature is therefore `Implemented` or `Verified` at the API
-level: a table, a row struct and a seeded row are not a behaviour.
+- **No reviewer has read the chain.** Chains `J2`/`J3`/`J4` were implemented in
+  one wave and no review row exists for it. A green gate is not a review.
+- **No run is recorded here.** `tests/job_applications_api.rs` (51 cases),
+  `tests/jobs_schema.rs` (11), the job cases in `tests/openapi_contract.rs` and
+  the seeder case all exist in the tree. Not one of their results is quoted in
+  this document, and this document does not invent one.
+- `Implemented` is the `AGENTS.md` §6 word for "the code exists and compiles".
+  The existence half is checkable against the tree; the compile half belongs to
+  the chain's gate. **`cargo` was not run while this document was written**,
+  because two agents were writing the tree at the time. The first compile-and-test
+  evidence will be the chain's gate, not this file.
 
-The schema is not `Verified` either. `tests/jobs_schema.rs` holds eleven cases
-and `tests/seeder.rs` one case for this feature, but no run of them is recorded
-in this document, and this document does not claim a measurement it did not
-make.
+### 1.1 What exists
 
-### 1.1 The requirements, half by half
+| Item | In the tree? | Detail |
+| ---- | ------------ | ------ |
+| `migrations/0005_job_applications.sql` | **Yes** | The two enum types, the three tables, every `CHECK`, both composite keys, the `ON DELETE` actions and every index of [`schema.md`](../../database/schema.md) §11.3–§11.5. Unchanged by `J2`–`J4`: the endpoint layer needed no migration. |
+| `src/job_applications/models.rs` | **Yes** | `ApplicationStatus`, `ApplicationEventKind`, `Company`, `JobApplication`, `ApplicationEvent`. |
+| `src/job_applications/dto.rs` | **Yes** | `CompanyResponse`, `CompanyPage`, `ApplicationResponse`, `ApplicationPage`, `EventResponse`, `EventPage`, the six request types, `CompanyQuery`, `ApplicationQuery`, `CompaniesListQuery`, `ApplicationsListQuery` and the length constants. Money is `Option<String>`, never a number. `EventResponse` has no `updated_at`. Also five unit tests. |
+| `src/job_applications/repository.rs` | **Yes** | Every SQL statement of the feature. No statement touches a row without `user_id = $n`. |
+| `src/job_applications/service.rs` | **Yes** | `ensure_transition`, `permitted_sources`, `ensure_initial_stage`, `JobService` with fourteen use cases, the field validators, and thirteen unit tests. |
+| `src/job_applications/handlers.rs` | **Yes** | Fourteen handlers, each with its `#[utoipa::path]` annotation and its documented status set. |
+| `src/job_applications/mod.rs` | **Yes** | Declares and re-exports all five layers. |
+| `src/api/routes.rs` | **Yes** | Six route declarations (14 method/path pairs), the fourteen `ROUTE_TABLE` entries, the fourteen operations and twelve schemas in `ApiDoc`, and the `companies` / `job-applications` tags. |
+| `src/state.rs` | **Yes** | `AppState::job_applications: JobService`, built from the pool, the message catalogue and the pagination settings. |
+| `config/messages.toml`, `src/config/messages.rs` | **Yes** | The client-facing strings of the feature: validation, conflicts, and the resource-not-found messages. |
+| `tests/job_applications_api.rs` | **Yes** | 51 HTTP-level cases. The case-by-case map is [testing.md](testing.md) §2. No run is recorded. |
+| `tests/jobs_schema.rs` | **Yes** | Eleven cases against the real database; [testing.md](testing.md) §1. No run is recorded. |
+| `tests/openapi_contract.rs` | **Yes** | `CONTRACT_OPERATIONS = 48`; the fourteen success statuses; the published parameter sets of both job list operations; `EventResponse` carrying no `updated_at`. No run is recorded. |
+| `tests/seeder.rs` | **Yes** | One case for the seeded `dev` counts and invariants. No run is recorded. |
 
-Every requirement is `Accepted` as a whole, because the behaviour half is what
-decides whether a requirement is built. The two right-hand columns separate the
-halves: "exists" there means the database object is in
-`migrations/0005_job_applications.sql`; it never means that a request can reach
-it.
+### 1.2 The requirements, one by one
 
-| Requirement | State | The schema half — what exists | The behaviour half — what is missing |
-| ----------- | ----- | ----------------------------- | ------------------------------------ |
-| `JOB-R01` A company name unique per owner, case-insensitively | `Accepted` | `companies` with `companies_name_length_chk`, `companies_name_trimmed_chk` and the functional unique index `companies_user_id_lower_name_unique_idx (user_id, LOWER(name))`: a duplicate for one owner, in any casing, is a `23505` whatever writes it. | The company create, read, update and delete endpoints, the `409 conflict` on a duplicate, the `422` for the name, website and notes rules, and the `404` for a foreign company. |
-| `JOB-R02` An application belongs to one company of the same owner, with a role title and one of seven stages | `Accepted` | `job_applications` with `company_id NOT NULL` and `job_applications_company_fk FOREIGN KEY (company_id, user_id) REFERENCES companies (id, user_id) ON DELETE NO ACTION`, so an application whose owner is not its company's owner cannot be stored; `job_applications_role_title_length_chk`; `status job_application_status NOT NULL DEFAULT 'wishlist'`. | The endpoints. "A create accepts only `wishlist` or an omitted stage" is a **service** rule, not a database one: a direct insert can name any value the enum admits. So are the `422` on an unknown stage, the `201`, and the `404` for a foreign company. |
-| `JOB-R03` An optional salary range, one currency, `min <= max`, money as `REIMB-R07` | `Accepted` | `salary_min` and `salary_max` as `NUMERIC(19,4)`, `salary_currency CHAR(3)`, and four named checks: `job_applications_salary_non_negative_chk`, `job_applications_salary_range_chk`, `job_applications_salary_currency_required_chk` and `job_applications_salary_currency_chk` (upper-case `[A-Z]{3}`). | The four-decimal **string** contract on the wire, the `::text` projection, the `422` naming the field, and the upper-casing of the code. The columns store four decimals; nothing in the feature serializes them yet. |
-| `JOB-R04` The seven-stage machine, three terminal stages | `Accepted` | The **vocabulary only**: the `job_application_status` enum makes any stage outside the seven unrepresentable. It does **not** express a transition — the edge table is not in the database ([architecture.md](architecture.md) §3.4). | `ensure_transition`, the `409 conflict` on a skipped, backwards or terminal move, the `200` no-op on the current stage, and the one transaction that makes a refused `PATCH` write nothing else. |
-| `JOB-R05` Events belong to an application, ordered `occurred_at DESC, id DESC` | `Accepted` | `application_events` with `application_events_application_fk FOREIGN KEY (application_id, user_id) … ON DELETE CASCADE`, `occurred_at TIMESTAMPTZ NOT NULL` with no past-only rule, `application_events_summary_length_chk`, and the index `application_events_application_id_occurred_at_idx (application_id, occurred_at DESC)`. The index supplies the leading order only; the `id DESC` tiebreaker is the query's job. | The event endpoints, the ordered listing, the pagination, and the `404` for an event reached under another application. |
-| `JOB-R06` Deleting an application deletes its events; a company with applications cannot be deleted | `Accepted` | Both halves are in the schema. The event cascade is `ON DELETE CASCADE` on `application_events_application_fk`. The company refusal is `ON DELETE NO ACTION` on `job_applications_company_fk`, which refuses a direct `DELETE FROM companies` while an application remains. | The `409 conflict` mapping, and the two cheap reads that choose between `404` and `409` after a delete affects zero rows. Today the refusal reaches a caller only as `23503` from a direct statement; no request produces it. |
-| `JOB-R07` One optional next-action task, cleared when the task is deleted | `Accepted` | `next_action_task_id` with `job_applications_next_action_task_fk REFERENCES tasks (id) ON DELETE SET NULL`, and the partial index `job_applications_next_action_task_id_idx`. The **owner-consistency** half is impossible in SQL: `tasks` has no `user_id`, so there is no column pair to reference. | The service check `tasks → projects → user_id` before a write, in `J3`, and the `404` it answers for a foreign task. Nothing enforces task ownership today. |
-| `JOB-R08` No text generation, no outbound AI call | `Accepted` | Nothing, and nothing to build: the requirement forbids a column as much as an endpoint. `src/job_applications/models.rs` imports no HTTP client. | The absence of a generating operation, which trivially holds at 34 operations because this feature publishes none, and cannot be asserted by a contract test until the fourteen operations exist. |
-| `JOB-R09` Owner-scoped reads and writes, a foreign row is `404` | `Accepted` | `user_id NOT NULL` on all three tables with `REFERENCES users (id) ON DELETE CASCADE`, plus the two composite keys that force a child's owner to equal its parent's. That is the data half of the rule. | Every statement. No `user_id = $n` predicate exists, no listing exists, and no `404` is produced by this feature. A foreign row is currently reachable by any caller that can run SQL — which is the test suite, not a client. |
+Every requirement is `Implemented`: the code exists. None is `Verified`: no
+result is recorded. "Asserted by" names tests that are **on disk**; it does not
+claim they passed.
 
-The schema half of `JOB-R01`, `R02`, `R03`, `R05`, `R06`, `R07` and `R09` is in
-the database. The behaviour half of **all nine** is not. `JOB-R04` has only its
-vocabulary and `JOB-R08` has nothing, because neither can be a column.
+| Requirement | State | What exists | Asserted by | Still unproven |
+| ----------- | ----- | ----------- | ----------- | -------------- |
+| `JOB-R01` A company name is unique per owner, case-insensitively | `Implemented` | Five company operations. `validate_company_name` trims and measures in characters (1–200). A duplicate is **not** pre-checked: `insert_company`/`update_company_owned` detect the `23505` from `companies_user_id_lower_name_unique_idx` and return `CompanyWrite::DuplicateName`, which the service answers as `409`. The stored casing survives; only the comparison is folded, in SQL. The listing orders `LOWER(name), name, id` and takes `search`, `limit`, `offset`. | `tests/job_applications_api.rs::a_company_name_is_unique_per_owner_ignoring_case`, `::renaming_a_company_onto_an_existing_name_is_refused`, `::two_accounts_may_use_the_same_company_name`, `::a_company_name_is_trimmed_and_bounded`, `::a_company_can_be_created_read_changed_and_deleted`, `::the_companies_listing_is_alphabetical_and_paginated`, `::the_companies_listing_searches_by_name`; `tests/jobs_schema.rs` cases 2 and 3. | A recorded run. |
+| `JOB-R02` An application belongs to one company of the same owner, with a role title and one of seven stages | `Implemented` | `INSERT_APPLICATION` inserts through `SELECT … FROM companies c WHERE c.id = $3 AND c.user_id = $2`, so a foreign company inserts **no row** and the service names it `404`. **The create accepts only `wishlist` or an omitted stage** (`ensure_initial_stage`), and the statement writes the literal `'wishlist'`; any other stage is `422` naming `status`. `role_title` is trimmed, 1–200, by `required_text`. A `PATCH` may correct `company_id` to another of the caller's companies, under the same predicate. | `tests/job_applications_api.rs::an_application_can_be_created_read_changed_and_deleted`, `::a_create_with_a_stage_other_than_wishlist_is_refused`, `::an_application_cannot_target_another_users_company`, `::an_application_can_be_moved_to_another_of_the_callers_companies`, `::a_role_title_is_trimmed_and_bounded`, `::an_unknown_stage_in_a_body_is_refused`; `tests/jobs_schema.rs` case 4; `src/job_applications/service.rs::a_create_accepts_only_wishlist_or_an_omitted_stage`. | A recorded run. |
+| `JOB-R03` An optional salary range, one currency, `min <= max`, money as `REIMB-R07` | `Implemented` | `validate_salary_range` on create and `resolve_salary` on `PATCH`: four-decimal string (`^[0-9]{1,15}\.[0-9]{4}$`, no sign, no rounding), a bound requires a currency, a currency without a bound is refused, `min <= max` by exact string comparison (`compare_money`, no `f32`/`f64`, no arithmetic). A `PATCH` that touches any salary field reads the stored triple (`find_salary_owned`), resolves and validates the whole triple, and writes it whole. `salary_currency` is trimmed and upper-cased before the `CHAR(3)` write. | `tests/job_applications_api.rs::salary_money_round_trips_with_four_decimals`, `::a_salary_bound_without_a_currency_is_refused`, `::a_salary_currency_without_a_bound_is_refused`, `::an_inverted_salary_range_is_refused`, `::a_salary_currency_is_three_upper_case_letters`, `::a_json_number_where_a_salary_is_expected_is_refused`; `src/job_applications/service.rs::a_salary_bound_without_a_currency_is_refused`, `::a_salary_minimum_above_the_maximum_is_refused`, `::the_money_comparison_is_exact_and_ignores_leading_zeros`, `::a_patched_bound_is_validated_against_the_stored_triple`; `tests/jobs_schema.rs` cases 8–10. | A recorded run, and an API case for a value above `999999999999999.9999` or a negative string (both currently refused by the same pattern, but unasserted through the API). |
+| `JOB-R04` The seven-stage machine, three terminal stages | `Implemented` | `ALLOWED_MOVES` is the **only** definition of the edge table (12 pairs). `ensure_transition` returns `Some(NoOp)` for a self-pair, `Some(Move)` for an edge, `None` otherwise. `permitted_sources` derives the write predicate's array from the same table. The change is **one guarded `UPDATE`** — `WHERE … AND status = ANY($20)` — with no read and no `FOR UPDATE` before it; zero rows is explained afterwards as `404` (row/company/task) or `409` (the move). `updated_at` is stamped only when a non-status column is written or the stage actually changes. The full shape is [architecture.md](architecture.md) §3.1. | `tests/job_applications_api.rs::every_permitted_stage_change_is_accepted` (12 edges), `::sending_the_current_stage_is_accepted_and_changes_nothing` (7 self-pairs), `::every_forbidden_stage_change_is_refused` (30 pairs), `::offer_rejected_and_withdrawn_are_terminal`, `::a_refused_stage_change_does_not_write_the_other_fields`, `::a_create_with_a_stage_other_than_wishlist_is_refused`; `src/job_applications/service.rs::the_stage_machine_allows_exactly_the_twelve_edges`, `::the_three_terminal_stages_have_no_exit`, `::the_permitted_sources_are_the_edges_into_the_stage_plus_itself`. | A recorded run, and any concurrency case (see [testing.md](testing.md) §5). |
+| `JOB-R05` Events belong to an application, ordered `occurred_at DESC, id DESC` | `Implemented` | Four event operations. The listing orders `occurred_at DESC, id DESC`; the index supplies the leading term only. `list_events_owned` distinguishes "no such application" from "no events" with `APPLICATION_EXISTS`, run only when the page is empty, so the empty page stays an empty page and the missing application stays `404`. Insert, update and delete are each scoped by `application_id`, `id` and `user_id`, so an event of the caller's other application matches no row. `occurred_at` has no past-only rule. | `tests/job_applications_api.rs::events_are_ordered_by_occurred_at`, `::an_event_can_be_added_changed_and_deleted`, `::an_event_id_cannot_be_used_under_another_application`, `::an_event_with_a_future_occurred_at_is_accepted`, `::an_event_kind_is_one_of_six`, `::an_event_summary_is_required_and_bounded`, `::an_event_occurred_at_requires_a_timezone`; `tests/jobs_schema.rs` cases 5 and 6; `src/job_applications/dto.rs::an_event_kind_is_one_of_six`, `::an_event_occurred_at_requires_a_timezone`. | A recorded run, and event pagination beyond `?limit=2` (`offset`, the clamp, an offset past the end). |
+| `JOB-R06` Deleting an application deletes its events; a company with applications cannot be deleted | `Implemented` | `DELETE_APPLICATION_OWNED` is one statement; the event cascade is the schema's `ON DELETE CASCADE`. `DELETE_COMPANY_IF_UNUSED` is one statement with `AND NOT EXISTS (SELECT 1 FROM job_applications …)`. **Nothing is deleted to make it succeed**: the applications are records the client did not ask to delete. Zero rows is resolved by one read, `company_is_owned`: owned → `409`, otherwise `404`. | `tests/job_applications_api.rs::deleting_an_application_removes_its_events`, `::a_company_with_applications_cannot_be_deleted`, `::a_company_can_be_deleted_once_its_applications_are_gone`, `::an_application_can_be_moved_to_another_of_the_callers_companies`; `tests/jobs_schema.rs` cases 5 and 6. | A recorded run, and the delete/insert race, which is analysed and not tested. |
+| `JOB-R07` One optional next-action task, cleared when the task is deleted | `Implemented` | `next_action_task_id` with `ON DELETE SET NULL` in the schema. The ownership rule cannot be a constraint (`tasks` has no `user_id`) and is a predicate of **both** the insert and the update: `EXISTS (SELECT 1 FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = $n AND p.user_id = $2)`. A foreign task, another account's task and a task that does not exist are one answer: `404`, named by `explain_insert_refusal` / `explain_update_refusal`. `{"next_action_task_id": null}` clears the link. | `tests/job_applications_api.rs::the_next_action_task_must_belong_to_the_caller`, `::deleting_the_task_clears_the_next_action`. | A recorded run. No schema test asserts the `SET NULL`; the API case is the only evidence, and it is the only evidence for the ownership rule that **can** exist. |
+| `JOB-R08` No text generation, no outbound AI call | `Implemented` | There is no generating operation among the 48, no `prompt` field in any DTO, and `src/job_applications/` imports no HTTP client. The implementation is the absence. | The surface is pinned: `tests/openapi_contract.rs::the_route_table_and_the_document_describe_the_same_operations` with `CONTRACT_OPERATIONS = 48`, and `::the_job_application_operations_publish_their_success_status` names all fourteen job operations. **No test asserts the absence of a generation field**: the contract case that would have asserted it was not written. | A recorded run, and a check of the absence itself, which today is a reading of the tree rather than a test. |
+| `JOB-R09` Owner-scoped reads and writes, a foreign row is `404` | `Implemented` | Every statement carries `user_id = $n`; every child row is written with the caller's id, never the body's. The two composite keys make a cross-owner child unrepresentable. A foreign row is `404`, never `403`; a foreign company `DELETE` is `404` before the `409` question is asked, so the `409` cannot leak existence. | `tests/job_applications_api.rs::a_company_of_another_user_is_invisible`, `::an_application_of_another_user_is_invisible`, `::the_listings_only_contain_the_callers_rows`, `::every_job_application_operation_is_not_found_for_another_account`, `::an_application_cannot_target_another_users_company`; `tests/jobs_schema.rs` cases 4 and 7. | A recorded run. |
 
-### 1.2 What is written, and what it proves
+### 1.3 The stage machine, exactly
+
+This is the distinction a reader gets wrong, so it is written out once:
+
+| Count | What | Answer |
+| ----- | ---- | ------ |
+| **12** | The allowed edges: `wishlist→applied`, `applied→screening`, `screening→interview`, `interview→offer`, and `rejected` and `withdrawn` from each of `wishlist`, `applied`, `screening`, `interview`. | `200`, the new stage, stored. |
+| **7** | The self-pairs, one per stage (`applied→applied`, …). They are **accepted no-ops, not refusals**. Re-sending the current stage changes nothing and is not a transition. | `200`, unchanged. |
+| **30** | Every other ordered pair of the seven stages: a skipped stage, a backwards move, a move between two terminal stages, and every move **out of** `offer`, `rejected` or `withdrawn`. | `409 conflict`, nothing written. |
+| **49** | All ordered pairs. 12 + 7 + 30 = 49. | — |
+
+The create is a **different rule** and is not one of the 49 pairs:
+
+- `POST /job-applications` accepts `wishlist` **or an omitted stage**, and
+  nothing else. The other six stages are `422 validation_failed` naming
+  `status`, not `409`, because the body is asking for a row the contract does
+  not allow to exist. `ensure_initial_stage` is the whole rule, and the insert
+  statement writes the literal `'wishlist'`, so a caller that bypassed the
+  service check could still not create another stage through this statement.
+- `offer`, `rejected` and `withdrawn` are terminal. Re-sending the terminal
+  stage itself is still a `200` no-op; a move **out of** it is `409`.
+
+### 1.4 The fourteen operations as a surface
+
+Six cases assert the surface rather than one rule, and they serve all nine
+requirements:
+
+| Case | What it asserts |
+| ---- | --------------- |
+| `every_job_application_operation_requires_a_credential` | All fourteen operations, with no token and with an invalid one, answer `401 unauthorized` in the standard envelope, with no `details`, and nothing they sent landed. |
+| `every_job_application_operation_is_not_found_for_another_account` | The eleven row-addressed operations answer `404` for another account; the two lists answer `200` with an empty page; a create is the caller's own. |
+| `every_path_id_must_be_a_uuid` | Twelve path shapes, including both id positions of the event route, answer `400 bad_request`. |
+| `every_write_operation_refuses_a_malformed_body` | Six write operations: non-JSON and empty bodies are `400`; a JSON value of the wrong shape is `422` naming `body`. |
+| `every_operation_with_a_documented_validation_failure_is_a_422` | Eight cases across the three resources, each `422` with a non-empty `details`. |
+| `a_job_applications_body_over_the_limit_is_refused` | A body above `max_body_bytes` is `413 payload_too_large`, on a state configured with a 256-byte limit. |
+
+### 1.5 What is written, and what it proves
 
 | File | Cases | What it serves | Has a run been recorded? |
 | ---- | ----- | -------------- | ------------------------ |
-| `tests/jobs_schema.rs` | 11 | The constraints, the two composite keys, the cascades, the enum vocabulary, the four-decimal storage and the migration from an empty database. The case-by-case map is [testing.md](testing.md) §1. | Not in this document. |
-| `tests/seeder.rs` | 1 case for this feature (`the_seeder_dev_profile_inserts_the_documented_company_and_application_counts`) | The `dev` counts 20 / 12 / 50, the deterministic ids, and the ownership and salary invariants of the seeded rows. | Not in this document. |
+| `tests/job_applications_api.rs` | 51 | The endpoint layer: companies, applications, the stage machine, the Phase 1 cross-links, events, salary money, ownership, and the shared `400`/`401`/`404`/`413`/`422` sweep. Map: [testing.md](testing.md) §2. | Not in this document. |
+| `tests/jobs_schema.rs` | 11 | The constraints, the two composite keys, the cascades, the enum vocabulary, the four-decimal storage and the migration from an empty database. Map: [testing.md](testing.md) §1. | Not in this document. |
+| `tests/openapi_contract.rs` | 4 for this feature | 48 operations in both directions, the fourteen success statuses, the two job parameter sets, and the event schemas carrying no `updated_at`. Map: [testing.md](testing.md) §3. | Not in this document. |
+| `tests/seeder.rs` | 1 for this feature | The `dev` counts 20 / 12 / 50, the deterministic ids, and the ownership and salary invariants of the seeded rows. | Not in this document. |
+| `src/job_applications/service.rs` | 13 | The transition table (all 49 pairs), the terminal stages, `permitted_sources`, the create rule, the trim rules, the URL rules, the money rules and the range order. | Not in this document. |
+| `src/job_applications/dto.rs` | 5 | The tri-state `PATCH` fields, the event-kind vocabulary, a timezone-less `occurred_at`, and the omitted stage on a create. | Not in this document. |
 
-A test that exists is not a test that passed, and a schema test is not an
-endpoint test. Both statements are load-bearing here.
+A test that exists is not a test that passed. The statement is load-bearing for
+every row above.
 
-## 2. What is still missing to reach `Implemented` and then `Verified`
+## 2. What is still missing to reach `Verified`
 
-1. **The rest of the module.** `handlers.rs`, `service.rs`, `repository.rs` and
-   `dto.rs` under `src/job_applications/`, with the layering of
-   [architecture.md](architecture.md) §2. `models.rs` exists; nothing reads or
-   writes through it.
-2. **The routes.** The fourteen operations of [api.md](api.md) registered in
-   `src/api/routes.rs` and in `ROUTE_TABLE`, with their OpenAPI annotations.
-   `/api/v1/openapi.json` is at 34 operations and must publish them.
-3. **The endpoint tests.** `tests/job_applications_api.rs` does not exist. Every
-   case in [testing.md](testing.md) §2 is a plan.
-4. **A recorded run.** `tests/jobs_schema.rs` and the seeder case exist without a
-   quoted result; the endpoint suite does not exist. The rule for what must pass
-   is [`verification-policy.md`](../../testing/verification-policy.md).
-5. **The review.** No reviewer has read `C-J1`. A green gate is not a review.
+1. **A recorded run.** The three quality gates of `AGENTS.md` §3 and the two
+   documentation gates of [strategy.md](../../testing/strategy.md) §7.5, with a
+   disposable `TEST_DATABASE_URL`, quoted in the verification record. The
+   policy is [`verification-policy.md`](../../testing/verification-policy.md).
+2. **The review.** No reviewer has read `J2`/`J3`/`J4`. The review log is the
+   evidence, and it does not exist for this chain yet.
+3. **The flow layer.** There is no `tests/jobs_flow.rs`. The reimbursement
+   feature has a journey, an ownership sweep and a seeded read in
+   `tests/claims_flow.rs`; this feature has per-operation cases and the walk
+   helper inside `tests/job_applications_api.rs`, which is not the same thing.
+4. **The uncovered halves** listed per requirement in §1.2 and collected in
+   [testing.md](testing.md) §5: the application-listing pagination bounds, the
+   event and application list clamps, the description and `job_url` length
+   bounds, the salary magnitude bound, and any assertion that the feature
+   generates no text.
 
-The feature becomes `Implemented` when the module and the routes exist and
-compile, which is the `AGENTS.md` §6 meaning and nothing stronger. It becomes
-`Verified` when the schema, endpoint and seeder cases pass in a recorded run.
-Neither word is used in this document today.
+`Verified` additionally requires that the schema, endpoint, contract and seeder
+cases pass in one recorded run. Neither word is used loosely here: `Implemented`
+is about the tree, `Verified` is about a measurement.
 
 One status discrepancy is recorded rather than resolved here:
 [`schema.md`](../../database/schema.md) §11 still heads its section `Proposed`
-and lists `companies`, `job_applications` and `application_events` as
-exceptions that exist but have no endpoint. That heading and this feature's
-`Accepted` are compatible only if "Proposed" is read as "not served by an
-endpoint"; reconciling the wording is the schema document's edit, not this
-file's.
+and lists `companies`, `job_applications` and `application_events` as tables
+that exist but have no endpoint. The second half of that sentence is now false:
+all fourteen operations are mounted. Reconciling the wording is the schema
+document's edit, not this file's.
 
-## 3. What a future change must do to keep it `Accepted` and then `Verified`
+## 3. What a future change must do to keep it `Implemented` and reach `Verified`
 
 - **Do not change an accepted requirement silently.** A revision goes through
   [`project-truth.md`](../../project-truth.md) §18.4, in a new change.
@@ -108,7 +155,18 @@ file's.
   `ALTER TYPE … ADD VALUE` in that new migration, with the transaction caveat in
   [`schema.md`](../../database/schema.md) §8.
 - **A change to the stage list is a breaking contract change**: every terminal
-  stage and every edge is published.
+  stage and every edge is published. `ALLOWED_MOVES` is the single definition;
+  do not write a second copy of the table, and do not replace it with a rank
+  comparison (`rejected` and `withdrawn` are reachable from four stages).
+- **Do not put a read before the guarded `UPDATE`.** `SELECT status … FOR UPDATE`
+  followed by an `UPDATE` reintroduces the race the statement's `status = ANY(…)`
+  predicate closes ([architecture.md](architecture.md) §3.1).
+- **Do not pre-check the company delete with `SELECT COUNT(*)`.** The
+  `AND NOT EXISTS` of the single statement is what makes the rule atomic, and
+  nothing may be deleted to make the delete succeed.
+- **Do not enforce the next-action task's owner by a constraint you cannot
+  write.** `tasks` has no `user_id`; the `tasks → projects → user_id` predicate
+  in the statement is the enforcement, and its only evidence is the API case.
 - **A change that adds generation of any kind** contradicts
   [`project-truth.md`](../../project-truth.md) §6.1 and needs an amendment
   before any code.
@@ -120,16 +178,18 @@ file's.
   would make `DELETE FROM users` fail for any account that has an application,
   which is the opposite of the documented cascade.
 - **Do not add `updated_at` to `application_events`.** Its absence is decision
-  `A-D1-1` ([architecture.md](architecture.md) §3.5).
+  `A-D1-1` ([architecture.md](architecture.md) §3.5), and
+  `tests/openapi_contract.rs::the_event_schemas_publish_no_updated_at` now
+  asserts it.
 
 ## 4. Related documents
 
 | Document | Contents |
 | -------- | -------- |
 | [`specification.md`](specification.md) | Purpose, scope, non-goals, accepted requirements, user-facing behaviour, acceptance criteria, limitations. |
-| [`architecture.md`](architecture.md) | What exists today, the planned layering, the three constraints that do real work, the invariants and the request path. |
-| [`api.md`](api.md) | The fourteen planned endpoints. **None is built.** |
-| [`testing.md`](testing.md) | The eleven schema cases that exist, the seeder case, the planned endpoint suite, and what is deliberately not covered. |
+| [`architecture.md`](architecture.md) | What exists, the five layers, the guarded `UPDATE`, the create rule, the company-delete rule, the task check, the event rules, the trimming rules, the invariants and the real request path. |
+| [`api.md`](api.md) | The fourteen published operations. |
+| [`testing.md`](testing.md) | The schema suite, the 51 endpoint cases, the contract cases, the unit tests, the requirement-to-test map and the gaps. |
 | [`../../api/conventions.md`](../../api/conventions.md) | Pagination, money, filtering and timestamps. |
 | [`../../database/schema.md`](../../database/schema.md) | The three tables, created by `migrations/0005_job_applications.sql`. |
 | [`../../decisions/ADR-0007-money-representation.md`](../../decisions/ADR-0007-money-representation.md) | The money decision. |

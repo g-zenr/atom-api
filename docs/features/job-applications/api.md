@@ -10,9 +10,10 @@ the API root. The general rules are in
 [`conventions.md`](../../api/conventions.md) and the error codes in
 [`error-contract.md`](../../api/error-contract.md).
 
-**This contract is not implemented.** No route below answers today. It is
-recorded as an accepted contract that is not built, so that the implementing
-change has a contract to meet.
+**All fourteen operations answer.** They are served, published in
+`/api/v1/openapi.json`, and asserted by `tests/job_applications_api.rs` and
+`tests/openapi_contract.rs`. The feature is `Implemented`; it is not `Verified`,
+because no reviewer has read the chain that completed it.
 
 ## 1. Endpoint summary
 
@@ -606,7 +607,7 @@ No body.
 
 ## 17. Notes on the OpenAPI document
 
-When the feature is implemented, the fourteen operations are registered in
+The fourteen operations are registered in
 `src/api/routes.rs` and appear in the document at `/api/v1/openapi.json` with
 the `CompanyResponse`, `CompanyPage`, `ApplicationResponse`,
 `ApplicationPage`, `EventResponse`, `EventPage`, `CreateCompanyRequest`,

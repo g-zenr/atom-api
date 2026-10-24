@@ -11,6 +11,7 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::auth::handlers;
 use crate::config::Config;
 use crate::error::AppError;
+use crate::job_applications::handlers as job_handlers;
 use crate::notes::handlers as note_handlers;
 use crate::projects::handlers as project_handlers;
 use crate::reimbursements::handlers as claim_handlers;
@@ -61,6 +62,20 @@ use crate::tasks::handlers as task_handlers;
         claim_handlers::approve_claim,
         claim_handlers::reject_claim,
         claim_handlers::pay_claim,
+        job_handlers::list_companies,
+        job_handlers::create_company,
+        job_handlers::get_company,
+        job_handlers::update_company,
+        job_handlers::delete_company,
+        job_handlers::list_applications,
+        job_handlers::create_application,
+        job_handlers::get_application,
+        job_handlers::update_application,
+        job_handlers::delete_application,
+        job_handlers::list_events,
+        job_handlers::create_event,
+        job_handlers::update_event,
+        job_handlers::delete_event,
     ),
     components(
         schemas(
@@ -100,6 +115,20 @@ use crate::tasks::handlers as task_handlers;
             crate::reimbursements::dto::CreateItemRequest,
             crate::reimbursements::dto::UpdateItemRequest,
             crate::reimbursements::models::ClaimStatus,
+            crate::job_applications::dto::CompanyResponse,
+            crate::job_applications::dto::CompanyPage,
+            crate::job_applications::dto::CreateCompanyRequest,
+            crate::job_applications::dto::UpdateCompanyRequest,
+            crate::job_applications::dto::ApplicationResponse,
+            crate::job_applications::dto::ApplicationPage,
+            crate::job_applications::dto::CreateApplicationRequest,
+            crate::job_applications::dto::UpdateApplicationRequest,
+            crate::job_applications::dto::EventResponse,
+            crate::job_applications::dto::EventPage,
+            crate::job_applications::dto::CreateEventRequest,
+            crate::job_applications::dto::UpdateEventRequest,
+            crate::job_applications::models::ApplicationStatus,
+            crate::job_applications::models::ApplicationEventKind,
             crate::pagination::Pagination,
         )
     ),
@@ -111,6 +140,8 @@ use crate::tasks::handlers as task_handlers;
         (name = "projects", description = "Project tracking"),
         (name = "tasks", description = "Tasks belonging to a project"),
         (name = "claims", description = "Expense claims and their line items"),
+        (name = "companies", description = "Employers a job application points at"),
+        (name = "job-applications", description = "Job applications and their event timeline"),
     )
 )]
 pub struct ApiDoc;
@@ -211,6 +242,29 @@ pub const ROUTE_TABLE: &[(&str, &str)] = &[
     ("POST", "/claims/{claim_id}/approve"),
     ("POST", "/claims/{claim_id}/reject"),
     ("POST", "/claims/{claim_id}/pay"),
+    // --- companies ---
+    ("GET", "/companies"),
+    ("POST", "/companies"),
+    ("GET", "/companies/{company_id}"),
+    ("PATCH", "/companies/{company_id}"),
+    ("DELETE", "/companies/{company_id}"),
+    // --- job applications ---
+    ("GET", "/job-applications"),
+    ("POST", "/job-applications"),
+    ("GET", "/job-applications/{application_id}"),
+    ("PATCH", "/job-applications/{application_id}"),
+    ("DELETE", "/job-applications/{application_id}"),
+    // --- application events ---
+    ("GET", "/job-applications/{application_id}/events"),
+    ("POST", "/job-applications/{application_id}/events"),
+    (
+        "PATCH",
+        "/job-applications/{application_id}/events/{event_id}",
+    ),
+    (
+        "DELETE",
+        "/job-applications/{application_id}/events/{event_id}",
+    ),
 ];
 
 /// Every operation outside [`API_PREFIX`], as `(METHOD, path)`.
@@ -297,6 +351,37 @@ pub fn api_routes() -> Router<AppState> {
             post(claim_handlers::reject_claim),
         )
         .route("/claims/{claim_id}/pay", post(claim_handlers::pay_claim))
+        // --- companies ---
+        .route(
+            "/companies",
+            get(job_handlers::list_companies).post(job_handlers::create_company),
+        )
+        .route(
+            "/companies/{company_id}",
+            get(job_handlers::get_company)
+                .patch(job_handlers::update_company)
+                .delete(job_handlers::delete_company),
+        )
+        // --- job applications ---
+        .route(
+            "/job-applications",
+            get(job_handlers::list_applications).post(job_handlers::create_application),
+        )
+        .route(
+            "/job-applications/{application_id}",
+            get(job_handlers::get_application)
+                .patch(job_handlers::update_application)
+                .delete(job_handlers::delete_application),
+        )
+        // --- application events ---
+        .route(
+            "/job-applications/{application_id}/events",
+            get(job_handlers::list_events).post(job_handlers::create_event),
+        )
+        .route(
+            "/job-applications/{application_id}/events/{event_id}",
+            patch(job_handlers::update_event).delete(job_handlers::delete_event),
+        )
 }
 
 /// The API explorer, as an Axum router.

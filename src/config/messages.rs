@@ -141,6 +141,20 @@ pub struct ValidationMessages {
     pub category_not_ascii: String,
     /// A receipt reference is not an absolute `http` or `https` URL.
     pub receipt_url_invalid: String,
+    /// A company website is not an absolute `http` or `https` URL.
+    pub website_invalid: String,
+    /// A job posting reference is not an absolute `http` or `https` URL.
+    pub job_url_invalid: String,
+    /// An applied-date range runs backwards.
+    pub applied_range_order: String,
+    /// A salary bound was given without a currency.
+    pub currency_required: String,
+    /// A salary currency was given without a bound.
+    pub currency_without_bound: String,
+    /// A salary minimum is above the maximum.
+    pub salary_range_order: String,
+    /// A create named a stage other than `wishlist`.
+    pub stage_must_start_at_wishlist: String,
     /// A claim with no items cannot be submitted.
     pub items_required: String,
     /// A claim with a zero total cannot be submitted.
@@ -163,6 +177,12 @@ pub struct ResourceMessages {
     pub claim_not_found: String,
     /// 404, when the expense item does not exist.
     pub item_not_found: String,
+    /// 404, when the company does not exist.
+    pub company_not_found: String,
+    /// 404, when the job application does not exist.
+    pub application_not_found: String,
+    /// 404, when the application event does not exist.
+    pub event_not_found: String,
 }
 
 /// The messages for a request the current state refuses.
@@ -177,6 +197,12 @@ pub struct ConflictMessages {
     pub claim_not_editable: String,
     /// 409, when a lifecycle action is not allowed from the current status.
     pub transition_not_allowed: String,
+    /// 409, when a company name is already used by the same owner.
+    pub company_name_taken: String,
+    /// 409, when a company still has applications.
+    pub company_has_applications: String,
+    /// 409, when a stage is not reachable from the application's current one.
+    pub stage_transition_not_allowed: String,
 }
 
 impl Messages {

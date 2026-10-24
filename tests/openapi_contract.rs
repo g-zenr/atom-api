@@ -28,14 +28,15 @@ use atom_api::api::routes::{API_PREFIX, ROUTE_TABLE, UNVERSIONED_ROUTE_TABLE, op
 
 /// The number of operations the locked contract publishes.
 ///
-/// Thirty-two versioned operations - five authentication, five notes, five
-/// projects, five tasks and twelve claims (five claim routes, three item writes
-/// and four lifecycle actions) - plus the two unversioned probes. The two-way
-/// comparison below cannot see an operation that was dropped from the table,
-/// the router and the document together, so the size of the agreed surface is
-/// pinned as well: the contract is that all 34 operations of
-/// `/api/v1/openapi.json` still exist.
-const CONTRACT_OPERATIONS: usize = 34;
+/// Forty-six versioned operations - five authentication, five notes, five
+/// projects, five tasks, twelve claims (five claim routes, three item writes
+/// and four lifecycle actions) and fourteen job-application operations (five
+/// company routes, five application routes and four event routes) - plus the
+/// two unversioned probes. The two-way comparison below cannot see an operation
+/// that was dropped from the table, the router and the document together, so
+/// the size of the agreed surface is pinned as well: the contract is that all
+/// 48 operations of `/api/v1/openapi.json` still exist.
+const CONTRACT_OPERATIONS: usize = 48;
 
 /// Every operation declared on a path item, as `(METHOD, operation)`.
 ///
@@ -481,7 +482,7 @@ fn each_list_endpoint_publishes_its_filter_and_pagination_parameters_once() {
     let document = openapi_document(&common::test_config());
 
     // path, expected query parameters, expected path parameters.
-    let endpoints: [(&str, &[&str], &[&str]); 4] = [
+    let endpoints: [(&str, &[&str], &[&str]); 6] = [
         (
             "/api/v1/notes",
             &["archived", "limit", "offset", "search"],
@@ -503,6 +504,25 @@ fn each_list_endpoint_publishes_its_filter_and_pagination_parameters_once() {
                 "status",
                 "submitted_from",
                 "submitted_to",
+            ],
+            &[],
+        ),
+        // `docs/features/job-applications/api.md` §2.5: `limit`, `offset` and a
+        // case-insensitive `search` over `name`.
+        ("/api/v1/companies", &["limit", "offset", "search"], &[]),
+        // The same §2.5: the shared pagination pair, the stage, the company,
+        // a case-insensitive `search` over `role_title`, and the two inclusive
+        // `applied_on` bounds.
+        (
+            "/api/v1/job-applications",
+            &[
+                "applied_from",
+                "applied_to",
+                "company_id",
+                "limit",
+                "offset",
+                "search",
+                "status",
             ],
             &[],
         ),
@@ -779,6 +799,104 @@ fn the_item_and_lifecycle_operations_publish_their_success_status() {
             statuses.iter().any(|status| status.as_str() == expected),
             "{method} {path} must publish the {expected} success response; it publishes \
              {statuses:?}"
+        );
+    }
+}
+
+/// The fourteen job-application operations publish their documented status.
+///
+/// `docs/features/job-applications/api.md` §1 is the table: a create is `201`,
+/// a read or a patch is `200`, a delete is `204`. A generated client picks its
+/// return type from the success response, so a delete that published no `204`
+/// (or a create that published `200`) is the contract already broken for that
+/// client, even though the router serves the path.
+///
+/// The fourteen rows are asserted to be fourteen, so a table that silently
+/// shrank cannot pass by having fewer assertions to make.
+#[test]
+fn the_job_application_operations_publish_their_success_status() {
+    let document = openapi_document(&common::test_config());
+
+    let published: [(&str, &str, &str); 14] = [
+        ("GET", "/api/v1/companies", "200"),
+        ("POST", "/api/v1/companies", "201"),
+        ("GET", "/api/v1/companies/{company_id}", "200"),
+        ("PATCH", "/api/v1/companies/{company_id}", "200"),
+        ("DELETE", "/api/v1/companies/{company_id}", "204"),
+        ("GET", "/api/v1/job-applications", "200"),
+        ("POST", "/api/v1/job-applications", "201"),
+        ("GET", "/api/v1/job-applications/{application_id}", "200"),
+        ("PATCH", "/api/v1/job-applications/{application_id}", "200"),
+        ("DELETE", "/api/v1/job-applications/{application_id}", "204"),
+        (
+            "GET",
+            "/api/v1/job-applications/{application_id}/events",
+            "200",
+        ),
+        (
+            "POST",
+            "/api/v1/job-applications/{application_id}/events",
+            "201",
+        ),
+        (
+            "PATCH",
+            "/api/v1/job-applications/{application_id}/events/{event_id}",
+            "200",
+        ),
+        (
+            "DELETE",
+            "/api/v1/job-applications/{application_id}/events/{event_id}",
+            "204",
+        ),
+    ];
+
+    for (method, path, expected) in published {
+        let item = document
+            .paths
+            .get_path_item(path)
+            .unwrap_or_else(|| panic!("the document must describe the path {path}"));
+
+        let operation = match method {
+            "GET" => item.get.as_ref(),
+            "POST" => item.post.as_ref(),
+            "PATCH" => item.patch.as_ref(),
+            "DELETE" => item.delete.as_ref(),
+            other => panic!("{other} is not one of the methods these operations use"),
+        }
+        .unwrap_or_else(|| panic!("the document must describe {method} {path}"));
+
+        let statuses: Vec<&String> = operation.responses.responses.keys().collect();
+
+        assert!(
+            statuses.iter().any(|status| status.as_str() == expected),
+            "{method} {path} must publish the {expected} success response; it publishes \
+             {statuses:?}"
+        );
+    }
+}
+
+/// An event is published with no `updated_at`.
+///
+/// Decision `A-D1-1` is that a timeline entry records what the owner says
+/// happened, not when the row was last written, so the table has no
+/// `updated_at` and the response must not publish one. A client generated from
+/// the document would otherwise read a field the API never sends, and the next
+/// "restore the missing field" change would add a column the schema deliberately
+/// does not have.
+#[test]
+fn the_event_schemas_publish_no_updated_at() {
+    let document = openapi_document(&common::test_config());
+
+    for component_name in ["EventResponse", "CreateEventRequest", "UpdateEventRequest"] {
+        let schema = component(&document, component_name);
+
+        assert!(
+            schema
+                .get("properties")
+                .and_then(Value::as_object)
+                .is_some_and(|properties| !properties.contains_key("updated_at")),
+            "{component_name} must not publish `updated_at`: an event is corrected in place and \
+             carries only its creation instant (A-D1-1): {schema}"
         );
     }
 }

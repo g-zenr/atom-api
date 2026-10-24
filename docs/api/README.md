@@ -23,8 +23,8 @@ The per-feature endpoint references are:
 | Tasks | [`../features/tasks/api.md`](../features/tasks/api.md) | 5 |
 | Reimbursements | [`../features/reimbursements/api.md`](../features/reimbursements/api.md) | all 12 it specifies |
 
-**The document describes 34 operations**: 32 under `/api/v1` and the two health
-probes outside it. The reimbursement feature contributes twelve of them — five
+**The document describes 48 operations**: 46 under `/api/v1` and the two health
+probes outside it. The reimbursement feature contributes twelve of them - five
 claim operations, three item operations and four lifecycle actions. A reader who
 counts the inventory below must agree with those numbers; the contract test
 `the_route_table_and_the_document_describe_the_same_operations` fails if they
@@ -149,10 +149,24 @@ is required.
 | `POST` | `/api/v1/claims/{claim_id}/approve` | bearer | `200` | reimbursements |
 | `POST` | `/api/v1/claims/{claim_id}/reject` | bearer | `200` | reimbursements |
 | `POST` | `/api/v1/claims/{claim_id}/pay` | bearer | `200` | reimbursements |
+| `GET` | `/api/v1/companies` | bearer | `200` | job applications |
+| `POST` | `/api/v1/companies` | bearer | `201` | job applications |
+| `GET` | `/api/v1/companies/{company_id}` | bearer | `200` | job applications |
+| `PATCH` | `/api/v1/companies/{company_id}` | bearer | `200` | job applications |
+| `DELETE` | `/api/v1/companies/{company_id}` | bearer | `204` | job applications |
+| `GET` | `/api/v1/job-applications` | bearer | `200` | job applications |
+| `POST` | `/api/v1/job-applications` | bearer | `201` | job applications |
+| `GET` | `/api/v1/job-applications/{application_id}` | bearer | `200` | job applications |
+| `PATCH` | `/api/v1/job-applications/{application_id}` | bearer | `200` | job applications |
+| `DELETE` | `/api/v1/job-applications/{application_id}` | bearer | `204` | job applications |
+| `GET` | `/api/v1/job-applications/{application_id}/events` | bearer | `200` | job applications |
+| `POST` | `/api/v1/job-applications/{application_id}/events` | bearer | `201` | job applications |
+| `PATCH` | `/api/v1/job-applications/{application_id}/events/{event_id}` | bearer | `200` | job applications |
+| `DELETE` | `/api/v1/job-applications/{application_id}/events/{event_id}` | bearer | `204` | job applications |
 | `GET` | `/api/v1/openapi.json` | — | `200` | the document itself |
 | `GET` | `/api/v1/docs/` | — | `200` | the explorer |
 
-The first 34 rows are the operations the document describes and the two route
+The first 48 rows are the operations the document describes and the two route
 tables declare, and `tests/openapi_contract.rs` holds them together in both
 directions. The last two rows are the explorer and the document itself: they are
 served, but they are mounted by `swagger_ui` and are **not** operations in the

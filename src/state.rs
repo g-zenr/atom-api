@@ -15,6 +15,8 @@ use crate::auth::password::PasswordHasher;
 use crate::auth::service::AuthService;
 use crate::auth::token::TokenService;
 use crate::config::Config;
+use crate::job_applications::repository::JobRepository;
+use crate::job_applications::service::JobService;
 use crate::notes::repository::NoteRepository;
 use crate::notes::service::NoteService;
 use crate::projects::repository::ProjectRepository;
@@ -46,6 +48,8 @@ pub struct AppState {
     pub tasks: TaskService,
     /// The expense claim use cases.
     pub reimbursements: ClaimService,
+    /// The company, job-application and event use cases.
+    pub job_applications: JobService,
 }
 
 impl AppState {
@@ -109,6 +113,11 @@ impl AppState {
             messages.clone(),
             config.api.pagination,
         );
+        let job_applications = JobService::new(
+            JobRepository::new(db.clone()),
+            messages.clone(),
+            config.api.pagination,
+        );
 
         Ok(Self {
             config: Arc::new(config),
@@ -119,6 +128,7 @@ impl AppState {
             projects,
             tasks,
             reimbursements,
+            job_applications,
         })
     }
 }

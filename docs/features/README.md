@@ -32,8 +32,8 @@ Reimbursements is `Implemented`: `migrations/0004_expense_claims.sql`,
 `tests/claims_schema.rs`, `tests/claims_api.rs`, `tests/claims_flow.rs` and
 `tests/openapi_contract.rs` are written against them. Job applications has its
 **schema only**: `migrations/0005_job_applications.sql` and
-`src/job_applications/{mod,models}.rs`, with `tests/jobs_schema.rs` proving the
-constraints, but no endpoint and no service. Local machine learning has nothing
+`src/job_applications/{mod,models}.rs`, with `tests/jobs_schema.rs` and `tests/job_applications_api.rs` proving the
+constraints and all fourteen published operations. Local machine learning has nothing
 yet. Neither is `Implemented` or `Verified`; a passing suite is not a review.
 
 The status column summarises the feature as a whole. The per-requirement

@@ -1,28 +1,27 @@
 # Job applications — testing
 
-> **Status:** Accepted
+> **Status:** Implemented
 > **Last updated:** 2026-10-24
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-JOB-001`](specification.md)
 
-What is covered today, and what the suite must contain once the feature has
-behaviour.
+What is covered today, in which file, and by which case.
 
-**The schema layer is written; the endpoint layer is not.** `tests/jobs_schema.rs`
-exists with eleven cases and `tests/seeder.rs` holds one case for this feature.
-`tests/job_applications_api.rs` **does not exist**, because there is no handler,
-service, repository, DTO or route to drive: `/api/v1/openapi.json` is still at
-34 operations. Every name in §2 and §3 below is therefore a **plan**, not a test
-in the tree, and no name in this document is a claim that a test passed. What
-must pass is in [`verification-policy.md`](../../testing/verification-policy.md);
-the result of a run belongs in the verification record and in
-[status.md](status.md), and no run is recorded there.
+**Both layers are written; no run is recorded.** `tests/job_applications_api.rs`
+holds 51 endpoint cases, `tests/jobs_schema.rs` eleven schema cases,
+`tests/openapi_contract.rs` carries four cases for this feature, and
+`tests/seeder.rs` one. The module holds eighteen unit tests, thirteen in
+`service.rs` and five in `dto.rs`. Every name below is a test **on disk**; none
+of them is a claim that a run passed. `cargo` was not run while this document was
+written, because two agents were writing the tree.
 
-**The rule that makes a test evidence:** a test that cannot fail for the reason
-it names is not evidence. Each test must be shown to fail when the rule it
-protects is removed — the transition table entry deleted, the `user_id`
-predicate dropped, the unique index removed, `NO ACTION` changed to `RESTRICT` —
-and pass again when restored.
+The rule that makes a test evidence is in [`strategy.md`](../../testing/strategy.md)
+§7.4: a test that cannot fail for the reason it names is not evidence. Each case
+below must be shown to fail when the rule it protects is removed — the transition
+table entry deleted, the `user_id` predicate dropped, the unique index removed,
+`NO ACTION` changed to `RESTRICT` — and pass again when restored. What must pass
+before a change is complete is in
+[`verification-policy.md`](../../testing/verification-policy.md).
 
 ## 1. The schema suite — `tests/jobs_schema.rs`
 
@@ -36,23 +35,23 @@ control row**, so a table that refuses everything cannot pass.
 
 | # | Test | The rule it proves | Serves |
 | - | ---- | ------------------ | ------ |
-| 1 | `the_job_tables_apply_from_an_empty_database` | A scratch database created empty ends with `_sqlx_migrations` at versions `1..=5`, the three tables and the two enum types, and the scratch database is dropped afterwards. Nothing is proved against a database that was already migrated by another test. | The precondition of `JOB-R01`…`R09`: no constraint can be tested against a schema that did not apply. |
+| 1 | `the_job_tables_apply_from_an_empty_database` | A scratch database created empty ends with `_sqlx_migrations` at versions `1..=5`, the three tables and the two enum types, and the scratch database is dropped afterwards. | The precondition of `JOB-R01`…`R09`. |
 | 2 | `a_company_name_is_unique_per_owner_case_insensitively` | `Acme` stores with its casing; `acme` and `ACME` for the same owner are each `23505` naming `companies_user_id_lower_name_unique_idx`; the same name for a second owner is accepted; no rejected insert left a row. | `JOB-R01`. |
-| 3 | `a_company_name_must_be_trimmed` | `"Globex "`, `" Initech"` and `"Umbrella  "` are each `23514` naming `companies_name_trimmed_chk`, after a trimmed control insert. The names are unique once trimmed, so the trim check is the only constraint that could have refused them. | `JOB-R01`. |
-| 4 | `an_application_cannot_belong_to_another_owners_company` | An application whose own `user_id` is honest and whose `company_id` belongs to another owner is `23503` naming `job_applications_company_fk`; the same row with the company's owner is accepted. The direct `users` key is satisfied in both, so only the composite key can explain the rejection. | `JOB-R02`, `JOB-R09`. |
+| 3 | `a_company_name_must_be_trimmed` | `"Globex "`, `" Initech"` and `"Umbrella  "` are each `23514` naming `companies_name_trimmed_chk`, after a trimmed control insert. | `JOB-R01`. |
+| 4 | `an_application_cannot_belong_to_another_owners_company` | An application whose own `user_id` is honest and whose `company_id` belongs to another owner is `23503` naming `job_applications_company_fk`; the same row with the company's owner is accepted. | `JOB-R02`, `JOB-R09`. |
 | 5 | `a_company_with_applications_cannot_be_deleted` | A direct `DELETE FROM companies` while an application remains is `23503` naming `job_applications_company_fk`; a company with no applications deletes; **and `DELETE FROM users` for the owner then succeeds**, taking the company and the application with it. The last step is the `NO ACTION` half — `RESTRICT` would fail it. | `JOB-R06`. |
 | 6 | `deleting_an_application_deletes_its_events` | Deleting one application removes its three events through `ON DELETE CASCADE`, and another application's event survives. | `JOB-R06`. |
-| 7 | `deleting_an_account_deletes_its_companies_applications_and_events` | `DELETE FROM users` removes the account's rows from all three tables through the `user_id` cascade, and another account's company, application and event survive. | `JOB-R09` — the ownership column's cascade. No requirement states account deletion separately; this is the delete half of the ownership model. |
+| 7 | `deleting_an_account_deletes_its_companies_applications_and_events` | `DELETE FROM users` removes the account's rows from all three tables through the `user_id` cascade, and another account's rows survive. | `JOB-R09` — the delete half of the ownership model. |
 | 8 | `a_salary_bound_requires_a_currency` | A minimum with no currency, a maximum with no currency, and a currency with no bound are each `23514` naming `job_applications_salary_currency_required_chk`; the all-null shape and a complete range are accepted. | `JOB-R03`. |
-| 9 | `a_salary_minimum_above_the_maximum_is_refused` | An inverted pair is `23514` naming `job_applications_salary_range_chk`; equal bounds are accepted, because the rule is `<=`; a negative bound is `23514` naming `job_applications_salary_non_negative_chk`, a **different** constraint with its own name. | `JOB-R03`. |
-| 10 | `money_is_stored_with_four_decimal_places` | `"1490.5"` and `"2000"` read back through `::text` as `"1490.5000"` and `"2000.0000"`, and `"149.876549"` is **rounded** to `"149.8765"` by the column. The second assertion pins the observed behaviour rather than assuming the database rejects a fifth decimal; the four-decimal **input** rule is the service's, and is planned in §2.4. | `JOB-R03`. |
-| 11 | `an_unknown_stage_is_unrepresentable` | All seven stages cast and store; `"onsite"` is `22P02` with **no constraint named**, because the enum type refuses the token before a `CHECK` could run. That is the difference between the native type and a `CHECK` on text. | `JOB-R04` — the vocabulary half only. The edge table is `JOB-R04`'s service half and has no test. |
+| 9 | `a_salary_minimum_above_the_maximum_is_refused` | An inverted pair is `23514` naming `job_applications_salary_range_chk`; equal bounds are accepted; a negative bound is `23514` naming `job_applications_salary_non_negative_chk`, a **different** constraint with its own name. | `JOB-R03`. |
+| 10 | `money_is_stored_with_four_decimal_places` | `"1490.5"` and `"2000"` read back through `::text` as `"1490.5000"` and `"2000.0000"`, and `"149.876549"` is **rounded** to `"149.8765"` by the column. The four-decimal **input** rule is the service's, and is asserted in §2.6 and §4. | `JOB-R03`. |
+| 11 | `an_unknown_stage_is_unrepresentable` | All seven stages cast and store; `"onsite"` is `22P02` with **no constraint named**, because the enum type refuses the token before a `CHECK` could run. | `JOB-R04` — the vocabulary half. The edge table is §2.3. |
 
 ### 1.1 The seeder case — `tests/seeder.rs`
 
 | Test | The rule it proves | Serves |
 | ---- | ------------------ | ------ |
-| `the_seeder_dev_profile_inserts_the_documented_company_and_application_counts` | The `dev` profile reports and stores 20 applications, 12 companies and 50 events, with zero skipped after `--reset`; the company and application ids are the deterministic `SHA-256("atom-seed/v1/<entity>/<index>")` values; every application resolves a company, and that company has the application's owner; every seeded salary bound carries a currency and no currency appears without a bound. | The fixture half of `JOB-R01`, `JOB-R02`, `JOB-R03` and `JOB-R09`: the seeded rows exercise the constraints rather than merely coexisting with them. |
+| `the_seeder_dev_profile_inserts_the_documented_company_and_application_counts` | The `dev` profile reports and stores 20 applications, 12 companies and 50 events, with zero skipped after `--reset`; the ids are the deterministic `SHA-256("atom-seed/v1/<entity>/<index>")` values; every application resolves a company, and that company has the application's owner; every seeded salary bound carries a currency and no currency appears without a bound. | The fixture half of `JOB-R01`, `JOB-R02`, `JOB-R03` and `JOB-R09`. |
 
 The count itself is derived, not copied: 20 applications alternate between two
 owners, so each owner has 10; each owner gets `ceil(10 / 3) + 2 == 6` companies,
@@ -61,171 +60,224 @@ cycles is 50. `minimal` gives 1 / 5 / 1 and `demo` 40 / 18 / 100.
 
 ### 1.2 What the schema suite does **not** cover
 
-These rules are enforced by `0005` and are asserted by nothing today. They are
-not "covered by the endpoint plan" in the sense of being written; they are gaps
-with a plan attached.
+Every rule below is enforced by `0005` and is not asserted by a schema test. The
+third column names where it is asserted instead, if it is.
 
-| Rule in the schema that no test asserts | Where it would be asserted |
-| --------------------------------------- | -------------------------- |
-| `companies_name_length_chk`, `companies_notes_length_chk`, `job_applications_role_title_length_chk`, `job_applications_description_length_chk`, `job_applications_source_chk` (the trim and the 1..64 bound), `application_events_summary_length_chk`, `application_events_details_length_chk` | The `422` cases in §2.2, §2.5 and §2.6, through the API. |
-| `companies_website_chk` and `job_applications_job_url_chk` | `a_company_website_must_be_an_http_url` and `a_job_url_must_be_an_http_url` in §2.2 and §2.5. |
-| The `application_event_kind` vocabulary — no case inserts a bad kind | `an_event_kind_is_one_of_six` in §2.6, which is an API case with no schema counterpart. |
-| `occurred_at NOT NULL`, and that a future value is accepted | `an_event_with_a_future_occurred_at_is_accepted` in §2.6. |
-| `job_applications_next_action_task_fk … ON DELETE SET NULL` | `deleting_the_task_clears_the_next_action` in §2.5. |
-| The orders the two listing indexes serve | The listing cases in §2.2 and §2.6; an index is an access path, not an order. |
+| Rule in the schema that no schema test asserts | Where it is asserted now |
+| ---------------------------------------------- | ------------------------ |
+| `companies_name_length_chk`, `companies_name_trimmed_chk` through the API, `companies_notes_length_chk`, `job_applications_role_title_length_chk`, `application_events_summary_length_chk`, `application_events_details_length_chk` | `a_company_name_is_trimmed_and_bounded`, `a_company_notes_are_bounded`, `a_role_title_is_trimmed_and_bounded`, `an_event_summary_is_required_and_bounded` (§2.2, §2.5). |
+| `job_applications_description_length_chk` | **Nowhere.** No case sends a description over 10 000 characters. |
+| `companies_website_chk` and `job_applications_job_url_chk` — the scheme half | `a_company_website_must_be_absolute_http_or_https`, `a_job_url_must_be_an_http_url` (§2.1, §2.2). |
+| The same two checks — the **length** half (2048) | **Nowhere** through the API; no case sends a 2049-character URL. |
+| `job_applications_source_chk` — the trim and the 1..64 bound | The unit test `a_source_is_trimmed_and_has_no_blank_spelling` (§4). No API case sends a blank `source`. |
+| The `application_event_kind` vocabulary — no schema case inserts a bad kind | `an_event_kind_is_one_of_six` (§2.5) and the unit case of the same name (§4). |
+| `occurred_at NOT NULL`, and that a future value is accepted | `an_event_with_a_future_occurred_at_is_accepted`, `an_event_occurred_at_requires_a_timezone` (§2.5). |
+| `job_applications_next_action_task_fk … ON DELETE SET NULL` | `deleting_the_task_clears_the_next_action` (§2.4). |
+| The orders the three listing indexes serve | `the_companies_listing_is_alphabetical_and_paginated`, `the_applications_listing_is_newest_first`, `events_are_ordered_by_occurred_at` (§2). An index is an access path, not an order. |
 
-## 2. The endpoint layer — `tests/job_applications_api.rs` (planned, not written)
+## 2. The endpoint suite — `tests/job_applications_api.rs`
 
-The file does not exist. It will use the shared harness in `tests/common/mod.rs`:
-the real router, a real PostgreSQL database, a unique user per test, no mocks.
-Each case below is a plan; none is a claim about a run.
+Fifty-one cases. The file drives the real router against a real, disposable
+PostgreSQL database: a unique account per test, the shared harness in
+`tests/common/mod.rs`, no mocks. One SQL fixture exists —
+`pin_created_at` writes an application's creation instant, because the API never
+accepts `created_at` and the `created_at DESC, id DESC` order has to be decided
+rather than hoped for. The assertion is still on the API response; the SQL only
+builds the state.
 
-### 2.1 Companies — happy paths
+The file groups its cases the way the contract does, and so does this section.
 
-| Test | What it proves |
-| ---- | -------------- |
-| `a_company_can_be_created_read_updated_and_deleted` | `POST` returns `201` with the trimmed name; `GET` returns it; `PATCH` changes only the website and leaves `notes`; `DELETE` returns `204`; a following `GET` returns `404`. |
-| `a_company_name_is_unique_per_owner` | Creating `Acme` and then `acme` with the same token is `409 conflict`; the stored name is unchanged. |
-| `two_owners_may_use_the_same_company_name` | The same name under two accounts is two successful creates. |
-| `renaming_a_company_onto_an_existing_name_is_refused` | `PATCH` onto the other company's name is `409`; onto the same name in different case is accepted. |
-| `a_company_can_be_deleted_once_its_applications_are_gone` | Delete the only application, then the company: `204`, and the company is gone. |
-| `a_company_with_applications_cannot_be_deleted` | A company with one application: `DELETE` returns `409 conflict`; both the company and the application are still readable; delete the application; `DELETE` the company returns `204`. This is the test `JOB-R06` names. |
+### 2.1 Companies
 
-### 2.2 Companies — validation and ownership
+| Test | The rule it proves | Serves |
+| ---- | ------------------ | ------ |
+| `a_company_can_be_created_read_changed_and_deleted` | `201` with `user_id` absent and the optional fields defaulted; `GET`; `PATCH` changing `notes` and clearing `website` with `null` while leaving `name`; `204`; then `404`; the listing holds only the survivor. | `JOB-R01`, `JOB-R09`. |
+| `a_company_name_is_unique_per_owner_ignoring_case` | `Acme`, `acme`, `ACME` and `"  acme  "` are each `409 conflict`; the stored row and its casing are unchanged. | `JOB-R01`. |
+| `renaming_a_company_onto_an_existing_name_is_refused` | A rename onto another company's name is `409` in three casings and writes nothing; a rename onto the company's **own** name, and a case-only rewrite of it, are `200`. | `JOB-R01`. |
+| `two_accounts_may_use_the_same_company_name` | The same name under two accounts is two `201`s, and each listing holds one. | `JOB-R01`. |
+| `a_company_name_is_trimmed_and_bounded` | 200 characters surrounded by spaces is stored trimmed; `""` and `"   "` are `422` naming `name`, never `409`; 201 is `422`; the same on a rename. | `JOB-R01`. |
+| `a_company_website_must_be_absolute_http_or_https` | A bare host, `ftp://`, `data:` and a protocol-relative value are each `422` naming `website`; `http://` is `201`. | `JOB-R01`. |
+| `a_company_notes_are_bounded` | 5 000 characters is `201` and stored whole; 5 001 is `422` naming `notes`. | `JOB-R01`. |
+| `a_company_with_applications_cannot_be_deleted` | `409 conflict`; then the company is still readable, the application is still readable with the same `company_id`, and the listing holds it. Nothing was deleted to make the delete succeed. | `JOB-R06`. |
+| `a_company_can_be_deleted_once_its_applications_are_gone` | Delete the application, then the company: `204` **with no body**, then `404`, then an empty page. | `JOB-R06`. |
+| `the_companies_listing_is_alphabetical_and_paginated` | Three names inserted out of order arrive `lower(name)`; `?limit=1&offset=1` returns the second and `has_more` is `true`. | `JOB-R01`, `JOB-R09`. |
+| `the_companies_listing_searches_by_name` | A case-insensitive substring for three casings; no match is an empty page; an empty term is no filter; 201 characters is `422` naming `search`. | `JOB-R01`. |
 
-| Test | What it proves |
-| ---- | -------------- |
-| `a_company_name_is_trimmed_and_bounded` | `"  Acme  "` is stored as `"Acme"`; `"   "` is `422`; 201 characters is `422`, 200 is accepted. |
-| `a_company_website_must_be_an_http_url` | `javascript:…`, `file:///…` and a relative path are `422`; `https://…` is accepted and returned verbatim. |
-| `a_company_notes_are_bounded` | 5001 characters is `422`. |
-| `a_company_of_another_user_is_invisible` | Another token gets `404` on `GET`, `PATCH` and `DELETE`; the owner still reads it. |
-| `the_companies_listing_only_contains_the_callers_companies` | One foreign company plus two own: `total` is 2. |
-| `the_companies_listing_is_alphabetical_and_paginated` | Inserted out of order, the page arrives `lower(name)`, `name`, `id`; `?limit=1&offset=1` returns the second and `has_more` true. |
-| `the_companies_listing_searches_by_name` | `?search=acm` matches `Acme` and not `Globex`. |
-| `a_company_id_must_be_a_uuid` | `GET /api/v1/companies/not-a-uuid` is `400`. |
+### 2.2 Applications
 
-### 2.3 Applications — happy paths and the stage machine
+| Test | The rule it proves | Serves |
+| ---- | ------------------ | ------ |
+| `an_application_can_be_created_read_changed_and_deleted` | `201` with every published field, `role_title` trimmed, money as four-decimal strings, `user_id` absent; a minimal create defaults `status` to `wishlist` and every optional field to `null`/`""`; `GET`; `PATCH` clearing `source`, `applied_on` and `job_url` with `null` while leaving the salary, title and description; `204`; then `404`; the company survives. | `JOB-R02`, `JOB-R03`. |
+| `a_create_with_a_stage_other_than_wishlist_is_refused` | The other six stages are each `422` naming `status`; `"wishlist"` and an omitted stage are `201`; only those two rows exist afterwards. A create is not a transition, so this is a `422`, never a `409`. | `JOB-R02`, `JOB-R04`. |
+| `a_role_title_is_trimmed_and_bounded` | `""` and `"   "` are `422`; 201 is `422`; 200 surrounded by spaces is stored trimmed; the same on a `PATCH`, and a refused `PATCH` leaves the stored title intact. | `JOB-R02`. |
+| `an_application_date_must_be_a_date` | `2026-02-30`, `2026-13-01`, `02-10-2026` and `tomorrow` are each `422` naming `applied_on`. | `JOB-R02`. |
+| `a_job_url_must_be_an_http_url` | `data:`, a bare host and `ftp://` are each `422` naming `job_url`. | `JOB-R02`. |
+| `an_unknown_stage_in_a_body_is_refused` | `"hired"` is `422 validation_failed` — a well-formed body breaking the contract, never `409` and never `400` — and the stage is unchanged. | `JOB-R04`. |
+| `the_applications_listing_is_newest_first` | Four applications with pinned creation instants, two of them tied, arrive `created_at DESC, id DESC`; the tie expectation is derived from the identifiers the server assigned. | `JOB-R09`. |
+| `the_applications_listing_filters_by_stage_company_and_dates` | Six queries: unfiltered, stage, company, role search, both date bounds, and an upper bound alone; each asserts the titles and the `total`; an application with a `null` `applied_on` is excluded by a date bound; no match is an empty page; `?status=hired` and a non-UUID `company_id` are `400`; a reversed range is `422` naming `applied_from`. | `JOB-R09`. |
 
-| Test | What it proves |
-| ---- | -------------- |
-| `an_application_can_be_created_and_read` | `POST` returns `201` with the company, the role and the stage; `GET` returns the same application. |
-| `an_application_defaults_to_wishlist` | A create without `status` stores `wishlist`. |
-| `a_wishlist_application_can_reach_offer` | The **flow test**: create `wishlist`, `PATCH` to `applied`, `screening`, `interview`, `offer`, each `200` with the new stage and a newer `updated_at`. |
-| `every_permitted_stage_change_is_accepted` | All twelve listed edges, one case each: the four forward edges and `rejected`/`withdrawn` from each of the four non-terminal stages. |
-| `every_forbidden_stage_change_is_refused` | Every one of the **30** ordered pairs that is neither one of the 12 allowed edges nor a self-pair — a skipped stage, a backwards move, a move between `rejected` and `withdrawn`, and every move out of a terminal stage — is `409 conflict` and leaves the stage unchanged. |
-| `offer_rejected_and_withdrawn_are_terminal` | One explicit case per terminal stage: no move **out of** a terminal stage is accepted, while re-sending the terminal stage itself is still a no-op (`200`, unchanged). |
-| `sending_the_current_stage_is_accepted` | One case per stage: `PATCH {"status":"<current>"}` on each of the seven stages is `200` and changes nothing. These seven self-pairs are no-ops, not refusals. |
-| `a_refused_stage_change_does_not_write_the_other_fields` | `PATCH {"status":"interview","role_title":"Changed"}` from `wishlist` is `409` **and** the role title is unchanged, because the request is one transaction. |
-| `a_create_with_a_stage_other_than_wishlist_is_refused` | `POST` with `"status":"applied"` is `422`; the same body without `status` creates a `wishlist` application. Only `wishlist` or an omitted stage is accepted on create (`JOB-R02`). |
+### 2.3 The stage machine
 
-### 2.4 Applications — money values
+| Test | The rule it proves | Serves |
+| ---- | ------------------ | ------ |
+| `every_permitted_stage_change_is_accepted` | The table is pinned at 12 edges, 30 refusals and 7 self-pairs, and the three partition all 49 pairs. Each of the twelve edges is walked to its `from` stage through the API, then `PATCH`ed: `200` with the new stage, and the stored row agrees. | `JOB-R04`. |
+| `sending_the_current_stage_is_accepted_and_changes_nothing` | One case per stage: re-sending the current stage is `200`, every content field is byte-identical before and after (in the response **and** in a later read), and `updated_at` never moves backwards. An implementation that treats "not one of the twelve edges" as "refuse" answers `409` here and passes the twelve-edge test. | `JOB-R04`. |
+| `every_forbidden_stage_change_is_refused` | All 30 refused pairs are `409 conflict`; the stage, `created_at` and `updated_at` are unchanged after each, because the row was never written. | `JOB-R04`. |
+| `offer_rejected_and_withdrawn_are_terminal` | For each terminal stage, all seven targets: the same stage is a `200` no-op and every other one is `409`, with the stage unchanged. | `JOB-R04`. |
+| `a_refused_stage_change_does_not_write_the_other_fields` | `{"status":"interview","role_title":"Changed"}` from `wishlist` is `409`, and the title, the stage and `updated_at` are unchanged: the request is one statement, not a sequence. | `JOB-R04`. |
 
-| Test | What it proves |
-| ---- | -------------- |
-| `salary_money_round_trips_with_four_decimals` | `"60000.0000"` and `"75000.0000"` are returned byte-identically; `"0.0000"` is accepted. |
-| `a_json_number_where_salary_is_expected_is_refused` | `{"salary_min": 60000}` is `422` naming `salary_min`. |
-| `a_salary_bound_requires_a_currency` | `salary_min` without `salary_currency` is `422`. This is the API half of a rule the schema already holds; both must refuse, and the client must see the `422` rather than a `23514`. |
-| `a_salary_minimum_above_the_maximum_is_refused` | `"80000.0000"` above `"75000.0000"` is `422`; the pair is unchanged. |
-| `clearing_both_salary_bounds_clears_the_currency` | `PATCH` with both bounds `null` returns `salary_currency` `null`. |
+### 2.4 The cross-links to Phase 1
 
-### 2.5 Applications — validation and ownership
+| Test | The rule it proves | Serves |
+| ---- | ------------------ | ------ |
+| `the_next_action_task_must_belong_to_the_caller` | A foreign task on create is `404` and nothing is created; the caller's own task is accepted and echoed; a foreign task on `PATCH` is `404` and the existing link is kept; a UUID that names no task is the same `404`. | `JOB-R07`. |
+| `deleting_the_task_clears_the_next_action` | After `DELETE /tasks/{id}`, the application survives with `next_action_task_id` `null`, its title and stage intact. | `JOB-R07`. |
+| `an_application_can_be_moved_to_another_of_the_callers_companies` | `PATCH {"company_id": other}` is `200` and stored; the old company then deletes with `204` and the new one is `409`, which proves the link moved rather than a second row appearing. | `JOB-R02`, `JOB-R06`. |
 
-| Test | What it proves |
-| ---- | -------------- |
-| `an_application_cannot_target_another_users_company` | A create or a `PATCH` with a foreign `company_id` is `404`, and nothing is written. The schema would answer `23503`; the client must see `404`. |
-| `the_next_action_task_must_belong_to_the_caller` | A foreign `next_action_task_id` is `404`; the caller's own task is accepted. This is the **only** evidence for that rule: no constraint can fail for it (`JOB-R07`). |
-| `deleting_the_task_clears_the_next_action` | After `DELETE /tasks/{id}`, the application still exists with `next_action_task_id` `null`. |
-| `a_role_title_is_trimmed_and_bounded` | 201 characters is `422`; `"  Engineer  "` is stored trimmed. |
-| `an_application_date_must_be_a_date` | `applied_on` `"2026-02-30"` is `422`. |
-| `a_job_url_must_be_an_http_url` | A `data:` value is `422`. |
-| `an_unknown_stage_in_a_body_is_refused` | `{"status":"hired"}` is `422` (the body parses but breaks the contract), not `400`. |
-| `an_application_of_another_user_is_invisible` | Another token gets `404` on `GET`, `PATCH` and `DELETE`. |
-| `the_applications_listing_only_contains_the_callers_applications` | `total` excludes the foreign application. |
-| `the_applications_listing_filters_by_stage_company_and_dates` | Each filter alone, and `applied_on` null excluded when a bound is present. |
-| `the_applications_listing_is_newest_first` | Items arrive `created_at DESC, id DESC`. |
-| `the_applications_listing_honours_the_pagination_bounds` | Five applications, `?limit=2&offset=0`: two items, `total` 5, `has_more` true; a limit above the configured maximum is clamped; an offset past the end is an empty page, not `404`. |
-| `an_unknown_stage_filter_is_refused` | `?status=hired` is `400`, because the query string cannot be parsed. |
-| `an_application_id_must_be_a_uuid` | `GET /api/v1/job-applications/not-a-uuid` is `400`. |
+### 2.5 Events
 
-### 2.6 Events
+| Test | The rule it proves | Serves |
+| ---- | ------------------ | ------ |
+| `an_event_can_be_added_changed_and_deleted` | `201` with the summary trimmed, `occurred_at` preserved, `user_id` and `updated_at` **absent**; a minimal create defaults `details`; two `PATCH`es correcting one field then the rest, each `200`, each with no `updated_at`, an omitted field left alone and an offset normalised to UTC; the stored row is the corrected one and `created_at` is not rewritten; `204` with no body; the listing holds only the survivor. | `JOB-R05`. |
+| `events_are_ordered_by_occurred_at` | Four events posted out of order arrive `occurred_at DESC`; two at the same instant are ordered by `id DESC`, derived from the assigned ids; `?limit=2` returns two with `has_more` true. | `JOB-R05`. |
+| `an_event_with_a_future_occurred_at_is_accepted` | A 2099 interview is `201` and echoed: there is no past-only rule. | `JOB-R05`. |
+| `an_event_kind_is_one_of_six` | Each of the six is `201` and echoed; `"meeting"` and `"screening"` are `422`; the listing holds exactly six. | `JOB-R05`. |
+| `an_event_summary_is_required_and_bounded` | `""` and `"   "` are `422` naming `summary`; 201 is `422`; `details` of 10 001 is `422` naming `details`. | `JOB-R05`. |
+| `an_event_occurred_at_requires_a_timezone` | A local time with no offset and a non-timestamp are each `422`; the listing stays empty. | `JOB-R05`. |
+| `an_event_id_cannot_be_used_under_another_application` | An event of the caller's application A, addressed under application B, is `404` on `PATCH` and on `DELETE`; it is neither moved nor returned, and B's page is empty. | `JOB-R05`, `JOB-R09`. |
+| `deleting_an_application_removes_its_events` | After the application is deleted, the events endpoint is `404`; a direct count of `application_events` for that id is zero, which the `404` alone would not prove; another account's application and event survive. | `JOB-R05`, `JOB-R06`. |
 
-| Test | What it proves |
-| ---- | -------------- |
-| `an_event_can_be_added_changed_and_deleted` | `POST` returns `201`; `PATCH` corrects `summary`, and a second `PATCH` corrects `kind`, `occurred_at` and `details`; each response is `200` and carries **no `updated_at` field**; `DELETE` returns `204` and the event is gone. The absence of `updated_at` is the locked decision `A-D1-1`, so the test asserts it explicitly rather than ignoring it. |
-| `events_are_ordered_by_occurred_at` | Three events inserted out of order arrive `occurred_at DESC`, `id DESC`; two with the same `occurred_at` are ordered by `id DESC`. |
-| `an_event_with_a_future_occurred_at_is_accepted` | A scheduled interview dated next month is `201`; there is no past-only rule. |
-| `an_event_kind_is_one_of_six` | Each of the six is accepted; `"meeting"` is `422`. The schema suite does not exercise this vocabulary at all (§1.2). |
-| `an_event_summary_is_required_and_bounded` | `""` is `422`; 201 characters is `422`. |
-| `an_event_details_are_bounded` | 10 001 characters is `422`. |
-| `an_event_occurred_at_requires_a_timezone` | `"2026-10-14T13:00:00"` without an offset is `422`. |
-| `an_event_of_another_users_application_is_invisible` | `GET`, `POST`, `PATCH` and `DELETE` under a foreign application are `404`. |
-| `an_event_id_cannot_be_used_under_another_application` | An event of the caller's application A used under application B is `404`, not moved and not returned. |
-| `the_events_listing_honours_the_pagination_bounds` | Three events with `?limit=2` returns two and `has_more` true. |
-| `deleting_an_application_removes_its_events` | After the application is deleted, the events endpoint on the old id is `404`, and a direct count is zero. The schema half of this is already proved by `deleting_an_application_deletes_its_events` (§1). |
+### 2.6 Salary money
 
-### 2.7 The error codes
+| Test | The rule it proves | Serves |
+| ---- | ------------------ | ------ |
+| `salary_money_round_trips_with_four_decimals` | `"60000.0000"`/`"75000.0000"`, `"0.0000"` and `"999999999999999.9999"` are returned byte-identically through a second operation; a single bound with a currency is accepted and the other stays `null`; clearing the last bound clears the currency. | `JOB-R03`. |
+| `a_salary_bound_without_a_currency_is_refused` | Minimum alone, maximum alone and both without a currency are each `422` — the client sees the `422`, not a `23514` presented as a `500` — and nothing is created. | `JOB-R03`. |
+| `a_salary_currency_without_a_bound_is_refused` | A currency with no bound is `422` on create, and on `PATCH` it is refused without clearing the stored bounds or currency. | `JOB-R03`. |
+| `an_inverted_salary_range_is_refused` | An inverted pair is `422` on create; equal bounds are `201`; inverting a stored pair with a one-bound `PATCH` is `422` and the pair stays as it was. | `JOB-R03`. |
+| `a_salary_currency_is_three_upper_case_letters` | `EU`, `EURO`, `E1R` and `EU R` are `422`; `"eur"` is accepted and returned as `"EUR"`. | `JOB-R03`. |
+| `a_json_number_where_a_salary_is_expected_is_refused` | `{"salary_min": 60000}` and `"60000.00"` are each `422`, and nothing is created: the wire form is a four-decimal string, and the server refuses rather than rounds. | `JOB-R03`. |
 
-| Code | Status | Proving test |
-| ---- | ------ | ------------ |
-| `bad_request` | `400` | `a_company_id_must_be_a_uuid`, `an_unknown_stage_filter_is_refused`, `a_malformed_body_is_refused` |
-| `unauthorized` | `401` | `the_job_routes_require_a_credential` |
-| `not_found` | `404` | `a_company_of_another_user_is_invisible`, `an_application_of_another_user_is_invisible`, `an_event_of_another_users_application_is_invisible` |
-| `conflict` | `409` | `a_company_name_is_unique_per_owner`, `every_forbidden_stage_change_is_refused`, `a_company_with_applications_cannot_be_deleted` |
-| `payload_too_large` | `413` | `a_companies_body_over_the_limit_is_refused`; the mechanism is already proven by `a_body_over_the_limit_is_refused` in `tests/auth_api.rs` |
-| `validation_failed` | `422` | the §2.2, §2.4 and §2.5 tables |
-| `database_error` | `500` | not provable through the API without fault injection; the mapping is unit-tested in `src/error.rs` |
-| `timeout` | `408` | proven globally by the timeout test in `tests/projects_tasks_api.rs` |
+### 2.7 Ownership
 
-| Test | What it proves |
-| ---- | -------------- |
-| `the_job_routes_require_a_credential` | All fourteen operations, without a token and with an invalid one, return `401 unauthorized` in the standard envelope. |
-| `a_malformed_body_is_refused` | Truncated JSON is `400`; valid JSON with an unknown `kind` is `422`. |
-| `a_companies_body_over_the_limit_is_refused` | A companies body above `max_body_bytes` returns `413 payload_too_large`. |
+| Test | The rule it proves | Serves |
+| ---- | ------------------ | ------ |
+| `a_company_of_another_user_is_invisible` | Another account gets `404` on `GET`, `PATCH` and `DELETE`; the `DELETE` is `404` **before** the `409` question, so existence does not leak; the owner's company and application are untouched. | `JOB-R09`. |
+| `an_application_of_another_user_is_invisible` | Another account gets `404` on `GET`, on a legal stage move, on `DELETE`, and on all four event operations under the application; the owner's stage, title and event survive. | `JOB-R09`. |
+| `an_application_cannot_target_another_users_company` | A foreign `company_id` on create and on `PATCH` is `404`, a UUID that names no company is the same, and the stored `company_id`, title and stage are unchanged. | `JOB-R02`, `JOB-R09`. |
+| `the_listings_only_contain_the_callers_rows` | Both company listings, both application listings, and a company filter naming another account's company, which matches nothing rather than leaking its applications. | `JOB-R09`. |
 
-### 2.8 The contract
+### 2.8 The shared status codes
 
-| Test | What it proves |
-| ---- | -------------- |
-| `the_job_routes_are_in_the_openapi_document` | Each of the fourteen `(method, path)` pairs is an operation in `/api/v1/openapi.json`, and the document contains no job-application operation that the router does not serve. The existing two-direction test in `tests/openapi_contract.rs` covers it once the routes are in `ROUTE_TABLE`. The document is at 34 operations today. |
-| `the_salary_fields_are_strings_in_the_document` | `salary_min` and `salary_max` are `type: string` with a four-decimal pattern, never `type: number`. |
-| `the_job_listings_publish_their_parameters_once` | The companies, applications and events list operations publish their parameter sets exactly once each. |
-| `no_job_operation_generates_text` | No operation in the document has a path or a description that offers generation, and no request schema has a `prompt` field. This is the contract-level half of `JOB-R08`; the other half is an inspection of `src/job_applications/` showing no HTTP client and no model call. Neither half is assertable while the feature publishes no operation — the model file imports no HTTP client, and that is the only part that is true today. |
+| Test | What it asserts | Serves |
+| ---- | --------------- | ------ |
+| `every_job_application_operation_requires_a_credential` | All fourteen operations, with no token and with an invalid one, are `401 unauthorized` with no `details`, and nothing they sent landed. The operation list is built once and asserted to hold fourteen entries. | All nine. |
+| `every_job_application_operation_is_not_found_for_another_account` | The eleven row-addressed operations are `404` with no `details`; the two lists are `200` with an empty page; a company create is the caller's own, and the owner's rows are untouched. | `JOB-R09`. |
+| `every_path_id_must_be_a_uuid` | Twelve path shapes, including both id positions of the event route, are `400 bad_request`. | All nine. |
+| `every_write_operation_refuses_a_malformed_body` | Six write operations: truncated JSON and an empty body are `400`; `[]` is `422` naming `body`; nothing landed. | All nine. |
+| `every_operation_with_a_documented_validation_failure_is_a_422` | Eight cases across the three resources, each `422 validation_failed` with a non-empty `details`; nothing refused was written. | `JOB-R02`, `JOB-R03`, `JOB-R05`. |
+| `a_job_applications_body_over_the_limit_is_refused` | A body above `max_body_bytes` is `413 payload_too_large`, on a state built with a 256-byte limit so the refusal is about size and not validation. | All nine. |
 
-## 3. Unit tests — in the module (planned, not written)
+## 3. The contract layer — `tests/openapi_contract.rs`
 
-No file in §3 exists; `src/job_applications/service.rs` and `dto.rs` are `J2`'s.
+The document is generated from the handlers, and the route table is declared
+independently, so they are held together by assertion. The published surface is
+`CONTRACT_OPERATIONS = 48`.
+
+| Test | What it asserts | Serves |
+| ---- | --------------- | ------ |
+| `the_route_table_and_the_document_describe_the_same_operations` | The route table and the document describe the same operations **in both directions**, and the count is exactly 48. A job route the document omits, or an operation the router does not serve, fails here. | All nine, and `JOB-R08` in part. |
+| `every_route_in_the_table_is_served_by_the_router` | Every declared route is actually mounted. | All nine. |
+| `each_list_endpoint_publishes_its_filter_and_pagination_parameters_once` | `/api/v1/companies` publishes `limit`, `offset` and `search`; `/api/v1/job-applications` publishes the pagination pair, `status`, `company_id`, `search`, `applied_from` and `applied_to`; neither publishes a parameter twice. | `JOB-R01`, `JOB-R05`. |
+| `the_job_application_operations_publish_their_success_status` | The fourteen `(method, path, success status)` triples: three creates are `201`, seven reads and patches are `200`, four deletes are `204`; the table is asserted to hold fourteen rows, so a table that shrank cannot pass with fewer assertions. | All nine. |
+| `the_event_schemas_publish_no_updated_at` | `EventResponse`, `CreateEventRequest` and `UpdateEventRequest` publish no `updated_at` property — decision `A-D1-1`, at the contract level. | `JOB-R05`. |
+| `each_list_handler_extracts_the_query_string_once` | Reads the handlers and asserts that no list handler parses the query twice, which is what would publish `limit` and `offset` twice. | `JOB-R01`, `JOB-R05`. |
+
+`every_route_in_the_table_is_served_by_the_router` and
+`the_route_table_and_the_document_describe_the_same_operations` are shared with
+the rest of the API; the other four were written or extended by this chain.
+
+**What is not asserted** is behaviour behind the document: that every documented
+status code is reachable, or that a documented schema type is what a response
+returns. The `salary_min`/`salary_max` `type: string` claim is asserted for the
+**claim** money fields by `the_claim_money_fields_are_strings_in_the_document`,
+not for the job salary fields; §5 records that.
+
+## 4. Unit tests in the module
+
+Eighteen tests, in `#[cfg(test)] mod tests` blocks next to the code. They run
+without a database.
 
 | File | Test | What it proves |
 | ---- | ---- | -------------- |
-| `src/job_applications/service.rs` | `the_stage_machine_allows_exactly_the_twelve_edges` | Of the **49** ordered pairs, **12** are allowed edges, **7** are accepted no-ops (the self-pairs: `applied → applied` and the other six) and the remaining **30** are refused. The test asserts the three counts and every pair by name. |
-| `src/job_applications/service.rs` | `the_three_terminal_stages_have_no_exit` | No move **out of** `offer`, `rejected` or `withdrawn` is allowed; re-sending the terminal stage itself is a no-op, not an exit. |
-| `src/job_applications/service.rs` | `a_company_name_is_compared_ignoring_case_and_whitespace` | `" Acme "` and `"acme"` collide; `"Acme"` and `"Acme2"` do not. |
-| `src/job_applications/service.rs` | `a_salary_bound_without_a_currency_is_refused` | The pair rule, with `None` on each side in turn. |
-| `src/job_applications/dto.rs` | `an_event_kind_is_one_of_six` | Each accepted value and one refused value. |
-| `src/job_applications/service.rs` | `a_job_url_must_be_an_absolute_http_url` | Scheme and length checks, mirroring the receipt rule. |
+| `src/job_applications/service.rs` | `the_stage_machine_allows_exactly_the_twelve_edges` | All 49 pairs: 12 moves, 7 no-ops, 30 refusals, with the three counts asserted. |
+| `src/job_applications/service.rs` | `the_three_terminal_stages_have_no_exit` | No move out of `offer`, `rejected` or `withdrawn`; a self-pair is a no-op, not an exit. |
+| `src/job_applications/service.rs` | `the_permitted_sources_are_the_edges_into_the_stage_plus_itself` | The write predicate's array is the requested stage plus every source of an edge into it — derived, never hand-written. |
+| `src/job_applications/service.rs` | `a_create_accepts_only_wishlist_or_an_omitted_stage` | `None` and `wishlist` are accepted; the other six are refused with a field violation naming `status`. |
+| `src/job_applications/service.rs` | `a_company_name_is_trimmed_and_keeps_its_casing` | `"  Acme  "` becomes `"Acme"`; a blank is refused; the bound is measured after trimming. |
+| `src/job_applications/service.rs` | `a_website_and_a_job_url_must_be_absolute_http_urls` | Scheme, authority and the 2048 bound, on both fields. |
+| `src/job_applications/service.rs` | `a_salary_bound_without_a_currency_is_refused` | The pair rule, with `None` on each side in turn, and a currency with no bound. |
+| `src/job_applications/service.rs` | `a_salary_minimum_above_the_maximum_is_refused` | Order, with equal bounds accepted. |
+| `src/job_applications/service.rs` | `the_money_comparison_is_exact_and_ignores_leading_zeros` | `"05.0000"` and `"5.0000"` compare equal; no parse and no float. |
+| `src/job_applications/service.rs` | `a_patched_bound_is_validated_against_the_stored_triple` | A one-bound `PATCH` resolves against the stored triple before it can be written. |
+| `src/job_applications/service.rs` | `a_blank_search_means_no_filter` | An empty or spaces-only term is `None`, not an error. |
+| `src/job_applications/service.rs` | `a_reversed_applied_range_is_refused` | `from > to` is refused naming `applied_from`; equal bounds are a one-day range. |
+| `src/job_applications/service.rs` | `a_source_is_trimmed_and_has_no_blank_spelling` | `"  referral "` is trimmed; `""` and `"   "` are refused; 64 is accepted, 65 is not. |
+| `src/job_applications/dto.rs` | `a_nullable_company_field_is_kept_cleared_or_set_by_the_three_body_forms` | `{}`, `{"website":null}` and a value stay three distinct instructions. |
+| `src/job_applications/dto.rs` | `a_nullable_application_field_is_kept_cleared_or_set_by_the_three_body_forms` | The same for `source`, `job_url`, `next_action_task_id`, and that any salary field counts as a salary touch. |
+| `src/job_applications/dto.rs` | `an_event_kind_is_one_of_six` | Each accepted kind parses; `"meeting"` does not. |
+| `src/job_applications/dto.rs` | `an_event_occurred_at_requires_a_timezone` | No offset is refused; `+02:00` is accepted. |
+| `src/job_applications/dto.rs` | `a_create_without_a_stage_parses_and_the_stage_is_absent` | An omitted stage is `None` and `description` defaults to `""`, so the parse and the service's rule cannot disagree. |
 
-## 4. Deliberately not covered
+## 5. The requirement-to-test map
 
-| Gap | Why |
-| --- | --- |
-| **Two concurrent stage changes on one application.** | The `SELECT … FOR UPDATE` serialises them, but the test would be timing-dependent. It belongs to the hardening chain if it is added at all; the invariant is stated in [architecture.md](architecture.md) §2.4. |
-| **A live `409` from the company-delete race.** | It needs one request to insert while another deletes. The `NO ACTION` key makes the orphan impossible; the race is analysed, not tested. |
-| **A `database_error` through the API.** | Fault injection into a live pool; the mapping is already unit-tested in `src/error.rs`. |
-| **An event whose `occurred_at` is exactly the same as another's, in a different timezone.** | The comparison is on the stored `timestamptz`, and the tie-break by `id` is tested. A timezone-rendering matrix would test PostgreSQL, not ATOM. |
-| **The generated client's date handling.** | Out of scope for the API suite; the contract test asserts the schema type. |
-| **A rejection reason, a rating or a stage history.** | They do not exist; a test would invent them. |
-| **The `NO ACTION` refusal through the API.** | It is a `409` in the contract and a `23503` in the database. The database half is `a_company_with_applications_cannot_be_deleted`; the `409` mapping is `a_company_with_applications_cannot_be_deleted` in §2.1, once it exists. Neither is a single test of "the constraint causes the response", and that seam is deliberately not closed by a schema test. |
+| Requirement | The cases that carry it | What is **not** asserted |
+| ----------- | ----------------------- | ------------------------ |
+| `JOB-R01` | §1 cases 2, 3; §2.1 (all eleven); §2.8; §3 parameter sets. | — |
+| `JOB-R02` | §1 case 4; §2.2 (all eight); §2.4 `an_application_can_be_moved_to_another_of_the_callers_companies`; §2.7 `an_application_cannot_target_another_users_company`; §4 create and role-title unit tests. | A `description` over 10 000 characters. |
+| `JOB-R03` | §1 cases 8–10; §2.6 (all six); §2.8 `every_operation_with_a_documented_validation_failure_is_a_422`; §4 money and range unit tests. | A negative money string through the API (refused by the pattern, unasserted); a value above the 15-integer-digit bound through the API; the `type: string` contract for the job salary fields. |
+| `JOB-R04` | §1 case 11; §2.2 `a_create_with_a_stage_other_than_wishlist_is_refused`, `an_unknown_stage_in_a_body_is_refused`; §2.3 (all five); §4 the first four tests. | Any concurrency case (§6). |
+| `JOB-R05` | §1 cases 5, 6; §2.5 (all eight); §3 `the_event_schemas_publish_no_updated_at`; §4 two event-kind and timezone tests. | Event pagination beyond `?limit=2`: `offset`, the clamp, an offset past the end. |
+| `JOB-R06` | §1 cases 5, 6; §2.1 `a_company_with_applications_cannot_be_deleted`, `a_company_can_be_deleted_once_its_applications_are_gone`; §2.5 `deleting_an_application_removes_its_events`; §2.4 the company move. | The delete/insert race (§6). |
+| `JOB-R07` | §2.4 both cross-link cases. | The `ON DELETE SET NULL` from a schema-level statement: the API case is the only evidence. |
+| `JOB-R08` | §3 `the_route_table_and_the_document_describe_the_same_operations` (the surface is pinned at 48) and `the_job_application_operations_publish_their_success_status` (the fourteen operations are named). | **The absence of generation is asserted by nothing.** No case checks it; the evidence today is a reading of the route table and the module's imports. |
+| `JOB-R09` | §1 cases 4, 7; §2.1 `two_accounts_may_use_the_same_company_name`; §2.7 (all four); §2.8 `every_job_application_operation_is_not_found_for_another_account`, `every_job_application_operation_requires_a_credential`; §3 the route table. | — |
 
-## 5. Conventions for a new test
+## 6. Deliberately not covered, and not yet covered
+
+The first three are decisions; the rest are gaps with a name and no case, listed
+so that nobody reads the map in §5 as completeness.
+
+| Gap | Why or what it would take |
+| --- | ------------------------- |
+| **Two concurrent stage changes on one application.** | Timing-dependent. The serialisation is the single statement's `status = ANY(…)` predicate: the loser's `WHERE` is re-checked against the committed row version and matches nothing, so it is answered `409`. The invariant is stated in [architecture.md](architecture.md) §3.1; no case exercises it. |
+| **A live `409` from the company-delete race.** | It needs one request to insert while another deletes. `NO ACTION` makes the orphan impossible; the race is analysed, not tested. |
+| **A `database_error` through the API.** | Fault injection into a live pool; the mapping is unit-tested in [`../../../src/error.rs`](../../../src/error.rs). The `408` timeout is proven globally by the timeout case in `tests/projects_tasks_api.rs`, not by this file. |
+| **The application-listing pagination bounds.** | No case sends `?limit=` or `?offset=` to `GET /job-applications`, so the clamp, `has_more` and an offset past the end are unasserted. `GET /companies` has one `?limit=1&offset=1` case; the clamp above the configured maximum is unasserted there too. |
+| **The event-listing pagination bounds beyond `limit=2`.** | `has_more` is asserted; `offset`, the clamp and an offset past the end are not. |
+| **The length half of the two URL rules.** | No case sends a 2049-character `website` or `job_url`; only the scheme half is asserted. |
+| **The application `description` bound.** | No case sends 10 001 characters. The validator is `bounded_text`, but no test names the field. |
+| **A blank `source` through the API.** | Refused by `required_text`, asserted only by the unit case. |
+| **`JOB-R08`'s absence of generation.** | Nothing asserts it. The strongest evidence is the pinned operation count and the fourteen named operations. |
+| **A flow file.** | `tests/jobs_flow.rs` does not exist. `tests/claims_flow.rs` is the shape a flow layer would take here: a journey from registration to a terminal stage, an ownership sweep over every addressed operation, and a seeded read. The `application_in_stage` helper in §2.3 is a fixture, not a flow test. |
+| **A recorded run of anything above.** | The four job files and the schema file exist without a quoted result. `Verified` requires that run. |
+
+## 7. Conventions for a new test
 
 - A new endpoint needs a success case, a `401` case, a `404` cross-account
   case, a `400` malformed-path case and a `422` validation case.
 - A schema test names its SQLSTATE and, when a constraint fired, the constraint
   name; and it pairs the rejection with an accepted control.
-- A stage test names the edge it proves. A pair that is neither listed nor
-  obviously forbidden gets its own case.
-- A test that asserts a `PATCH` with `status` also asserts that the other
-  fields of a refused request are unchanged.
-- A listing test asserts the order with rows inserted out of order.
-- A money assertion compares the string, never a parsed number.
-- A new route is added to `ROUTE_TABLE` in the same change.
+- A stage test names the edge it proves, and one test names all twelve, one all
+  seven self-pairs and one all thirty refusals. A create-stage case asserts
+  `422`, because a create is not a transition.
+- A test that asserts a `PATCH` with `status` also asserts that the other fields
+  of a refused request are unchanged.
+- A listing test asserts the order with rows inserted out of order, and derives
+  an `id` tie-break from the identifiers the server assigned rather than
+  guessing.
+- A money assertion compares the string and asserts it is not a JSON number.
+- Where a row cannot be produced through the API — an exact `created_at` — the
+  fixture may be SQL, but the assertion stays on the API response.
+- A new route is added to `ROUTE_TABLE` and to `CONTRACT_OPERATIONS` in the same
+  change; the contract test compares the two directions.

@@ -25,10 +25,12 @@ thing to do lives in the same task list as everything else.
 
 ## 2. Status
 
-**Accepted, not built.** The requirements are recorded in
+**Implemented, not `Verified`.** The requirements are recorded in
 [`project-truth.md`](../../project-truth.md) §18.2 as `JOB-R01`…`R09` and
-agreed on 2026-10-24. No code, migration or test for this feature exists, so
-the feature is **not** `Implemented` and **not** `Verified`. See
+agreed on 2026-10-24. Migration `0005_job_applications.sql`, the
+`src/job_applications/` module and all fourteen published operations exist, with
+`tests/jobs_schema.rs` and `tests/job_applications_api.rs` to match. No reviewer
+has read the chain that completed them, so nothing is `Verified`. See
 [status.md](status.md).
 
 The model rests on assumptions **A3** and **A6** in

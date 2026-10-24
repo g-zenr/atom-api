@@ -1132,6 +1132,40 @@ Authority: `docs/database/schema.md` §11.3, §11.4 and §11.5 are the column, c
 
 ---
 
+### C-J2/C-J3/C-J4 - Companies, applications and events (locked 2026-10-24, PHASE=3)
+
+One wave, three chains: they share the DTO/repository shape, the ownership predicate and one reviewer. Authority: `docs/features/job-applications/api.md` is the published contract for all fourteen operations; `docs/database/schema.md` §11.3-§11.5 the schema; `C-J1` the types that exist.
+
+**ENDPOINTS** - fourteen, taking the surface from **34 to 48**:
+
+`GET`/`POST` `/companies`; `GET`/`PATCH`/`DELETE` `/companies/{company_id}`; `GET`/`POST` `/job-applications`; `GET`/`PATCH`/`DELETE` `/job-applications/{application_id}`; `GET`/`POST` `/job-applications/{application_id}/events`; `PATCH`/`DELETE` `/job-applications/{application_id}/events/{event_id}`. Success statuses `200`/`201`/`204` exactly as published. `400` malformed, `401`, `404` absent **or foreign**, `409` for the stage machine and the company-delete refusal, `413`, `422` validation, plus the shared `408`/`500`.
+
+**THE STAGE MACHINE** - the rule the whole chain turns on. Seven stages, 49 ordered pairs: **12 allowed edges, 7 accepted no-ops, 30 refused with `409`**.
+- Allowed: `wishlist->applied`, `applied->screening`, `screening->interview`, `interview->offer`, and `rejected` and `withdrawn` from each of `wishlist`, `applied`, `screening`, `interview` (8 more).
+- **Self-pairs are accepted no-ops**, not `409`: `applied->applied` returns `200` and changes nothing. It is not a transition.
+- Terminal: `offer`, `rejected`, `withdrawn`. No move **out of** a terminal stage is accepted; re-sending the same terminal stage is still a no-op.
+- **Create accepts only `wishlist`** or an omitted stage; any other stage is `422`. This is what stops the machine being bypassed at birth.
+- The transition is one guarded `UPDATE ... WHERE status = $expected`; zero rows affected is `409` when the claim exists for the caller, `404` when it does not.
+
+**TYPES** - `CompanyResponse`, `CompanyPage`, `CreateCompanyRequest`, `UpdateCompanyRequest`, `ApplicationResponse`, `ApplicationPage`, `CreateApplicationRequest`, `UpdateApplicationRequest`, `EventResponse`, `EventPage`, `CreateEventRequest`, `UpdateEventRequest`, `CompaniesListQuery`, `ApplicationsListQuery`, `CompanyQuery`, `ApplicationQuery`, plus `into_parts()` per list, exactly as `C-D0` requires. Salary money is `String` from `::text`; no `f32`/`f64`, no arithmetic in Rust.
+
+**INVARIANTS** - I1 ownership in SQL, `404` never `403`; I2 a company name is unique per owner **case-insensitively** (`409`), trimmed, and the stored casing is preserved; I3 a company with applications **cannot** be deleted (`409`) and nothing is deleted to make it succeed - one statement with `AND NOT EXISTS (...)`; I4 `next_action_task_id` must name a task of the caller, checked `tasks -> projects -> user_id` and refused `404`, because the database cannot enforce it; I5 deleting an application cascades its events and `204`; I6 events are ordered `occurred_at DESC, id DESC`, `occurred_at` may be in the future, and `PATCH` corrects in place with **no** `updated_at` (`A-D1-1`); I7 `salary_currency` is required whenever a bound is present and a currency with no bound is `422`; I8 `role_title`, `summary` and `source` are trimmed by the service - the schema documents "trimmed" for the first two but has no `CHECK` for them, which the review confirmed is a service rule.
+
+**TESTS** - `tests/job_applications_api.rs`, one test per rule, including: every one of the 12 allowed edges, `sending_the_current_stage_is_accepted_and_changes_nothing`, `every_forbidden_stage_change_is_refused` (30), `offer_rejected_and_withdrawn_are_terminal`, `a_create_with_a_stage_other_than_wishlist_is_refused`, `a_company_with_applications_cannot_be_deleted`, `a_company_can_be_deleted_once_its_applications_are_gone`, `renaming_a_company_onto_an_existing_name_is_refused`, `the_next_action_task_must_belong_to_the_caller`, `deleting_the_task_clears_the_next_action`, `deleting_an_application_removes_its_events`, `events_are_ordered_by_occurred_at`, `an_event_can_be_added_changed_and_deleted`, plus the `401`/`400`/`404`-for-another-owner/`422` cases for all fourteen operations. `CONTRACT_OPERATIONS` moves **34 -> 48**.
+
+**FILES** (exclusive)
+
+| Owner | Files |
+| ----- | ----- |
+| `rust-backend` | `src/job_applications/{dto,service,repository,handlers}.rs`, `src/job_applications/mod.rs`, `src/api/routes.rs`, `src/state.rs`, `config/messages.toml`, `src/config/messages.rs` |
+| `test-engineer` | `tests/job_applications_api.rs` (new), `tests/openapi_contract.rs` |
+| `docs` | `docs/features/job-applications/{status,architecture,testing}.md`, `docs/testing/strategy.md` |
+| orchestrator | `docs/engineering/**` |
+
+**SEEDER** - no table or column change; `J1` already seeds companies, applications and events.
+
+---
+
 ## Parked
 
 | Item | Blocker | Next step |

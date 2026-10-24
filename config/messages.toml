@@ -147,6 +147,37 @@ category_not_ascii = "must contain only ASCII characters"
 # contract: only `http` and `https` are accepted.
 receipt_url_invalid = "must be an absolute http or https URL of at most 2048 characters"
 
+# A company website is a client-supplied reference, never fetched. The column
+# bounds it and requires the scheme; the service also requires an authority.
+website_invalid = "must be an absolute http or https URL of at most 2048 characters"
+
+# A job posting is stored as text and never fetched, for the same SSRF reason.
+job_url_invalid = "must be an absolute http or https URL of at most 2048 characters"
+
+# An application's applied-date range runs backwards.
+#
+# The violation names `applied_from`, because that is the field a client can
+# correct.
+applied_range_order = "must not be later than applied_to"
+
+# A salary bound with no currency is a number whose meaning is unknown.
+#
+# The violation names `salary_currency`, because that is the field to add.
+currency_required = "must be provided when salary_min or salary_max is given"
+
+# A currency with no bound has nothing to denominate.
+#
+# The violation names `salary_currency`, because that is the field to remove.
+currency_without_bound = "must be accompanied by salary_min or salary_max"
+
+# A salary range whose minimum is above its maximum is refused rather than
+# stored, so a report cannot silently average it into nonsense.
+salary_range_order = "must not be greater than salary_max"
+
+# The stage machine governs every change after creation, so a create that named
+# a later stage would bypass it at birth.
+stage_must_start_at_wishlist = "must be `wishlist` when an application is created"
+
 # A claim can only be submitted with something to reimburse.
 #
 # The two violations name `items` and `total_amount` respectively, because the
@@ -174,6 +205,16 @@ claim_not_found = "The requested expense claim does not exist."
 # addressed under a claim it does not belong to.
 item_not_found = "The requested expense item does not exist."
 
+# 404, when the company does not exist, or is not owned by the caller.
+company_not_found = "The requested company does not exist."
+
+# 404, when the job application does not exist, or is not owned by the caller.
+application_not_found = "The requested job application does not exist."
+
+# 404, when the event does not exist, is not owned by the caller, or is
+# addressed under an application it does not belong to.
+event_not_found = "The requested application event does not exist."
+
 [messages.conflicts]
 # 409, when an item is written on a claim that is no longer a draft.
 #
@@ -186,3 +227,23 @@ claim_not_editable = "Items can only be added, changed or deleted while the clai
 # The message never names the current status or the refused action: the caller
 # already knows both, and the text stays valid for every refused pair.
 transition_not_allowed = "The claim's current status does not allow this action."
+
+# 409, when a company name is already used by another company of the same owner,
+# ignoring case.
+#
+# The comparison is folded by the database's functional unique index, so the
+# message states the rule and not the comparison.
+company_name_taken = "A company with this name already exists."
+
+# 409, when a company still has applications.
+#
+# The applications are never deleted to make the delete succeed: they are
+# records the client did not ask to delete.
+company_has_applications = "The company still has job applications. Delete or move them first."
+
+# 409, when a requested stage is not reachable from the application's current
+# one.
+#
+# The message never names the current stage or the requested one, so it stays
+# true for every refused pair of the stage machine.
+stage_transition_not_allowed = "The application's current stage does not allow this change."

@@ -8,8 +8,8 @@ The complete Phase 1 schema of the ATOM database, table by table, as it is
 defined in `migrations/`. Section 11 is the Phase 2 schema. Its first two tables
 are created by `migrations/0004_expense_claims.sql` and are served by the five
 claim endpoints of chain `R2`; its next three are created by
-`migrations/0005_job_applications.sql` and have no endpoint yet, because chain
-`J1` is the schema and the Rust types only. `embeddings` is still proposed and
+`migrations/0005_job_applications.sql` and are served by the fourteen
+operations of chains `J2`-`J4`. `embeddings` is still proposed and
 does not exist.
 
 The conventions the schema follows are in
@@ -41,9 +41,9 @@ users ──1:N──► refresh_sessions
 | `tasks` | `migrations/0003_projects_and_tasks.sql` | One row per task. |
 | `expense_claims` | `migrations/0004_expense_claims.sql` | One row per reimbursement claim. Read and written by the five `R2` claim endpoints (§11.1). |
 | `expense_items` | `migrations/0004_expense_claims.sql` | One row per claim line item. Read and written by the three item endpoints; the claim detail response reads it (§11.2). |
-| `companies` | `migrations/0005_job_applications.sql` | One row per employer (§11.3). Created by chain `J1`; no endpoint serves it yet. |
-| `job_applications` | `migrations/0005_job_applications.sql` | One row per role being pursued at a company (§11.4). Created by chain `J1`; no endpoint serves it yet. |
-| `application_events` | `migrations/0005_job_applications.sql` | One row per dated entry in an application's timeline (§11.5). Created by chain `J1`; no endpoint serves it yet. |
+| `companies` | `migrations/0005_job_applications.sql` | One row per employer (§11.3). Served by `J2`'s five operations. |
+| `job_applications` | `migrations/0005_job_applications.sql` | One row per role being pursued at a company (§11.4). Served by the five application operations of `J3`. |
+| `application_events` | `migrations/0005_job_applications.sql` | One row per dated entry in an application's timeline (§11.5). Served by the four event operations of `J4`. |
 
 Two enum types are created by `migrations/0003_projects_and_tasks.sql`:
 `task_status` and `task_priority`. `migrations/0004_expense_claims.sql` adds a
@@ -375,15 +375,16 @@ written with that in mind, and the policy in
 | Controlled state | A native `ENUM` type | The database refuses an out-of-contract value. |
 | Free text | A `tsvector` generated column with a GIN index | Search over the user's own data without a separate search service. |
 
-## 11. Phase 2 (Proposed)
+## 11. Phase 2 (Proposed, except what has been built)
 
-> **Status:** **Proposed**, with two exceptions. `expense_claims` and
-> `expense_items` are served by the five claim endpoints of chain `R2` (§11.1).
-> `companies`, `job_applications` and `application_events` are created by
-> `migrations/0005_job_applications.sql` (§11.3-§11.5), but no endpoint serves
-> them yet: chain `J1` is the schema and the Rust types, and the routes arrive
-> in `J2`-`J4`.
-> Phase 1 of the run — the product intake — writes the accepted requirements in
+> **Status:** **Proposed**, except for the five tables two migrations already
+> create. `expense_claims` and `expense_items` are served by the twelve claim
+> operations of chains `R2`-`R4` (§11.1). `companies`, `job_applications` and
+> `application_events` are created by `migrations/0005_job_applications.sql`
+> (§11.3-§11.5) and served by the fourteen operations of chains `J2`-`J4`: five
+> company, five application and four event routes, with the stage machine and
+> the two composite ownership keys proved by `tests/jobs_schema.rs` and
+> `tests/job_applications_api.rs`.
 > [`../project-truth.md`](../project-truth.md) §18. This section records the
 > schema those requirements imply. Nothing in this section is `Verified` by this
 > document; the API half is covered by the tests the chain records, not here.
