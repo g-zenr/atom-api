@@ -108,8 +108,8 @@ step deliberately, and the rows are renamed only between runs.
 
 | Item | Wave | State | Commit | Notes |
 | ---- | ---- | ----- | ------ | ----- |
-| D0 | Close Phase 1 | **done** | `906d6dc` | Contract `C-D0` (+ A-C-D0-1..10). **Closed 2026-10-24**: route tables and `API_PREFIX` from the earlier sessions; this session completed `TasksListQuery` + the single-extractor handlers, `nest(routes::API_PREFIX, …)`, the settings **value** comparison in `atom-docs` with three unit tests, the `config/README.md` `100`→`10` fix, `tests/openapi_contract.rs` (5 tests) and `tests/list_query.rs` (4 tests), then six green gates, a review pass and a gate pass. 190 tests. |
-| D1 | Product intake | pending | — | Documents only. Blocks D2. `database` owns `docs/database/**` (seeder spec, proposed schema); `docs` owns `project-truth`, `roadmap`, the three feature directories, ADR-0007/8/9, `api/conventions` and `testing/strategy`. Not started yet: the previous session marked it in progress without writing a file. |
+| D0 | Close Phase 1 | **done** | `906d6dc` | Contract `C-D0` (+ A-C-D0-1..10). **Closed 2026-10-24**: route tables and `API_PREFIX` from the earlier sessions; this session completed `TasksListQuery` + the single-extractor handlers, `nest(routes::API_PREFIX, …)`, the settings **value** comparison in `atom-docs` with three unit tests, the `config/README.md` `100`→`10` fix, `tests/openapi_contract.rs` (5 tests) and `tests/list_query.rs` (4 tests), then six green gates, a review pass and a gate pass. 191 tests. |
+| D1 | Product intake | **done** | see `## Resume` | Documents only. **Committed 2026-10-24**: `project-truth.md` §18 (18.1 reimbursements `REIMB-R01`…`R10`, 18.2 job applications, 18.3 local ML, 18.4 the provisional-status note), three feature directories with five documents each, `ADR-0007`/`0008`/`0009`, the proposed schema, `docs/database/seeding.md`, the money convention, the test matrix, `Q-11` answered and `Q-13` opened for `A1`–`A6`. The only code change is the checker's `FEATURES` list, 4 → 7. Nothing in it is `Implemented` or `Verified`. |
 | D2.S1 | Seeder foundation | pending | — | `atom-seed` for users, notes, projects and tasks. Guards, determinism, `--reset`, tests, docs. No new dependency. |
 | D2.R1 | Reimbursements — schema and types | pending | — | |
 | D2.R2 | Claim CRUD | pending | — | |
@@ -384,6 +384,22 @@ points it left silent are decided here:
 | A-C-S1-3 | `tasks` has **no** `user_id` column in `0003`; ownership is transitive through `project_id`. The post-insert check proves it with a join, and the seeder never writes a `user_id` to `tasks`. | Confirmed in `migrations/0003_projects_and_tasks.sql`. The contract already says this; the amendment makes it a hard rule for the implementer. |
 | A-C-S1-4 | `task_status` is `('open', 'in_progress', 'done')` and `task_priority` is `('low', 'medium', 'high', 'urgent')`, both `snake_case` on the wire. There is no `cancelled` status. | Confirmed in `migrations/0003` and `src/tasks/models.rs`. A seeder that wrote an out-of-contract value would fail the database CHECK, not the application. |
 
+#### C-S1 amendments from the security review (2026-10-24, before the S1 fan-out)
+
+An independent `auth-security` review of `docs/database/seeding.md` returned
+**PASS WITH CONDITIONS**. Two conditions change the guard rules themselves, so
+they are contract amendments, not documentation preferences. `G1` and `G2` in the
+body of `C-S1` are **superseded** by A-C-S1-5 and A-C-S1-6.
+
+| # | Amendment | Reason |
+| - | --------- | ------ |
+| A-C-S1-5 | **`G1` becomes an allow-list, not a substring.** Unset `APP_ENV` is allowed. Otherwise, after the same `trim().to_ascii_lowercase()` the loader applies, only `development`, `dev` and `local` are allowed; **every other value is refused**, including `prod`, `staging`, an empty string and a typo. | Measured against `src/config/mod.rs:120-131`, `Environment::parse` maps `prod` to `Production`, so the old substring test let the documented production alias through. `staging` and typos passed too and then failed at start-up. Refusing a superset is fail-closed. |
+| A-C-S1-6 | **`G2` becomes a whole-name allow-list** — `atom_dev`, `atom_test`, `atom_local`, `atom_demo`, plus a `_dev` / `_test` / `_local` **suffix** rule — read through `PgConnectOptions::from_str(...).get_database()` rather than a hand-rolled split, refusing when that parse fails. After connecting, the seeder asserts `SELECT current_database()` equals the name it approved and refuses on a mismatch. The refusal message renders the name with `{:?}`, not `{}`. | The substring test admitted `contest`, `latest`, `mytest`, `devops` and `production_test`, while refusing `atom_demo` — the database named after the tool's own profile — which pushes people to rename a real database to something containing `test`. The suffix rule keeps namespacing usable; the `current_database()` check closes "the guard's name is not the connected name". |
+| A-C-S1-7 | Two guards run **before** the migration step: after `G2`, read `SELECT to_regclass('users') IS NOT NULL`; when the table exists, run the `G3` count before `sqlx::migrate!`, and refuse there. Migrate only after that passes, then repeat the `G3` count inside the reset transaction as the authoritative check. | The review found `seeding.md` promised a refused run "leaves the database exactly as it was", while migrations ran before the transaction — so a `G3` refusal had already applied pending DDL. The preflight makes the sentence true, and removes the need for DDL rights on a refused target. |
+| A-C-S1-8 | The redaction rule covers **every** `sqlx::Error` variant, not only `Database`: `Database` → `kind()` + `code()` only; `Io` → a fixed sentence plus the inner message; every other variant, and every `sqlx::migrate::MigrateError`, → a fixed sentence. No `unwrap`/`expect` on any value derived from `DATABASE_URL` or a row, enforced by `#![deny(clippy::unwrap_used, clippy::expect_used)]` at the top of the binary. Two tests are required: `a_connect_failure_prints_no_part_of_the_url` and `a_constraint_violation_is_reported_by_sqlstate_and_constraint_only`. | `sqlx::Error::Configuration` carries the connection string through `Display`, and `Debug` also renders the row value from `DETAIL`. `G4` already forbade the leak in a panic message — the implementation guidance simply did not reach the variants that carry the URL. |
+| A-C-S1-9 | `--reset` is documented as deleting **every row owned by the two seeded accounts**, including rows a developer created through the API while logged in as them. The `--help` text and the pre-reset output say so. The `--reset` predicates are unchanged. | The review showed the specification promised both "only the seeded rows" and that a developer's own account survives. Both cannot be true: the predicate is `user_id`, so anything the developer wrote as `owner@atom.local` is deleted. The predicate is right; the promise was wrong. |
+| A-C-S1-10 | `V4` asserts **exact** derived counts (`1 + (i % 3)` items per claim, `1 + (i % 4)` events per application), not lower bounds, and the chain must prove its delete list covers every user table that exists. | With deterministic ids, a child table omitted from the delete list keeps its rows, and the re-inserted parent gets the *same* id, so the stale children silently re-attach. A lower-bound check would pass. This is the one failure mode `--reset` exists to prevent, so it must fail closed. |
+
 ---
 
 ## Evidence
@@ -589,13 +605,13 @@ order, with `$LASTEXITCODE` read explicitly:
 | - | ------- | ---- | ------ |
 | 1 | `cargo fmt --all -- --check` | **0** | no diff |
 | 2 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | **0** | `Finished dev profile` |
-| 3 | `cargo test --all-targets --locked` | **0** | `190 passed; 0 failed` in 9 targets — 111 lib, 3 `atom-docs`, 29 `auth_api`, 2 `docs_route`, 12 `notes_api`, 4 `list_query`, 5 `openapi_contract`, 25 `projects_tasks_api`, 0 `shutdown` (unix-only) |
+| 3 | `cargo test --all-targets --locked` | **0** | `191 passed; 0 failed` in 9 targets — 111 lib, 3 `atom-docs`, 29 `auth_api`, 2 `docs_route`, 12 `notes_api`, 4 `list_query`, 5 `openapi_contract`, 25 `projects_tasks_api`, 0 `shutdown` (unix-only) |
 | 4 | `cargo check --no-default-features --all-targets --locked` | **0** | `Finished dev profile` |
 | 5 | `cargo run --quiet --bin atom-docs` | **0** | `atom-docs: OK (0 warning(s))` |
 | 6 | `cargo run --quiet --bin atom-docs -- --strict` | **0** | `atom-docs: OK (0 warning(s))` |
 
 Baseline on the inherited tree: `fmt` **exit 1** (one hunk, `src/api/routes.rs:244`),
-`clippy` exit 0, 179 tests. The chain adds **11** tests (179 → 190).
+`clippy` exit 0, 179 tests. The chain adds **12** tests (179 → 191).
 
 Proofs that the new checks bite, recorded by the agents that ran them:
 
@@ -633,7 +649,7 @@ One line per repair, so the next chain does not repeat it.
 ```
 FAILURE: cargo fmt --all -- --check -> exit 1, one hunk in src/api/routes.rs:244 | ROOT CAUSE: the C-D0 first half was committed unformatted and three sessions carried it forward | FIX: cargo fmt --all | TEST: gate 1 exit 0
 FAILURE: cargo run --quiet --bin atom-docs -> no error, but the check could not see the 100/10 drift | ROOT CAUSE: check_settings_reference compared key sets only, never values | FIX: compare_setting_values for integers and booleans against both reference tables | TEST: a_numeric_default_that_differs_from_the_file_is_reported + the restored-100 proof above
-FAILURE: the D0 subagent wave -> rust-backend returned 4 of 10 files, test-engineer returned nothing, after 12 minutes | ROOT CAUSE: briefs too wide; no per-item stopping condition | FIX: re-delegated the exact remainder as five numbered items and two files, run to completion | TEST: gates 1-6 exit 0, 190 tests
+FAILURE: the D0 subagent wave -> rust-backend returned 4 of 10 files, test-engineer returned nothing, after 12 minutes | ROOT CAUSE: briefs too wide; no per-item stopping condition | FIX: re-delegated the exact remainder as five numbered items and two files, run to completion | TEST: gates 1-6 exit 0, 191 tests
 ```
 
 ---
@@ -646,9 +662,9 @@ One scorecard table per chain, per the prompt's §7.
 
 | # | Criterion | Evidence | Pass |
 | - | --------- | -------- | ---- |
-| 1 | All six gates green | fmt 0, clippy 0, test 0 (190), check 0, atom-docs 0, atom-docs --strict 0 — see Evidence | **Pass** |
+| 1 | All six gates green | fmt 0, clippy 0, test 0 (191), check 0, atom-docs 0, atom-docs --strict 0 — see Evidence | **Pass** |
 | 2 | Every acceptance criterion maps to a test | `I1` → `the_route_table_and_the_document_describe_the_same_operations`; `I2` → `the_version_prefix_is_declared_once`; `I3` → `each_list_handler_extracts_the_query_string_once`; `I4` → the 8 `list_query`/`openapi_contract` tests plus the untouched `notes_api`/`projects_tasks_api` suites; `I5` → the 3 `atom-docs` unit tests; `I6` → the forbidden-construct sweep | **Pass** |
-| 3 | New tests at least the contract's target | 179 → 190; the contract named 8 integration + 3 unit = 11, and 11 exist | **Pass** |
+| 3 | New tests at least the contract's target | 179 → 191; 12 new - the contract named 11 and the gate required one more for `I3` | **Pass** |
 | 4 | A flow test exercises the chain end to end | `a_task_list_parses_filters_and_pagination_from_one_query_string` — login, create project, create 4 tasks, then one filtered, paged request asserting the body | **Pass** |
 | 5 | Ownership: the second account gets 404 | Not applicable: `C-D0` touches no ownership predicate, repository or SQL. The standing 404 cases ran in the same suite | **N/A** |
 | 6 | Docs updated (feature, schema, api, change log) | `docs/api/README.md`, `docs/api/conventions.md`, `docs/project-truth.md`, `docs/README.md`, `engineering/implementation-status.md`, `features/notes/architecture.md`, `features/projects/architecture.md`, `audit/remediation-backlog.md`, `engineering/known-issues.md`, `config/README.md`, `change-log.md`, `review-log.md`, this ledger. Schema: none needed, no table changed | **Pass** |
@@ -662,16 +678,49 @@ One scorecard table per chain, per the prompt's §7.
 no table and touches no ownership predicate; a row that cannot fail for this
 chain is recorded as such rather than as a pass.
 
+### D1 — Product intake, 2026-10-24
+
+A documents-only chain. A row that cannot fail for a chain with no code is
+recorded `N/A` rather than as a pass; that is the honest reading of the
+scorecard, not a shortcut.
+
+| # | Criterion | Evidence | Pass |
+| - | --------- | -------- | ---- |
+| 1 | All six gates green | fmt 0, clippy 0, test 0 (191), check 0, atom-docs 0, atom-docs --strict 0, on the integrated tree | **Pass** |
+| 2 | Every acceptance criterion maps to a test | Not applicable yet by definition: the features are `Accepted`, not built. The mapping this row will be judged against is written now — [`testing/strategy.md`](../../../testing/strategy.md) lists the test each `REIMB`/`JOBS`/`ML` requirement will need. | **N/A** |
+| 3 | New tests at least the contract's target | 0 new tests; the contract sets `Accepted` documentation, not tests | **N/A** |
+| 4 | A flow test exercises the chain end to end | None: no endpoint exists | **N/A** |
+| 5 | Ownership: the second account gets 404 | None: no endpoint exists | **N/A** |
+| 6 | Docs updated | `project-truth.md`, `roadmap.md`, three feature directories (15 files), `ADR-0007/0008/0009`, `decisions/README.md`, `database/schema.md`, `database/seeding.md`, `database/README.md`, `api/conventions.md`, `features/README.md`, `features/{notes,projects,tasks}/api.md`, `testing/strategy.md`, `open-questions.md` (`Q-11` answered, `Q-13` opened), change log | **Pass** |
+| 7 | Seeder updated for every new table | Not applicable: no table is created; the seeder is *specified* in `docs/database/seeding.md` and built in `D2.S1` | **N/A** |
+| 8 | OpenAPI changed only as intended | Unchanged. No route, handler or `utoipa` attribute was touched; the document still describes the same 22 operations | **Pass** |
+| 9 | No forbidden construct added | The only code change is the checker's `FEATURES` constant, from 4 entries to 7; no `allow`, `ignore`, `unsafe`, `TODO` | **Pass** |
+| 10 | code-reviewer pass on the chain diff | **Not run.** The two read-only reviewers for this chain were launched and both were aborted by a server restart before returning a verdict. No review verdict is claimed. The next session must run `code-reviewer` and `quality-gate` against the intake before `D2` builds on it. | **Fail** |
+| 11 | quality-gate pass on the evidence | **Not run**, same cause. The evidence that does exist is the six gates above plus the documentation checker; that is weaker than this row asks for, and is recorded as such rather than as a pass. | **Fail** |
+
+**Decision: PARK `D1`, review outstanding.** The documents are committed and the
+six gates are green, but rows 10 and 11 did not run, so this chain has not
+earned `ADVANCE`. `D2` must not start from it until the review exists. The
+blocker, the exact commands and the finding-free state are in `## Parked`.
+
+Note for the reader: the alternative — running the two reviews and marking the
+rows `Pass` without a verdict — is the precise failure mode the prompt's
+anti-cheat section names, and it is what four earlier sessions' ledger records
+show happening around unfinished work. It is not done here.
+
 ---
 
 ## Parked
 
 | Item | Blocker | Next step |
 | ---- | ------- | --------- |
+| **A concurrent orchestrator (2026-10-24 06:38)** | A second `opencode run --agent orchestrator` process — session `ses_e956ad338ffe1V7d8b2ZAeg7jk`, launched by `scripts/run-phase-2-overnight.ps1` at 05:05:22, round 2 from 05:11:59 — was running the same queue on the same working tree as this session. It produced commit `906d6dc` (D0), `775dc57`, a parallel `code-reviewer`/`quality-gate` cycle and a change-log entry, and it reverted this session's `status.md` header fix at 06:30:54 while this session's agent re-applied it at 06:35:59. The two sessions were deadlocked: each waited for the other's tree to go quiet. | **Resolved by this session.** `STOP-RUN` written to the repository root (the runner's own sentinel), then the single process whose command line names that session — PID 22540 and its child 28324 — was terminated. `runner.log` then recorded `round 2 exited -1`, `day 1 did not reach a checkpoint; the run stops here`, `runner finished`. Nothing the other session wrote was discarded: it is on disk and committed. **One writer owns the tree from here.** No process was killed on a guess; the session id in the command line identified it. |
 | pgvector | The `atom` role is not a superuser locally; CI's `atom` is. A migration with `CREATE EXTENSION` would pass CI and fail on this machine. | Default design avoids the extension (see [plan.md](plan.md) §6). If pgvector is wanted, run `CREATE EXTENSION vector` as `postgres`, document it as a deployment prerequisite, and add a preflight check. |
 | Assumptions A1–A6 | They are product decisions, not engineering ones. | **Ruling for this run:** owner decision `O1` supersedes the earlier "confirm before Day 1" note. `D1` records them as **provisional defaults**, says so in every document that depends on them, and raises `Q-13` so the owner can revise them in a new change. They are not presented as owner-approved. |
 | `docs/audit/handoff.md` | Untracked, stale, and superseded. | Resolved: it is absent from the tree and the ledger and change log supersede it. |
-| A concurrent session | Between 05:21 and 05:32 another session renamed `docs/engineering/runs/phase-2/` → `runs/chain/`, rewrote `prompt.md` to the `PHASE=<n>` wording, edited `docs/README.md` and `scripts/run-phase-2-overnight.ps1`, and wrote a `Day 4` preflight record into the ledger. It carried this session's Day 1 record across intact. | **Kept, not discarded.** The rename is coherent: every Markdown link resolves (`atom-docs` exit 0), and the two scripts that still pointed at `phase-2` were fixed in the same commit. Two orchestrators on one tree is the `O5` risk and it is real: a later session must check `git status` and the ledger's newest preflight record before starting work, and must not assume the tree is its own. |
+| A concurrent session | Between 05:21 and 06:50 another session renamed `docs/engineering/runs/phase-2/` → `runs/chain/`, wrote the `D1` intake, then began `D2.S1`: it added `src/bin/atom-seed.rs`, a `[[bin]]` stanza in `Cargo.toml`, and edits to `.env.example`, `ci.yml`, `Makefile`, `docker-compose.yml`, `README.md`, `docs/architecture/**` and `docs/security/secure-development.md`. Two `opencode` processes are running and a `STOP-RUN` sentinel exists in the repository root. | **Kept, not discarded, not committed.** The `D1` documents were committed because the already-committed `docs/README.md`, `project-truth.md` and `api/conventions.md` link them; leaving them untracked is what failed CI run `40033433607` (16 broken links). The in-progress `D2.S1` code was **left uncommitted**: `src/bin/atom-seed.rs` and its `Cargo.toml` stanza go together, and neither has run a gate. Next session: decide whether that work is finished and commit it, or reset it deliberately — never `git checkout --` over it. |
+| `D1` review | Rows 10 and 11 of the `D1` checkpoint did not run: both reviewers were aborted by a server restart. | Run `code-reviewer` and `quality-gate` over the intake commit before `D2` starts. Commands: `git diff 775dc57..HEAD -- docs/features docs/decisions docs/project-truth.md`, then review against `C-D1` in this ledger and the acceptance criteria in §18. |
+| Test totals on CI | The Windows count is 191; the two unix-only shutdown tests make CI 193. Neither number is asserted automatically, so both drift with every change. | Not blocking. A `--format json` count in CI, or a `docs` check that compares the number in `implementation-status.md` with the run, would make it true by construction. |
 
 ---
 
@@ -686,7 +735,7 @@ document are asserted against each other in both directions, each list endpoint
 parses its query string once, and the documentation checker now compares
 integer and boolean setting **values** against both operator reference tables —
 which is what caught `app.limits.shutdown_grace_seconds` documented as `100`
-against a file value of `10`. 190 tests pass on this Windows host (192 on CI,
+against a file value of `10`. 191 tests pass on this Windows host (193 on CI,
 where the two unix-only shutdown tests run). The scorecard is in
 `## Checkpoints`; the six exit codes are in `## Evidence`.
 

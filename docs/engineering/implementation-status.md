@@ -69,10 +69,10 @@ A feature is never `Verified` because the code exists or compiles.
 | Everything in the roadmap | `Proposed` | By design. See [`../roadmap.md`](../roadmap.md). | — |
 
 The last full run of the test suite on a Windows host was on 2026-10-24, during
-chain `D0`: **190 tests pass** (111 unit, 3 `atom-docs`, 29 authentication,
+chain `D0`: **191 tests pass** (111 unit, 3 `atom-docs`, 29 authentication,
 2 explorer, 12 notes, 4 `list_query`, 5 `openapi_contract`, 25 projects and
 tasks, 0 shutdown), 0 failed, `cargo test --all-targets --locked` exit 0. The
-unix-only shutdown tests do not run on Windows, so the same tree is **192** on
+unix-only shutdown tests do not run on Windows, so the same tree is **193** on
 CI's `ubuntu` runner. The run covers the current tree, after the audit
 remediation recorded in
 [`change-log.md`](change-log.md) under `ATOM-CHANGE-20261022-003` and the

@@ -179,7 +179,7 @@ migration.
 | - | -------- | ------- | ----------- |
 | N-1 | High | Both runner scripts still pointed `$RunDir` at `docs/engineering/runs/phase-2`, which no longer exists: the runner would throw at preflight and the watchdog would silently no-op forever. | Fixed in `scripts/run-phase-2-overnight.ps1` and `scripts/watchdog-phase-2.ps1`. |
 | N-2 | Medium | `docs/README.md` §5 said the checker compares names only and does not read the second table - false since the previous change, and the "values" half false since this one. | Rewritten to state both tables, the value comparison and its exact scope. |
-| N-3 | Medium | `implementation-status.md` said "**No test asserts its content.**" and carried a stale run count. | Row moved to `Verified` citing the five contract tests; the run paragraph now records 190 on Windows and 192 on CI; `Last updated` bumped. |
+| N-3 | Medium | `implementation-status.md` said "**No test asserts its content.**" and carried a stale run count. | Row moved to `Verified` citing the five contract tests; the run paragraph now records 191 on Windows and 193 on CI; `Last updated` bumped. |
 | N-4 | Medium | The remediation backlog still reported `F-23` and `F-49` as `deferred`, which is the work this change closes. | Both rows set to `verified`, each with a Correction that names the amendments and the tests. |
 | N-5 | Medium | No change-log entry. | `ATOM-CHANGE-20261024-002` added. |
 | N-6 | Low | `docs/api/README.md` credited the prefix test with checking the explorer paths, which it does not. | Table rewritten: what each test proves, and explicitly what it does not. |
@@ -223,7 +223,7 @@ re-gated.
 
 #### What the gate confirmed was honest
 
-The six recorded exit codes reconcile with the tree: the 190 count matches the
+The six recorded exit codes reconcile with the tree: the 191 count matches the
 test functions physically present, the 179 baseline matches the same files minus
 the 11 new ones, the drift the chain exists to fix is genuinely fixed, the
 `--no-default-features` gate is plausible because only `utoipa-swagger-ui` is

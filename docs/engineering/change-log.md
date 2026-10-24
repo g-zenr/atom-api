@@ -42,6 +42,75 @@ define the target state. The requirements live in
 
 ## Entries
 
+### ATOM-CHANGE-20261024-003 - The Phase 2 product intake
+
+**Date:** 2026-10-24 (UTC)
+**Type:** Documentation (product intake)
+**Author:** The ATOM engineering team — the `architect`, `database` and `docs` agents with the orchestrator.
+**Status:** Complete — **documents only**
+
+#### Summary
+
+Phase 2 now has accepted requirements, three feature specifications, three
+architecture decisions, a proposed schema and a seeding specification. No code,
+no migration and no test was written for any of the three features: they are
+`Accepted`, not `Implemented`, and nothing in this change is `Verified`.
+
+Per owner decision `O1`, the six working assumptions `A1`–`A6` are recorded as
+**provisional defaults**, each document that depends on one says so, and
+[`open-questions.md`](open-questions.md) `Q-13` asks the owner to confirm or
+revise them. They are not presented as approved.
+
+#### What changed
+
+| Area | Change |
+| ---- | ------ |
+| Requirements | [`project-truth.md`](../project-truth.md) §18: 18.1 reimbursements (`REIMB-R01`…`R10`), 18.2 job applications (`JOBS-R01`…), 18.3 local machine learning (`ML-R01`…), 18.4 the provisional-status note. §17 gains the Phase 2 rows as `Not started`. |
+| Features | Three new directories with the full five documents each: [`features/reimbursements/`](../features/reimbursements/), [`features/job-applications/`](../features/job-applications/), [`features/ml/`](../features/ml/). All three are `Accepted`. |
+| Decisions | [`ADR-0007`](../decisions/ADR-0007-money-representation.md) money as `NUMERIC(19,4)` and a JSON string; [`ADR-0008`](../decisions/ADR-0008-local-pure-rust-ml.md) local, pure-Rust ML with `REAL[]` rather than pgvector; [`ADR-0009`](../decisions/ADR-0009-receipt-references.md) a receipt is a reference, not an upload. |
+| Schema | [`database/schema.md`](../database/schema.md) records the proposed `expense_claims`, `expense_items`, `companies`, `job_applications`, `application_events` and `embeddings` tables as proposed, with no migration written. |
+| Seeder | [`database/seeding.md`](../database/seeding.md) — the profiles, the guards, determinism, `--reset`, the post-insert verification and the credentials. |
+| Conventions | [`api/conventions.md`](../api/conventions.md): money is a JSON string, four decimal places, never a float. |
+| Test matrix | [`testing/strategy.md`](../testing/strategy.md): the acceptance tests each requirement will need, one per rule. |
+| Questions | `Q-11` answered — Phase 2 is defined in [`roadmap.md`](../roadmap.md) §2. `Q-13` opened for the provisional assumptions. |
+
+#### Why `REAL[]` and not pgvector
+
+`vector` 0.8.1 is available on the development server, but the `atom` role is not
+a superuser there while CI's is, so a migration containing `CREATE EXTENSION`
+would pass CI and fail on the developer's machine — the worst possible
+divergence. Phase 2 therefore does not depend on the extension: embeddings are
+`REAL[]`, and search is hybrid — the existing lexical search narrows the owner's
+rows to a bounded candidate set, and cosine similarity re-ranks them in Rust. That
+is recorded in `ADR-0008`, with the trade-off that `source_id` is polymorphic and
+carries no foreign key.
+
+#### What this change does not do
+
+It adds no endpoint, no handler, no service, no repository, no migration and no
+test. `/api/v1/openapi.json` is unchanged. The three features cannot be
+`Implemented` until their migrations and modules exist, and cannot be `Verified`
+until their tests have run and passed.
+
+#### Checks and results
+
+`cargo run --bin atom-docs` and `--strict` both exit 0 with 0 warnings. The
+checker's `FEATURES` list was extended from four to seven so that the three new
+directories are validated too — the only code change in this intake. The three
+new `status.md` files carried their status line inside the header blockquote,
+where the checker cannot see it; they now open with the bare `**Status:** Accepted`
+line the other feature documents use.
+
+The full six gates were run on the integrated tree: `fmt` 0, `clippy -D warnings`
+0, `test --all-targets` 0 (**191 tests**), `check --no-default-features` 0,
+`atom-docs` 0, `atom-docs --strict` 0.
+
+#### Compatibility impact
+
+None. No behaviour, contract or schema changed.
+
+---
+
 ### ATOM-CHANGE-20261024-002 - The route table, the document and the setting values are asserted, not assumed
 
 **Date:** 2026-10-24 (UTC)
@@ -161,6 +230,33 @@ ledger row - all of which were resolved before the change was committed. Entries
 | [`../audit/remediation-backlog.md`](../audit/remediation-backlog.md) | Both rows moved from `deferred` to `verified`, each with a Correction. |
 | [`project-truth.md`](../project-truth.md) | The OpenAPI row moved to `Verified`, with its scope stated. |
 | [`runs/chain/ledger.md`](runs/chain/ledger.md) | `C-D0` and amendments `A-C-D0-1`…`A-C-D0-10`, the evidence and the scorecard. |
+
+#### Correction, 2026-10-24 — the test total was miscounted
+
+This entry, its commit message and four other documents said the suite grew to
+**190** tests. The recorded per-target counts sum to **191**: 111 lib, 3
+`atom-docs`, 29 `auth_api`, 2 `docs_route`, 12 `notes_api`, 4 `list_query`,
+5 `openapi_contract`, 25 `projects_tasks_api`, 0 `shutdown`. The growth is
+**179 → 191** — twelve new tests, not eleven: the contract named eleven, and the
+quality gate required a twelfth, `each_list_handler_extracts_the_query_string_once`,
+to hold `I3` rather than leave it verified by inspection only.
+
+No gate result changes. `cargo test --all-targets --locked` exited 0 and every
+target passed; the error was arithmetic in prose, not in the run. It is corrected
+here rather than in the original text, per the append-only rule of this log.
+
+#### Correction (2026-10-24) — the commit also carried the intake
+
+Commit `906d6dc`, which this entry describes, also carried the `D1` intake
+documents (`project-truth.md` §18, `api/conventions.md` §15–§17, the run folder
+rename). That was a consequence of two orchestrator sessions running the same
+queue on one working tree; it is recorded in
+[`runs/chain/ledger.md`](runs/chain/ledger.md) `## Parked`. The statements in
+this entry remain true — no endpoint, path, method, status code, request body or
+response schema changed — but a reader bisecting the log should expect
+`906d6dc` to be larger than this entry alone, and should read
+[`ATOM-CHANGE-20261024-003`](#atom-change-20261024-003---the-phase-2-product-intake)
+for the intake half.
 
 ---
 

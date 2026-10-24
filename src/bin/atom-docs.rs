@@ -63,7 +63,15 @@ const FEATURE_FILES: [&str; 5] = [
 ];
 
 /// The features that must have a complete document set.
-const FEATURES: [&str; 4] = ["authentication", "notes", "projects", "tasks"];
+const FEATURES: [&str; 7] = [
+    "authentication",
+    "job-applications",
+    "ml",
+    "notes",
+    "projects",
+    "reimbursements",
+    "tasks",
+];
 
 /// The files that must exist in the configuration directory.
 const CONFIG_FILES: [&str; 8] = [

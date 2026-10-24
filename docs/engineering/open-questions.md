@@ -1,7 +1,7 @@
 # ATOM open questions
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-24
 > **Owner:** maintained by the `docs` agent
 
 Product and architecture decisions that have not been taken yet. Each question
@@ -307,7 +307,16 @@ to agree.
 
 ### Q-11 — What are the phases after Phase 1?
 
-**State:** Open · **Blocks:** the roadmap's phase column
+**State:** Answered · **Blocks:** nothing any more
+
+**Answer (2026-10-24, intake `D1`).** [`../roadmap.md`](../roadmap.md) §2 now
+defines the phases: Phase 1 is the backend foundation; **Phase 2 is the personal
+workspace** — reimbursements, job-application tracking, local machine learning
+and the database seeder — with its requirements recorded in
+[`../project-truth.md`](../project-truth.md) §18 and its delivery waves in
+[`runs/chain/plan.md`](runs/chain/plan.md) §7. Phase 3 and later stay
+unassigned text in the roadmap, so this answer commits to one phase, not to a
+numbered plan for everything.
 
 **Context.** ATOM defines one delivery phase today: Phase 1, the backend
 foundation, described in [`../project-truth.md`](../project-truth.md) §3. The
@@ -360,6 +369,36 @@ specialist.
 [`../../config/README.md`](../../config/README.md);
 [`../architecture/deployment.md`](../architecture/deployment.md).
 
+### Q-13 — Are the Phase 2 working assumptions correct?
+
+**State:** Open · **Blocks:** nothing in Phase 2's engineering; it blocks the product behaviour each assumption describes
+
+**Context.** The Phase 2 intake rests on six working assumptions — `A1`–`A6` in
+[`runs/chain/plan.md`](runs/chain/plan.md) §3 — that were **not explicitly
+confirmed** by the owner (owner decision `O1`, recorded in
+[`runs/chain/ledger.md`](runs/chain/ledger.md)). The intake therefore recorded
+them as **provisional defaults**: a claim with line items and one currency per
+claim (`A1`), receipts as references rather than uploaded files (`A2`),
+applications tracked but never generated (`A3`), machine learning local only
+(`A4`), a single owner with no teams (`A5`), and money as `NUMERIC(19,4)` and a
+JSON string (`A6`). Each is stated as provisional where it is used; the origin
+note is [`../project-truth.md`](../project-truth.md) §18.4.
+
+**Options.**
+
+| Option | Impact |
+| ------ | ------ |
+| Confirm all six. | The provisional marker is removed from `project-truth.md` §18, and the specifications are promoted from `Accepted` as written. Cheapest for the build; it makes the build's shape the product's shape. |
+| Confirm some, revise others. | Each revision is a new change against the affected specification and, where it changes money or storage, an amendment to `ADR-0007` or `ADR-0009`. Nothing is rewritten silently. |
+| Leave them provisional. | The features stay `Accepted` and their behaviour is built to the provisional reading; a later revision is a normal change. This is the state today. |
+
+**Who decides.** The product owner.
+
+**Related.** [`../project-truth.md`](../project-truth.md) §18.4;
+[`runs/chain/plan.md`](runs/chain/plan.md) §3;
+[`../decisions/ADR-0007-money-representation.md`](../decisions/ADR-0007-money-representation.md);
+[`../decisions/ADR-0009-receipt-references.md`](../decisions/ADR-0009-receipt-references.md).
+
 ---
 
 ## Summary
@@ -376,5 +415,6 @@ specialist.
 | `Q-08` | A password-change and session-management surface | Open | Nothing today |
 | `Q-09` | The rate limiter: fail open or closed, and which algorithm | Open | Nothing today |
 | `Q-10` | Which license does ATOM use? | Open | The publication of the repository |
-| `Q-11` | What are the phases after Phase 1? | Open | The roadmap's phase column |
+| `Q-11` | What are the phases after Phase 1? | **Answered** — Phase 2 defined in `roadmap.md` §2 | Nothing any more |
 | `Q-12` | Reload without a restart, and which settings may change at run time | Open | Nothing today |
+| `Q-13` | Are the Phase 2 working assumptions (`A1`–`A6`) correct? | Open | The product behaviour each assumption describes |
