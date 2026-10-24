@@ -75,9 +75,10 @@ later phase depends on:
 
 **Phase 2 — the personal-workspace layer.** It is defined in
 [`roadmap.md`](roadmap.md) §2 and its requirements are in §18 of this file.
-Phase 2 is accepted and **not built**: no Phase 2 endpoint exists in the
-repository today. Its delivery builds on the Phase 1 API, so it starts after
-the Phase 1 close-out, but its requirements are agreed independently of it.
+Phase 2 is **partly delivered**: the reimbursement endpoints exist (§17), the
+job application and machine-learning endpoints do not. Its delivery builds on
+the Phase 1 API, so it started after the Phase 1 close-out, but its
+requirements are agreed independently of it.
 
 ## 4. Agreed features (Phase 1 scope)
 
@@ -482,7 +483,7 @@ blocks Phase 1 work that does not depend on the answer.
 | Documentation tree | Verified | `docs/` - `cargo run --bin atom-docs` reports no error and no warning |
 | CI pipeline | Implemented | `.github/workflows/ci.yml` - the three quality gates, a release build, the documentation check and the OpenCode configuration check |
 | Container image | Not started | `docker-compose.yml` is provided for local PostgreSQL only |
-| Reimbursement tracking | Implemented (schema only) | accepted in §18.1; migration `0004_expense_claims.sql` and `src/reimbursements/{mod,models}.rs` exist and compile, and nothing else does: no endpoint, no service, no recorded API run. The constraints are asserted by `tests/claims_schema.rs`. The feature itself is `Accepted`, not `Verified`. |
+| Reimbursement tracking | Implemented | accepted in §18.1; migration `0004_expense_claims.sql`, `src/reimbursements/` and all twelve published operations exist. `tests/claims_schema.rs` asserts the constraints, `tests/claims_api.rs` the twelve operations and `tests/openapi_contract.rs` the published surface. No run of that suite is recorded and no reviewer has read the chain that completed it, so the feature is **not** `Verified`. |
 | Job application tracking | Not started | accepted in §18.2; no code, no migration, no test exists |
 | Local machine learning | Not started | accepted in §18.3; no code, no migration, no test exists |
 | Everything else in the roadmap | Not started | by design |
@@ -504,9 +505,13 @@ foundation: reimbursement tracking, job application tracking, and local
 machine learning over the owner's own notes. The phase itself is defined in
 [`roadmap.md`](roadmap.md) §2.
 
-Every requirement in this section is **`Accepted`** — agreed, and **not
-built**. None of them is `Implemented` or `Verified`; §17 says the same in the
-status table. The feature specifications are:
+Every requirement in this section was **`Accepted`** on 2026-10-24 — agreed,
+and not built at the time. The reimbursement requirements (`REIMB-R01`…`R11`)
+are now **`Implemented`**: the code exists for all twelve published operations.
+They are not `Verified`, because no passing run is recorded and no reviewer has
+read the chain that completed them. The job-application and machine-learning
+requirements are still `Accepted`. §17 says the same in its status table. The
+feature specifications are:
 
 | Feature | Identifier | Specification |
 | ------- | ---------- | ------------- |

@@ -28,13 +28,14 @@ use atom_api::api::routes::{API_PREFIX, ROUTE_TABLE, UNVERSIONED_ROUTE_TABLE, op
 
 /// The number of operations the locked contract publishes.
 ///
-/// Twenty-five versioned operations - five authentication, five notes, five
-/// projects, five tasks and five claims - plus the two unversioned probes. The
-/// two-way comparison below cannot see an operation that was dropped from the
-/// table, the router and the document together, so the size of the agreed
-/// surface is pinned as well: the contract is that all 27 operations of
+/// Thirty-two versioned operations - five authentication, five notes, five
+/// projects, five tasks and twelve claims (five claim routes, three item writes
+/// and four lifecycle actions) - plus the two unversioned probes. The two-way
+/// comparison below cannot see an operation that was dropped from the table,
+/// the router and the document together, so the size of the agreed surface is
+/// pinned as well: the contract is that all 34 operations of
 /// `/api/v1/openapi.json` still exist.
-const CONTRACT_OPERATIONS: usize = 27;
+const CONTRACT_OPERATIONS: usize = 34;
 
 /// Every operation declared on a path item, as `(METHOD, operation)`.
 ///
@@ -734,4 +735,50 @@ fn the_update_claim_request_publishes_a_nullable_project_id() {
         carries_uuid(&project_id),
         "UpdateClaimRequest.project_id must publish the UUID form it accepts: {project_id}"
     );
+}
+
+/// The item and lifecycle operations publish their documented success status.
+///
+/// A generated client picks its return type from the success response, so the
+/// status is part of the contract and not a rendering detail: an item write
+/// that published `200` where the API answers `201`, or a delete that published
+/// no `204`, is broken for that client even though the router serves the path.
+/// The seven operations and their statuses are the table `C-R3`/`C-R4` locks and
+/// [`docs/features/reimbursements/api.md`] §1 publishes.
+#[test]
+fn the_item_and_lifecycle_operations_publish_their_success_status() {
+    let document = openapi_document(&common::test_config());
+
+    let published: [(&str, &str, &str); 7] = [
+        ("POST", "/api/v1/claims/{claim_id}/items", "201"),
+        ("PATCH", "/api/v1/claims/{claim_id}/items/{item_id}", "200"),
+        ("DELETE", "/api/v1/claims/{claim_id}/items/{item_id}", "204"),
+        ("POST", "/api/v1/claims/{claim_id}/submit", "200"),
+        ("POST", "/api/v1/claims/{claim_id}/approve", "200"),
+        ("POST", "/api/v1/claims/{claim_id}/reject", "200"),
+        ("POST", "/api/v1/claims/{claim_id}/pay", "200"),
+    ];
+
+    for (method, path, expected) in published {
+        let item = document
+            .paths
+            .get_path_item(path)
+            .unwrap_or_else(|| panic!("the document must describe the path {path}"));
+
+        let operation = match method {
+            "POST" => item.post.as_ref(),
+            "PATCH" => item.patch.as_ref(),
+            "DELETE" => item.delete.as_ref(),
+            other => panic!("{other} is not one of the methods these operations use"),
+        }
+        .unwrap_or_else(|| panic!("the document must describe {method} {path}"));
+
+        let statuses: Vec<&String> = operation.responses.responses.keys().collect();
+
+        assert!(
+            statuses.iter().any(|status| status.as_str() == expected),
+            "{method} {path} must publish the {expected} success response; it publishes \
+             {statuses:?}"
+        );
+    }
 }

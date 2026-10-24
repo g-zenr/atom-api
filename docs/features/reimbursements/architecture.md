@@ -1,6 +1,6 @@
 # Reimbursements — architecture
 
-> **Status:** Accepted
+> **Status:** Implemented
 > **Last updated:** 2026-10-24
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-REIMB-001`](specification.md)
@@ -9,26 +9,25 @@ How the reimbursement feature is built. The public contract is in
 [api.md](api.md); the agreed requirements are in
 [specification.md](specification.md).
 
-**Two layers exist and two do not.** Migration `0004_expense_claims.sql`
-creates `expense_claims`, `expense_items` and the `expense_claim_status` enum;
+**Both halves exist.** Migration `0004_expense_claims.sql` creates
+`expense_claims`, `expense_items` and the `expense_claim_status` enum;
 `src/reimbursements/` holds `mod.rs`, `models.rs`, `dto.rs`, `service.rs`,
-`repository.rs` and `handlers.rs`, and five **claim** operations are served under
-`/api/v1/claims`. The **item** endpoints and the **lifecycle** actions do not
-exist: `POST`, `PATCH` and `DELETE …/items`, and `POST …/submit`,
-`…/approve`, `…/reject`, `…/pay`. Everything below that names an item write or a
-transition is the **plan** for R3–R5, recorded so that the implementing change
-has a shape to follow. A planned design is recorded as planned; the text is
-corrected whenever the implementation and this plan disagree.
+`repository.rs` and `handlers.rs`; and all **twelve** published operations are
+served under `/api/v1/claims` — five on the claim, three on its items, four
+lifecycle actions. What this document describes is what the tree contains, not
+what a later chain intends. Where a design decision was taken during the
+implementation and differs from the earlier plan, the decision is recorded with
+its reason.
 
 ## 1. Responsibilities
 
 | Module | Responsibility | Exists |
 | ------ | -------------- | ------ |
-| [`../../../src/reimbursements/handlers.rs`](../../../src/reimbursements/handlers.rs) | HTTP only: extraction, status codes, response serialization. Five handlers with their `utoipa` attributes. | Yes |
-| [`../../../src/reimbursements/service.rs`](../../../src/reimbursements/service.rs) | Business rules: validation, the project rule, the mapping from a repository miss to `404`. The lifecycle rules arrive with R4. | Yes, claim rules only |
-| [`../../../src/reimbursements/repository.rs`](../../../src/reimbursements/repository.rs) | SQL: the claim statements, every one scoped by `user_id`. The item statements and the total recomputation arrive with R3. | Yes, claim statements only |
+| [`../../../src/reimbursements/handlers.rs`](../../../src/reimbursements/handlers.rs) | HTTP only: extraction, status codes, response serialization. Twelve handlers with their `utoipa` attributes. | Yes |
+| [`../../../src/reimbursements/service.rs`](../../../src/reimbursements/service.rs) | Business rules: validation, the project rule, the transition table, the mapping from a repository outcome to `404`/`409`/`422`. | Yes |
+| [`../../../src/reimbursements/repository.rs`](../../../src/reimbursements/repository.rs) | SQL: the claim and item statements and the transition statements, every one scoped by `user_id`; the item transaction; the detail snapshot. | Yes |
 | [`../../../src/reimbursements/models.rs`](../../../src/reimbursements/models.rs) | Persistence shapes: `ExpenseClaim`, `ExpenseItem`, `ClaimStatus`. | Yes |
-| [`../../../src/reimbursements/dto.rs`](../../../src/reimbursements/dto.rs) | Public contracts: `ClaimResponse`, `ClaimDetailResponse`, `ClaimPage`, `ItemResponse`, `CreateClaimRequest`, `UpdateClaimRequest`, `ClaimQuery`, `ClaimsListQuery` and the two length limits. **No money type** — see §2.3. | Yes |
+| [`../../../src/reimbursements/dto.rs`](../../../src/reimbursements/dto.rs) | Public contracts: `ClaimResponse`, `ClaimDetailResponse`, `ClaimPage`, `ItemResponse`, `CreateClaimRequest`, `UpdateClaimRequest`, `CreateItemRequest`, `UpdateItemRequest`, `ClaimQuery`, `ClaimsListQuery` and the five length limits. **No money type** — see §2.3. | Yes |
 
 `mod.rs` declares all five modules and the module is registered in `src/lib.rs`.
 `ClaimStatus` is one enum used in three places — a filter, a response and the
@@ -45,7 +44,7 @@ The feature depends on:
 | ---------- | --- |
 | `src/api/middleware.rs` (`AuthUser`) | The caller's identity, and therefore the ownership predicate. |
 | `src/pagination.rs` | `PaginationQuery`, `Page<T>`, the list envelope and the clamp. |
-| `src/helpers/validation.rs` | The shared text validators (trimmed, bounded, required, search). |
+| `src/helpers/validation.rs` | The shared text validators, and `validate_money` for the four-decimal input rule. |
 | `src/error.rs` (`AppError`) | The one error envelope. |
 | `src/config/messages.toml` | Every client-facing string, through the message catalogue. |
 
@@ -56,22 +55,20 @@ the clearing. It does not read `notes` or `tasks` at all.
 
 ### 2.1 `ClaimService`
 
-The five claim methods exist; the item and lifecycle methods are the plan for
-R3 and R4.
+Nine public methods. The four lifecycle routes share one of them, because the
+action, not the body, is the input.
 
 | Method | Contract | Exists |
 | ------ | -------- | ------ |
 | `create(owner, request)` | Validates title, description and currency; verifies the optional project belongs to `owner`; inserts the claim in `draft`; returns `ClaimDetailResponse`. | Yes |
 | `list(owner, query, pagination)` | Applies the filters and the clamp; returns `Page<ClaimResponse>` without items. | Yes |
-| `get(owner, claim_id)` | Loads the claim **and its items**, both owned by `owner`; `404` otherwise. | Yes |
+| `get(owner, claim_id)` | Loads the claim **and its items** from one snapshot, both owned by `owner`; `404` otherwise. | Yes |
 | `update(owner, claim_id, request)` | Validates only the fields present; applies a partial update; `404` otherwise, naming the project when the project is what failed. | Yes |
-| `delete(owner, claim_id)` | Deletes the claim, its items cascade; `404` otherwise. | Yes |
-| `add_item(owner, claim_id, request)` | Requires `draft`; inserts the item and recomputes the total in one transaction. | No — R3 |
-| `update_item(owner, claim_id, item_id, request)` | Requires `draft`; updates the present fields and recomputes the total in one transaction. | No — R3 |
-| `delete_item(owner, claim_id, item_id)` | Requires `draft`; deletes the item and recomputes the total in one transaction. | No — R3 |
-| `submit(owner, claim_id)` | `draft` → `submitted` after the preconditions; `rejected` → `draft` (reopen only); anything else `409`. | No — R4 |
-| `decide(owner, claim_id, decision)` | `submitted` → `approved` or `rejected`; anything else `409`. | No — R4 |
-| `pay(owner, claim_id)` | `approved` → `paid`; anything else `409`. | No — R4 |
+| `delete(owner, claim_id)` | Deletes the claim; its items cascade; `404` otherwise. No status guard. | Yes |
+| `create_item(owner, claim_id, request)` | Validates the five item fields; requires `draft`; inserts the item and recomputes the total in one transaction; returns `ItemResponse`. | Yes |
+| `update_item(owner, claim_id, item_id, request)` | Requires `draft`; updates the present fields and recomputes the total in one transaction; `404` when the item is not under that claim. | Yes |
+| `delete_item(owner, claim_id, item_id)` | Requires `draft`; deletes the item and recomputes the total in one transaction. | Yes |
+| `transition(owner, claim_id, action)` | One guarded `UPDATE` for the action; on zero rows, `explain_refusal` maps the state to `404`, `409` or the `422` of a refused submit; returns `ClaimDetailResponse` read after the write. | Yes |
 
 The `owner` argument is the authenticated `user_id`. It is the first parameter
 of every method, which makes it impossible to call a claim method without
@@ -80,25 +77,34 @@ the message catalogue and the configured pagination, and the field is
 `state.reimbursements`.
 
 `list` returns `Page<ClaimResponse>`, not `Page<ClaimDetailResponse>`: the
-listing does not carry items.
+listing does not carry items. The item and lifecycle methods return a single
+resource, never a page.
 
 ### 2.2 `ClaimRepository`
 
-Six methods, no trait, and **nine static statements** behind them: five
-operations are one statement each, and the listing is a page statement plus a
-matching `COUNT(*)` in each of its two shapes. At most two statements run per
-request.
+Twelve methods over **nineteen statement constants**: ten for the claim — the
+insert, the single read, the item read, the two list shapes, the two counts,
+the update, the delete and the detail snapshot's `SET TRANSACTION` — six for
+the items (the lock, the insert, the update, the delete, the total recompute
+and the item count) and three for the lifecycle. A request runs one, two or
+three of them; §2.6 and §2.7 say which.
 
 | Method | What the statement does | Ownership predicate |
 | ------ | ----------------------- | ------------------- |
 | `insert` | `INSERT … SELECT … WHERE <project is null> OR EXISTS (SELECT 1 FROM projects WHERE id = $n AND user_id = $owner) RETURNING …`. Writes `'draft'` explicitly; `total_amount` comes from the column default and renders `"0.0000"`. | The `EXISTS` names the caller. `user_id` is written from the token, never from the request. |
 | `find_owned` | The single-row read of a claim. | `id = $1 AND user_id = $2` |
-| `list_items_owned` | Reads the items of one claim for the detail response. **Read-only in R2**: it is not an item endpoint. | `claim_id = $1 AND user_id = $2` — both, always |
+| `list_items_owned` | Reads the items of one claim in the published order. | `claim_id = $1 AND user_id = $2` — both, always |
+| `find_detail_owned` | The claim and its items in **one** `REPEATABLE READ, READ ONLY` transaction, so the total and the items of one response always agree. | `id = $1 AND user_id = $2` and `claim_id = $1 AND user_id = $2` |
 | `update_owned` | The partial update: `COALESCE($n, column)` per field, an explicit `CASE` for the one field that can be set to `NULL`, `updated_at = NOW()`, and the project rule in the same `WHERE`. | `id = $1 AND user_id = $2`, plus `user_id = $2` inside the `EXISTS` over `projects` |
-| `delete_owned` | One `DELETE`; the items follow through `ON DELETE CASCADE`. | `id = $1 AND user_id = $2` |
+| `delete_owned` | One `DELETE`, with **no status predicate**; the items follow through `ON DELETE CASCADE`. | `id = $1 AND user_id = $2` |
 | `list_owned` | The page and its count, in two shapes — §2.5. | `user_id = $1` on both |
+| `count_items_owned` | `COUNT(*)` of a claim's items. Used only on the error path of `submit`, to say which field the refusal names. | `claim_id = $1 AND user_id = $2` |
+| `insert_item` | Begin; `SELECT status … FOR UPDATE`; `INSERT`; recompute; commit. §2.7. | `claim_id = $1 AND user_id = $2` on the lock and the recompute; `user_id` written from the token on the insert |
+| `update_item` | Begin; lock; `UPDATE … WHERE id AND claim_id AND user_id`; recompute; commit. | all three |
+| `delete_item` | Begin; lock; `DELETE … WHERE id AND claim_id AND user_id`; recompute; commit. | all three |
+| `transition_owned` | One guarded `UPDATE` for the action. §2.6. | `id = $1 AND user_id = $2`, plus the expected `status` |
 
-Four rules the statements follow:
+Five rules the statements follow:
 
 1. **`user_id` is in the `WHERE` clause, not in a check.** This is
    [`ADR-0005`](../../decisions/ADR-0005-ownership-enforced-in-sql.md). A miss
@@ -112,22 +118,27 @@ Four rules the statements follow:
    `find_owned` *after* the statement has already refused; see
    [`../../architecture/reimbursements-crud-design.md`](../../architecture/reimbursements-crud-design.md)
    §6.4.
-3. **The item predicate carries both `claim_id` and `user_id`**, so an item
-   cannot be reached by combining an id from one account with a claim id from
-   another.
+3. **The item predicate carries `id`, `claim_id` and `user_id`.** An item id is
+   only meaningful inside its claim, so an id from one account cannot be
+   combined with a claim id from another, and an id under a different claim of
+   the **same** owner matches no row.
 4. **Money is selected with `::text` and an explicit alias.** No `numeric`
    reaches Rust as anything but its exact rendering
    ([`ADR-0007`](../../decisions/ADR-0007-money-representation.md)). A money
    column selected without `::text` does not decode at all, so the mistake fails
    loudly instead of publishing a number.
+5. **Timestamps written by a transition or an item write use
+   `clock_timestamp()`, not `NOW()`.** `NOW()` is the transaction's start
+   instant; for a transaction that waited on the claim row lock it can predate
+   the `submitted_at` it is compared against, and
+   `expense_claims_timestamp_order_chk` would then reject a correct approval.
 
-`update_owned` needs its second statement only on the failure path. That is a
-deliberate trade, recorded as a limitation in §10.
+`update_owned` needs its second statement only on the failure path, and so does
+`transition_owned`. That is a deliberate trade, recorded as a limitation in §10.
 
 ### 2.3 Money: a string, not a type
 
-**There is no `Money` newtype, and R2 did not add one.** The design that settled
-this is
+**There is no `Money` newtype.** The design that settled this is
 [`../../architecture/reimbursements-crud-design.md`](../../architecture/reimbursements-crud-design.md)
 §4.3, and the reasoning is worth keeping because a previous version of **this
 document** promised the newtype:
@@ -141,9 +152,10 @@ document** promised the newtype:
    sees the whole-body error.
 2. It would have no method but a constructor. Every operation money needs — the
    sum, the range check, the comparison — is SQL's.
-3. R2 accepts **no** money at all, so the type would have zero callers until R3,
-   and the module-admission rule in [`../../../src/helpers/mod.rs`](../../../src/helpers/mod.rs)
-   asks for more than one caller.
+3. The validator that replaced it is one function beside the other shared text
+   validators, which is where the module-admission rule in
+   [`../../../src/helpers/mod.rs`](../../../src/helpers/mod.rs) expects such a
+   rule to live.
 
 What exists instead:
 
@@ -151,12 +163,12 @@ What exists instead:
   `NUMERIC(19,4)::text` renders exactly four decimals (`"149.8000"`,
   `"0.0000"`), which **is** the wire form; serde quotes it as a JSON string.
 - No `f32`, no `f64`, no decimal crate, and no arithmetic in Rust. The total is
-  computed by `SUM` in SQL, and not at all in R2.
-- The four-decimal **input** rule is fixed now and built in R3, as one function
-  beside the other text validators (`validate_money` in
-  `src/helpers/validation.rs`), not as a type. It is one character-level check
-  that produces a `FieldViolation` naming the field, which is what that module
-  already holds.
+  computed by `SUM` in SQL, and nowhere else.
+- The four-decimal **input** rule is
+  `helpers::validation::validate_money`, built in the item wave: it accepts
+  `^[0-9]{1,15}\.[0-9]{4}$` and returns the string unchanged, and it is applied
+  to `CreateItemRequest.amount` and to `UpdateItemRequest.amount` when present.
+  It is a character check, not a parse: nothing rounds, compares or sums there.
 
 The database column is permissive on **input** and exact on **output**: it
 coerces `"12.5"` to `12.5000` and rounds a fifth decimal instead of refusing it.
@@ -165,9 +177,9 @@ That is why the input rule cannot be left to the column, and why
 [`../../../tests/claims_schema.rs`](../../../tests/claims_schema.rs) records the
 behaviour rather than treating the scale as validation.
 
-### 2.4 `project_id` is a tri-state
+### 2.4 The nullable fields are tri-states
 
-`project_id` is the one field of a claim whose "absent" and "null" mean different
+`project_id` is the claim field whose "absent" and "null" mean different
 things, so `UpdateClaimRequest.project_id` is `Option<Option<Uuid>>` — and that
 shape alone is **not enough**, because `serde` collapses an explicit `null` into
 "absent" for a plain nested `Option`:
@@ -198,10 +210,26 @@ the accessor can drift;
 seam is visible in the OpenAPI document as a nullable field rather than a
 missing one.
 
-`title` and `description` have no tri-state: `{"title": null}` is indistinguishable
-from an omitted key and is treated as omitted, `{"title": ""}` is a `422`, and
-`{"description": ""}` is the one empty string that means something — it clears
-the description, which is the column's own default.
+**The item's two nullable fields reuse the same seam**, through
+`double_option_string` and two accessors of their own:
+
+| Field | Accessor | `null` means |
+| ----- | -------- | ------------ |
+| `category` | `UpdateItemRequest::category_change() -> (bool, Option<&str>)` | clear the column |
+| `receipt_url` | `UpdateItemRequest::receipt_url_change() -> (bool, Option<&str>)` | clear the reference |
+
+`an_item_category_and_receipt_are_kept_cleared_or_set_by_the_three_body_forms`
+deserialises the three body forms and asserts both accessors. An **empty**
+category is the published "store `null`" case, so on a `PATCH` it is also a
+clear — `resolve_category` in the service turns it into the same pair.
+
+`title` and `description` have no tri-state: `{"title": null}` is
+indistinguishable from an omitted key and is treated as omitted, `{"title": ""}`
+is a `422`, and `{"description": ""}` is the one empty string that means
+something — it clears the description, which is the column's own default. The
+same rule holds for an item: `{"description": ""}` is a `422`, because
+`expense_items_description_chk` has a lower bound of one character and no
+"clear" spelling.
 
 ### 2.5 The list: two shapes, one per index
 
@@ -237,16 +265,134 @@ Four details the statements carry:
 
 `currency`, the date range and the search are not indexed and must not be: they
 narrow the rows the chosen index has already reduced to the owner.
-`expense_claims_project_id_idx` is not read by R2 — the published listing has no
-`project_id` filter.
+`expense_claims_project_id_idx` is not read by the published listing, which has
+no `project_id` filter.
 
-### 2.6 The lifecycle guard — planned for R4
+### 2.6 The lifecycle guard — built
 
-One function, `ensure_transition(current, action) -> Result<Next, AppError>`,
-holds the transition table, and the service calls it before every state
-change. A table with one implementation is what makes "every forbidden
-transition is refused" a single testable rule rather than eight `if`
-statements. It does not exist yet, and neither does any writer of `status`.
+The table has **five edges** and twenty combinations:
+
+| From | Action | To | Timestamp written |
+| ---- | ------ | -- | ----------------- |
+| `draft` | `submit` | `submitted` | `submitted_at` |
+| `submitted` | `approve` | `approved` | `decided_at` |
+| `submitted` | `reject` | `rejected` | `decided_at` |
+| `approved` | `pay` | `paid` | `paid_at` |
+| `rejected` | `submit` | `draft` | none; the reopen **clears `submitted_at` and `decided_at`** |
+
+Every other pair — fifteen of them — is refused, and `paid` is terminal.
+
+`ensure_transition(current, action) -> Option<ClaimStatus>` in `service.rs` is
+the single definition of that table, and the unit test
+`the_transition_table_allows_exactly_the_five_edges` walks all twenty
+combinations against it.
+
+**The table is not on the success path.** A lifecycle action is **one guarded
+`UPDATE`**, not a read followed by a write:
+
+```text
+UPDATE expense_claims
+   SET status = …, <the stamp the CHECK requires> = clock_timestamp(), updated_at = clock_timestamp()
+ WHERE id = $1 AND user_id = $2 AND status = <the expected source status>
+RETURNING …
+```
+
+That is what makes two concurrent actions safe. The second statement blocks on
+the row lock, then re-evaluates its own `WHERE` against the committed row, and
+because the status has already moved it matches nothing: exactly one of the two
+actions wins, and the loser gets `409`. A check-then-write would let both read
+`submitted` and both decide.
+
+A zero-row result is ambiguous — absent, foreign, wrong status, or a refused
+submit precondition — so the service explains it **after** the write has already
+refused, in this order:
+
+1. the claim does not exist for this caller → `404 not_found`;
+2. `ensure_transition(claim.status, action)` is `None` → `409 conflict`
+   (`transition_not_allowed`);
+3. the table allows the pair, so for `submit` from `draft` the refusal is the
+   precondition: no items → `422` naming `items`, items but a zero total →
+   `422` naming `total_amount` (`REIMB-R05`);
+4. otherwise a concurrent action moved the claim between the statement and this
+   read → `409 conflict`.
+
+The submit statement carries the precondition itself, so no request path can
+skip it:
+
+```text
+AND (status = 'rejected'
+     OR (total_amount > 0
+         AND EXISTS (SELECT 1 FROM expense_items WHERE claim_id = $1 AND user_id = $2)))
+```
+
+`submit` covers two edges in one statement because the action is ambiguous about
+its source state; the `CASE` arms are the two rows of the table for that action.
+The draft arm keeps `decided_at` and `paid_at`, which the lifecycle constraint
+already requires to be null for a draft. The reopen arm nulls all three, because
+`expense_claims_lifecycle_timestamps_chk` requires a `draft` to carry no stamp
+at all — clearing one and not the other would be a `23514` at commit instead of
+a clean `200`. `approve` and `reject` share one statement that binds the target
+status; `pay` has its own.
+
+**The table exists twice** — as `ensure_transition` in Rust and as the `status`
+predicates of the three statements — and nothing at compile time keeps them in
+step. What keeps them in step is the test pair: the twenty-case unit test for
+the Rust table and `every_forbidden_transition_is_refused` plus
+`a_draft_can_be_submitted_approved_and_paid` for the SQL. A sixth edge would
+have to be added in both, and the tests are what say so. This is recorded as a
+limitation in §10.
+
+### 2.7 The item transaction and the total invariant
+
+Every item write is **one transaction, in this order**, and the order is the
+invariant:
+
+```text
+BEGIN
+  ├─ SELECT status FROM expense_claims
+  │    WHERE id = $1 AND user_id = $2 FOR UPDATE     no row   → 404
+  │                                                  not draft → 409
+  ├─ INSERT / UPDATE / DELETE the item               no row on update or
+  │                                                  delete   → 404
+  ├─ UPDATE expense_claims
+  │    SET total_amount = COALESCE(
+  │          (SELECT SUM(amount) FROM expense_items
+  │            WHERE claim_id = $1 AND user_id = $2), 0),
+  │        updated_at = clock_timestamp()
+  │    WHERE id = $1 AND user_id = $2
+COMMIT
+```
+
+Four properties follow from the shape, not from a later check:
+
+1. **The item and the total cannot diverge.** The write and the recompute are in
+   the same transaction, so either both commit or neither does. A failure after
+   the insert leaves neither the item nor a new total.
+2. **`FOR UPDATE` serialises the writers of one claim.** Two concurrent inserts
+   would otherwise each compute a `SUM` that misses the other's row; the lock
+   forces the second to wait, and its `SUM` therefore sees the first's committed
+   item. Item writes on one claim are consequently serialised — the throughput
+   ceiling of the feature, and irrelevant for a personal workspace.
+3. **`SUM` over no rows is `NULL`, hence the `COALESCE`.** Deleting the last item
+   stores `0`, which renders `"0.0000"`, never `null` and never a stale total.
+4. **The claim's `updated_at` moves with its items.** The recompute sets it, so
+   a claim's modification time is the last change to the claim *or* to one of
+   its items. That is deliberate: the response is a detail, and a client
+   polling `updated_at` should see the item write.
+
+The refusal paths return before any write, and the transaction is dropped rather
+than committed, so a refused item write leaves nothing behind. The repository
+never builds an error: it returns `ItemWrite::{Applied, ClaimNotFound,
+ClaimNotDraft, ItemNotFound}`, and the service maps each variant to its
+catalogue message and status, so a new outcome cannot be silently ignored.
+
+**The detail read is one snapshot.** `find_detail_owned` runs the claim read and
+the item read inside a `REPEATABLE READ, READ ONLY` transaction. Under the
+default `READ COMMITTED` those were two snapshots, so an item committed between
+them would be published next to a `total_amount` that predates it — exactly the
+divergence the item transaction exists to prevent. The cost is one extra
+statement (`SET TRANSACTION …`) and a transaction per detail read, `GET`,
+`PATCH` and every lifecycle response all use it.
 
 ## 3. Data ownership
 
@@ -274,51 +420,51 @@ authority the migration implements. The plan's working sketch is in
 
 ### 3.1 The seeded claims
 
-`atom-seed` seeds claims and items in the same chain that adds the tables,
-because its count check compares its own table list against
-`information_schema` and every run would otherwise fail. The profiles are
-**1 / 25 / 50 claims** and **0 / 48 / 98 items** for `minimal` / `dev` /
-`demo`. Claim `i` gets `1 + (i % 3)` items **except claim `0`**, the
+`atom-seed` seeds claims and items, because its count check compares its own
+table list against `information_schema` and every run would otherwise fail. The
+profiles are **1 / 25 / 50 claims** and **0 / 48 / 98 items** for `minimal` /
+`dev` / `demo`. Claim `i` gets `1 + (i % 3)` items **except claim `0`**, the
 profile's first claim, which is a `draft` (`status` cycles the five states by
 `i % 5`) and gets none — that single exception is why `minimal` seeds no items
-at all.
-`currency` cycles a fixed three, and `submitted_at`, `decided_at` and `paid_at`
-are set so that `expense_claims_lifecycle_timestamps_chk` holds for every row.
-`total_amount` is the `SUM` of the claim's items, computed in SQL. The seeder
-asserts the counts exactly and re-reads every seeded claim's total against its
-items; `tests/claims_schema.rs` owns the constraint proof, the seeder owns the
-data.
+at all. `currency` cycles a fixed three, and `submitted_at`, `decided_at` and
+`paid_at` are set so that `expense_claims_lifecycle_timestamps_chk` holds for
+every row. `total_amount` is the `SUM` of the claim's items, computed in SQL.
+The seeder asserts the counts exactly and re-reads every seeded claim's total
+against its items; `tests/claims_schema.rs` owns the constraint proof, the
+seeder owns the data.
 
-The API can create neither a status other than `draft` nor a total other than
-`0.0000`, so the endpoint tests insert their own claims and items with SQL for
-the filters, the money scale and the item order — the fixture section of
-[testing.md](testing.md) §2. A fixture is never a seeded row: every one is
-scoped to the account the test registered, and none of the seeder's data is
-needed to run the API suite.
+The API can now reach all five statuses and any total, so the endpoint tests no
+longer need SQL to build a lifecycle state: `claim_in_status` in
+`tests/claims_api.rs` creates a claim and walks it with the real action routes,
+which means a lifecycle that cannot reach one of its own states fails there
+rather than quietly making a transition test vacuous. Two cases still use a SQL
+fixture — the listing filters with fixed `created_at` instants, and the item
+order — and every fixture is scoped to the account the test registered, so none
+of the seeder's data is needed to run the API suite.
 
 ## 4. Invariants
 
 | # | Invariant | Enforced by | Exists |
 | - | --------- | ----------- | ------ |
-| 1 | A claim belongs to exactly one user; an item belongs to one claim and to the same user. | The non-null foreign keys, and `user_id` in the item predicate. | Yes |
-| 2 | A claim or item of another account is invisible and answers `404`. | `user_id = $n` in every statement; `AppError::NotFound` in the service. | Claim half yes; item half R3 |
-| 3 | `total_amount = SUM(items.amount)`, always. | Recomputed by `SUM` in SQL in the same transaction as every item write. | **No** — R3 writes the items; the seeder and the schema tests hold the data half |
-| 4 | One currency per claim, never converted. `currency` is required and upper-cased on create and is **not patchable**: a `PATCH` body carrying it — or `status`, or `total_amount` — is **accepted with `200` and the field is ignored**, because none of the three is a field of `UpdateClaimRequest` and none appears in any `SET` clause. There is no `422` for them; that is the published `api.md` §6 behaviour, and [status.md](status.md) §1.1 records why the earlier "service rule with a `422`" wording was wrong. | The create validator, the three-field `UpdateClaimRequest`, and the `SET` clause of `update_owned`. Asserted by `the_claim_currency_is_not_patchable` and `the_claim_status_is_not_patchable`. | Yes |
-| 5 | An amount is non-negative and at most 15 integer digits. | The R3 money validator, and a database `CHECK (amount >= 0)` plus the column type. | Schema half yes; the validator is R3 |
-| 6 | A claim in any status other than `draft` has at least one item and a positive total. | The submit precondition; a `CHECK` cannot see the items, so this one is a service rule. | **No** — R4 |
-| 7 | Only the listed transitions happen; `paid` is terminal. | `ensure_transition`, and a `status` `CHECK` for the five values. | **No** — R4 |
-| 8 | A partial update leaves an omitted field untouched; `project_id: null` clears the link; an empty body changes only `updated_at`. | `Option`/`Option<Option<…>>` in the DTO (§2.4) and `COALESCE` plus an explicit `null` path in SQL. | Yes |
+| 1 | A claim belongs to exactly one user; an item belongs to one claim and to the same user. | The non-null foreign keys, the composite item key, and `user_id` in every item predicate. | Yes |
+| 2 | A claim or item of another account is invisible and answers `404`. | `user_id = $n` in every statement; `AppError::NotFound` in the service. | Yes |
+| 3 | `total_amount = SUM(items.amount)`, always. | Recomputed by `SUM` in SQL in the same transaction as every item write, after the claim row is locked. | Yes, for every API path (§2.7) |
+| 4 | One currency per claim, never converted. `currency` is required and upper-cased on create and is **not patchable**: a `PATCH` body carrying it — or `status`, or `total_amount` — is **accepted with `200` and the field is ignored**, because none of the three is a field of `UpdateClaimRequest` and none appears in any `SET` clause. There is no `422` for them; that is the published `api.md` §6 behaviour, and [status.md](status.md) §1.2 records why the earlier "service rule with a `422`" wording was wrong. | The create validator, the three-field `UpdateClaimRequest`, and the `SET` clause of `update_owned`. Asserted by `the_claim_currency_is_not_patchable` and `the_claim_status_is_not_patchable`. | Yes |
+| 5 | An amount is non-negative and at most 15 integer digits, with exactly four decimals. | `validate_money` for input, `expense_items_amount_chk` and `NUMERIC(19,4)` at rest. | Yes |
+| 6 | A claim in any status other than `draft` has at least one item and a positive total. | The `WHERE` of the submit statement (§2.6); a `CHECK` cannot see the items, so this one is SQL inside the request, not a constraint. | Yes, for the request path |
+| 7 | Only the listed transitions happen; `paid` is terminal. | The `status` predicate of the three transition statements, `ensure_transition`, and the `expense_claim_status` enum for the five values. | Yes |
+| 8 | A partial update leaves an omitted field untouched; `project_id: null` clears the link; `category: null` and `receipt_url: null` clear those columns; an empty body changes only `updated_at`. | `Option`/`Option<Option<…>>` in the DTOs (§2.4) and `COALESCE` plus an explicit `null` path in SQL. | Yes |
 | 9 | The list order is total and stable. | `ORDER BY created_at DESC, id DESC`. | Yes |
-| 10 | The item order is chronological and total. | `ORDER BY incurred_on, created_at, id`. | The read exists; the order is asserted by `the_claim_detail_items_are_in_chronological_order` |
-| 11 | A receipt is a reference, never bytes. | The column is `text`; no route accepts a file ([`ADR-0009`](../../decisions/ADR-0009-receipt-references.md)). | Yes, vacuously: no route accepts a receipt at all yet |
+| 10 | The item order is chronological and total. | `ORDER BY incurred_on, created_at, id`. | Yes |
+| 11 | A receipt is a reference, never bytes. | The column is `text`; no route accepts a file ([`ADR-0009`](../../decisions/ADR-0009-receipt-references.md)). | Yes |
 | 12 | Deleting a project keeps the claim. | `ON DELETE SET NULL`. | Yes |
 
-The migration enforces the **data** half of invariants 1, 5, 11 and 12: the two
-`user_id` keys and the composite item key, `expense_items_amount_chk`, the
-`receipt_url` column type, and `ON DELETE SET NULL`. Invariants 2, 4, 8 and 9 are
-now held by the claim statements as well as by the migration. Invariants 3, 5
-(input), 6 and 7 remain service rules that arrive with R3 and R4. A constraint
-holds data; it does not answer a request.
+The migration enforces the **data** half of invariants 1, 4, 5, 11 and 12: the
+two `user_id` keys and the composite item key, `expense_claims_currency_chk`,
+`expense_items_amount_chk`, the `receipt_url` column type, and `ON DELETE SET
+NULL`. Invariants 2, 3, 6, 7, 8 and 9 are held by the statements as well. A
+constraint holds data; it does not answer a request, and that is why the two
+halves are listed separately.
 
 ## 5. Error handling
 
@@ -326,24 +472,23 @@ holds data; it does not answer a request.
 | --------- | ----- | ------ | ------ |
 | Title, description or currency invalid, on create | `validation_failed` naming the field | `422` | Yes |
 | `search` over its bound, `currency` filter not three letters, reversed date range | `validation_failed` naming the field | `422` | Yes |
-| Item description, amount, date, category or receipt invalid | `validation_failed` naming the field | `422` | **No** — R3 |
-| Submission with no items or a zero total | `validation_failed` naming `items` or `total_amount` | `422` | **No** — R4 |
+| Item description, amount, date, category or receipt invalid | `validation_failed` naming the field | `422` | Yes |
+| A body value of the wrong type — including a JSON number where money is expected | `validation_failed`, field `body` | `422` | Yes |
+| Submission with no items or a zero total | `validation_failed` naming `items` or `total_amount` | `422` | Yes |
 | The claim does not exist, or belongs to another account | `not_found` | `404` | Yes |
 | The optional project does not exist, or belongs to another account | `not_found` | `404` | Yes |
-| The item does not exist, or does not belong to that claim | `not_found` | `404` | **No** — R3 |
-| A transition the lifecycle does not allow | `conflict` | `409` | **No** — R4 |
-| An item write on a claim that is not a draft | `conflict` | `409` | **No** — R3 |
+| The item does not exist, does not belong to that claim, or belongs to another account | `not_found` | `404` | Yes |
+| A transition the lifecycle does not allow | `conflict` (`transition_not_allowed`) | `409` | Yes |
+| An item write on a claim that is not a draft | `conflict` (`claim_not_editable`) | `409` | Yes |
 | The body is not JSON, or a path parameter is not a UUID | `bad_request` | `400` | Yes |
 | A query parameter cannot be parsed, or is outside its enum | `bad_request` | `400` | Yes |
-| A body value of the wrong type, or a missing required field | `validation_failed`, field `body` | `422` | Yes |
+| A missing required field | `validation_failed`, field `body` | `422` | Yes |
 | No or invalid credentials | `unauthorized` | `401` | Yes |
 | A body over the limit | `payload_too_large` | `413` | Yes |
 | The database failed | `database_error` | `500` | Yes |
+| The request exceeded the configured timeout | `timeout` | `408` | Yes, from the middleware |
 
-**Nothing in this feature answers `409` today**, because nothing changes a
-status. The two `409` rows are R3 and R4.
-
-Two rules the claim service follows, in this order:
+Two rules the service follows, in this order:
 
 1. **Validate the whole body first, then touch the database.** A request that is
    both malformed and aimed at a foreign resource is a `422`, not a `404`.
@@ -354,32 +499,41 @@ Two rules the claim service follows, in this order:
 A missing claim and a claim of another account produce the **same** response.
 That is deliberate: a `403` would confirm that the identifier exists.
 
+The `409` is decided by the statement, not by the service: the service only
+translates a zero-row outcome. That ordering matters for a concurrent caller —
+if the service decided, two callers could both pass its check.
+
 ## 6. The security boundary
 
 ```text
                  ┌──────────────────────────────────────────────┐
   bearer token ─►│ /claims, /claims/{claim_id}                  │  served (R2)
-                 │ /claims/{claim_id}/items                     │  planned (R3)
-                 │ /claims/{claim_id}/{submit|approve|reject|pay}│  planned (R4)
+                 │ /claims/{claim_id}/items                     │  served (R3)
+                 │ /claims/{claim_id}/{submit|approve|reject|pay}│  served (R4)
                  └──────────────────────────────────────────────┘
                                     │
                                     │  user_id from the credential only
                                     ▼
                  every statement carries `user_id = $n`
-                 the item statements carry `claim_id` **and** `user_id`
+                 the item statements carry `item_id`, `claim_id` **and** `user_id`
 ```
 
-- There is no anonymous route in this feature.
+- There is no anonymous route in this feature. `the_claim_routes_require_a_credential`
+  calls all twelve with no token and with an invalid one.
 - A claim's `project_id` is verified against `projects.user_id` **inside the
   write statement**, so a claim cannot point at another account's project and
   the check cannot be skipped by a caller who sends the field late.
 - An item id is only meaningful **inside** its claim. The path
-  `/claims/{claim_id}/items/{item_id}` is resolved as a pair, so a caller
-  cannot move an item between claims by guessing an id. Planned for R3.
-- The receipt URL is owner data. It is never fetched (no SSRF) and never
-  logged (it can carry a signed credential). Planned for R3.
+  `/claims/{claim_id}/items/{item_id}` is resolved as a triple — item, claim and
+  owner — so a caller cannot move an item between claims by guessing an id, and
+  cannot reach another account's item by combining identifiers.
+- The receipt URL is owner data. It is never fetched (no SSRF) and never logged
+  (it can carry a signed credential).
 - `user_id` is never accepted from a request body and never appears in a
   response: the DTOs drop it, and the statements write it from the token.
+- A lifecycle action is authorised by the same `user_id` predicate as a read.
+  `a_lifecycle_action_on_another_users_claim_is_not_found` proves all four
+  actions answer `404` and write nothing.
 
 ## 7. The request path
 
@@ -400,63 +554,75 @@ PATCH /api/v1/claims/{claim_id}
   │    │                ├─ a row  → the claim exists, so the project failed
   │    │                │            → 404 not_found, project message
   │    │                └─ no row → 404 not_found, claim message
-  │    └─ 200 OK, ClaimDetailResponse (the claim, then its items)
+  │    └─ 200 OK, ClaimDetailResponse (one repeatable-read snapshot)
 ```
 
 An ignored field never reaches the service: `currency`, `status` and
 `total_amount` are not fields of `UpdateClaimRequest` (§4 invariant 4). A body
 with no field at all is still a `200`, and the only change is `updated_at`.
 
-### 7.2 Adding an item — planned for R3
+### 7.2 Adding an item — served
 
 ```text
 POST /api/v1/claims/{claim_id}/items
   │
   ├─ api::middleware::AuthUser → user_id
-  ├─ api::extract::Path<(Uuid,)>                       not a UUID → 400
-  ├─ api::extract::Json<CreateItemRequest>             not JSON → 400
-  ├─ reimbursements::service::ClaimService::add_item
-  │    ├─ validate description, amount, incurred_on, category, receipt_url
+  ├─ api::extract::Path<Uuid>                           not a UUID → 400
+  ├─ api::extract::Json<CreateItemRequest>              not JSON → 400
+  │                                                     wrong type → 422, field `body`
+  ├─ reimbursements::service::ClaimService::create_item
+  │    ├─ validate description, amount, category, receipt_url
+  │    │                                                → 422 naming the field
   │    ├─ BEGIN
-  │    │    ├─ SELECT status FROM expense_claims
-  │    │    │    WHERE id = $1 AND user_id = $2        no row → 404
-  │    │    ├─ status != 'draft'                       → 409
+  │    │    ├─ SELECT status … FOR UPDATE               no row   → 404
+  │    │    │                                           not draft → 409
   │    │    ├─ INSERT INTO expense_items …
-  │    │    └─ UPDATE expense_claims SET total_amount = SUM(…), updated_at = NOW()
+  │    │    └─ UPDATE expense_claims SET total_amount = SUM(…)
   │    └─ COMMIT
   └─ 201 Created, ItemResponse
 ```
 
-The transaction is what makes invariant 3 hold. A failure after the insert
-leaves neither the item nor a new total. The claim's new total is read with
-`GET /claims/{claim_id}`, which is what the money test does.
+The response is the **item**, not the claim: the published `api.md` §8 says the
+claim's new total is read with `GET /claims/{claim_id}`, and the tests do exactly
+that, so a stale total cannot hide behind the mutating response.
 
-### 7.3 Transitioning — planned for R4
+`PATCH` and `DELETE` on an item follow the same three steps. A `PATCH` that
+matches no item under that claim is the item's `404`; a `DELETE` with
+`rows_affected() == 0` is the same.
+
+### 7.3 Transitioning — served
 
 ```text
 POST /api/v1/claims/{claim_id}/approve
   │
   ├─ AuthUser → user_id
-  ├─ Path → claim_id
-  ├─ ensure_transition(current_status, Approve)
-  │    ├─ submitted → approved     set decided_at = NOW()
-  │    └─ anything else            → 409
-  └─ 200 OK, ClaimDetailResponse
+  ├─ Path → claim_id                                    not a UUID → 400
+  ├─ reimbursements::service::ClaimService::transition(…, Approve)
+  │    ├─ UPDATE … SET status = 'approved', decided_at = clock_timestamp()
+  │    │     WHERE id = $1 AND user_id = $2 AND status = 'submitted'
+  │    │       1 row  → continue
+  │    │       0 rows → explain_refusal  (§2.6)
+  │    │                404 → 409 → 422 (submit only) → 409
+  │    └─ 200 OK, ClaimDetailResponse in the new status
 ```
+
+`submit` has no timestamp of its own in this sketch because its statement writes
+one of two: `submitted_at` for the draft edge, and `NULL` for the reopen's
+`submitted_at` and `decided_at`.
 
 ## 8. Related files
 
 | File | Role | Exists |
 | ---- | ---- | ------ |
-| [`../../../src/api/routes.rs`](../../../src/api/routes.rs) | Registers the five claim routes, the five `ROUTE_TABLE` rows and the seven component schemas in the OpenAPI document. | Yes, extended |
+| [`../../../src/api/routes.rs`](../../../src/api/routes.rs) | Registers the twelve claim routes, the twelve `ROUTE_TABLE` rows and the nine component schemas in the OpenAPI document. | Yes |
 | [`../../../src/api/extract.rs`](../../../src/api/extract.rs) | The `Path`, `Query` and `Json` extractors that keep the error envelope intact. | Yes |
 | [`../../../src/api/middleware.rs`](../../../src/api/middleware.rs) | `AuthUser`, the source of the ownership predicate. | Yes |
 | [`../../../src/pagination.rs`](../../../src/pagination.rs) | The list envelope and the clamp. | Yes |
-| [`../../../src/helpers/validation.rs`](../../../src/helpers/validation.rs) | The shared text validators; `validate_money` arrives with R3. | Yes |
+| [`../../../src/helpers/validation.rs`](../../../src/helpers/validation.rs) | The shared text validators and `validate_money`. | Yes |
 | [`../../../src/reimbursements/`](../../../src/reimbursements/) | The feature itself. | All five modules |
 | [`../../../migrations/0004_expense_claims.sql`](../../../migrations/0004_expense_claims.sql) | The two tables, their constraints and their indexes. | Yes |
 | [`../../../tests/claims_schema.rs`](../../../tests/claims_schema.rs) | The constraint, cascade and money-scale proofs. | Yes |
-| [`../../../tests/claims_api.rs`](../../../tests/claims_api.rs) | The 34 claim endpoint tests. | Yes |
+| [`../../../tests/claims_api.rs`](../../../tests/claims_api.rs) | The 55 endpoint tests: 34 on the claim, 21 on the items and the lifecycle. | Yes |
 
 ## 9. Related decisions
 
@@ -469,45 +635,57 @@ POST /api/v1/claims/{claim_id}/approve
 - [`ADR-0001`](../../decisions/ADR-0001-modular-monolith.md) — why this is a
   module and not a service.
 
-No new ADR was written for R2. The five claim endpoints fit the accepted model,
-and the one structural decision — no money type, the check is a validator in
-`helpers` — narrows a plan in
+No new ADR was written for `R2`, `R3` or `R4`. The twelve endpoints fit the
+accepted model, and the two structural decisions — no money type, with the check
+a validator in `helpers`; and a stored total recomputed by `SUM` inside the item
+transaction — narrow a plan in
 [`module-boundaries.md`](../../architecture/module-boundaries.md) rather than
-reversing a decision. A change that needs money handled in Rust needs an ADR
-superseding `ADR-0007`.
+reversing a decision. A change that needs money handled in Rust, or the total
+computed outside SQL, needs an ADR superseding `ADR-0007`.
 
 ## 10. Limitations of this design
 
-- **The total is a stored column, not a view.** It is recomputed on every item
-  write inside the transaction, so a direct SQL edit of an item without the
-  recomputation leaves the total stale. The seeder's post-insert verification
-  checks it on seeded data; the API-level check is R3's, because R2 writes no
-  item.
+- **The total is a stored column, not a view.** Every API path now maintains it
+  inside the transaction, so no request can produce a stale total. A direct SQL
+  edit of an item still can, because it bypasses the recompute. The seeder's
+  post-insert verification checks it on seeded data; no HTTP test can produce
+  the divergence, which is why there is none.
 - **The submit precondition is not a database constraint.** A `CHECK` cannot
-  count the items of another table, so the "at least one item" rule is
-  enforced by the service. A direct insert can violate it.
+  count the items of another table, so "at least one item and a positive total"
+  lives in the `WHERE` of the submit statement. A direct SQL status write can
+  therefore create a `submitted` claim with no items.
+- **The transition table is written twice.** `ensure_transition` in Rust and the
+  three statements' `status` predicates express the same five edges. Nothing at
+  compile time links them; the twenty-case unit test and the fifteen-case HTTP
+  test are what would catch a drift. `ensure_transition` is only on the error
+  path, so it cannot be the guard.
 - **The item `user_id` is redundant.** It is an intentional denormalisation,
   kept so that the item statements carry the ownership predicate without a
   join. The composite foreign key on `(claim_id, user_id)` makes a
   disagreement unrepresentable; the cost is the extra unique index on the
   parent.
 - **One transaction per item write, one claim row lock.** Two concurrent item
-  writes on the same claim serialise on the claim row. That is correct and it
-  is also the throughput ceiling of the feature; a personal workspace will
-  never reach it.
-- **The lifecycle is a service rule, not a state machine in the database.** A
-  `status` change written directly by SQL bypasses it.
+  writes on the same claim serialise. That is what makes the `SUM` correct and
+  it is also the throughput ceiling of the feature. No test runs two writers at
+  once, so the serialisation is argued from the lock, not measured.
+- **The lifecycle is a service rule, not a state machine in the database.** The
+  guard is the `WHERE` of a statement the service issues; a `status` change
+  written directly by SQL bypasses it.
 - **A `PATCH` with a foreign `project_id` costs one extra owner-scoped read on
   the failure path**, to name the resource correctly. The success path is one
-  statement.
-- **The detail read is two statements in two snapshots.** Nothing writes items
-  in R2, so nothing can race it. `R3` introduces the first item writer and owns
-  the decision whether the read needs one snapshot.
+  statement. A refused lifecycle action costs one read (and, for `submit`, one
+  count) on the same path for the same reason.
+- **The detail read costs a transaction.** `GET`, `PATCH` and the four
+  lifecycle responses read the claim and its items from one `REPEATABLE READ`
+  snapshot, which is one extra statement and one commit per read.
+  Consistency was chosen over the round trip
+  ([`../../architecture/reimbursements-crud-design.md`](../../architecture/reimbursements-crud-design.md)
+  §6.7).
 - **`?currency=` is a `422`, while `?search=` means "no filter".** Each follows
   the published sentence for that parameter; the difference is in the contract,
   not in the code.
 - **A `%` or `_` in `search` is a wildcard.** Identical to `notes` and
   `projects`; fixing it in one feature would make two searches behave
   differently.
-- **Deleting a claim is permanent.** There is no soft delete and no history,
-  in any status (`REIMB-R11`).
+- **Deleting a claim is permanent.** There is no soft delete and no history, in
+  any status (`REIMB-R11`).

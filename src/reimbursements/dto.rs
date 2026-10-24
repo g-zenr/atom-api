@@ -42,6 +42,27 @@ pub const MAX_TITLE_LENGTH: usize = 200;
 /// this constant is the application-side mirror of it.
 pub const MAX_DESCRIPTION_LENGTH: usize = 5_000;
 
+/// Maximum accepted item description length.
+///
+/// Mirrors `expense_items_description_length_chk`
+/// (`CHECK (CHAR_LENGTH(description) BETWEEN 1 AND 500)`) in
+/// `migrations/0004_expense_claims.sql`.
+pub const MAX_ITEM_DESCRIPTION_LENGTH: usize = 500;
+
+/// Maximum accepted item category length.
+///
+/// Mirrors the length half of `expense_items_category_chk`. The other half —
+/// that the stored value is lower case and trimmed — is a normalisation the
+/// service performs, not a limit.
+pub const MAX_ITEM_CATEGORY_LENGTH: usize = 64;
+
+/// Maximum accepted receipt reference length.
+///
+/// Mirrors `expense_items_receipt_url_chk`
+/// (`CHECK (CHAR_LENGTH(receipt_url) BETWEEN 1 AND 2048 ...)`). The receipt is
+/// a client-supplied reference, never an upload (`ADR-0009`).
+pub const MAX_RECEIPT_URL_LENGTH: usize = 2048;
+
 /// The public representation of a claim, as the listing returns it.
 ///
 /// The listing carries no items: [`ClaimDetailResponse`] is the shape that
@@ -331,6 +352,112 @@ where
     Option::<Uuid>::deserialize(deserializer).map(Some)
 }
 
+/// The same tri-state for a text field.
+///
+/// `category` and `receipt_url` are nullable columns, so an omitted key means
+/// "leave it untouched" while an explicit `null` means "clear it". The pair of
+/// attributes on the field does the work; see [`double_option`] for why both
+/// are needed.
+fn double_option_string<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
+}
+
+/// Request body for adding a line item to a draft claim.
+///
+/// **There is no `currency`.** An item is denominated in its claim's currency,
+/// so a body carrying one is accepted and ignored as an unknown key. `id`,
+/// `claim_id`, `user_id` and the two timestamps are server-owned for the same
+/// reason: they are absent from this type, so no code path can write them.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct CreateItemRequest {
+    /// Line description, trimmed to 1 to 500 characters.
+    #[schema(example = "Train, return")]
+    pub description: String,
+    /// The amount as a four-decimal string in the claim's currency.
+    ///
+    /// A JSON number is refused by the extractor. `"12.5"` and `"12.500"` are
+    /// refused by the service rather than rounded by the column (`ADR-0007`).
+    #[schema(
+        format = "decimal",
+        pattern = "^[0-9]{1,15}\\.[0-9]{4}$",
+        example = "125.8000"
+    )]
+    pub amount: String,
+    /// The day the expense was incurred, `YYYY-MM-DD`.
+    #[schema(example = "2026-10-20")]
+    pub incurred_on: NaiveDate,
+    /// Optional category. Trimmed and lower-cased; an empty value stores
+    /// `null`.
+    #[schema(example = "travel")]
+    pub category: Option<String>,
+    /// Optional absolute `http` or `https` reference. Never fetched.
+    #[schema(example = "https://receipts.example.test/2026/10/20-train.pdf")]
+    pub receipt_url: Option<String>,
+}
+
+/// Request body for partially updating one line item.
+///
+/// Every field is optional and an omitted one is left untouched. `category`
+/// and `receipt_url` are tri-states, exactly like `project_id` on
+/// [`UpdateClaimRequest`]: absent leaves the column alone, `null` clears it.
+///
+/// `amount`, `incurred_on`, `description`, `category` and `receipt_url` are the
+/// only writable fields. `currency`, `claim_id`, `user_id` and the two
+/// timestamps are not on this type, so a body carrying one of them changes
+/// nothing.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct UpdateItemRequest {
+    /// New description. Trimmed; an empty one is a validation failure, not a
+    /// clear.
+    pub description: Option<String>,
+    /// New amount, as a four-decimal string.
+    #[schema(
+        format = "decimal",
+        pattern = "^[0-9]{1,15}\\.[0-9]{4}$",
+        example = "129.9000"
+    )]
+    pub amount: Option<String>,
+    /// New incurred day, `YYYY-MM-DD`.
+    pub incurred_on: Option<NaiveDate>,
+    /// The category as a tri-state: absent leaves it, `null` clears it.
+    #[serde(default, deserialize_with = "double_option_string")]
+    #[schema(value_type = Option<String>, nullable)]
+    pub category: Option<Option<String>>,
+    /// The receipt reference as a tri-state: absent leaves it, `null` clears
+    /// it.
+    #[serde(default, deserialize_with = "double_option_string")]
+    #[schema(value_type = Option<String>, nullable)]
+    pub receipt_url: Option<Option<String>>,
+}
+
+impl UpdateItemRequest {
+    /// The category as `(clear, value)`.
+    ///
+    /// A single `COALESCE($n, category)` cannot express "set to `NULL`",
+    /// because `NULL` already means "leave alone", which is why the boolean is
+    /// part of the pair.
+    pub fn category_change(&self) -> (bool, Option<&str>) {
+        match &self.category {
+            None => (false, None),
+            Some(None) => (true, None),
+            Some(Some(value)) => (false, Some(value)),
+        }
+    }
+
+    /// The receipt reference as `(clear, value)`, with the same cardinality as
+    /// [`Self::category_change`].
+    pub fn receipt_url_change(&self) -> (bool, Option<&str>) {
+        match &self.receipt_url {
+            None => (false, None),
+            Some(None) => (true, None),
+            Some(Some(value)) => (false, Some(value)),
+        }
+    }
+}
+
 /// Query parameters accepted by `GET /api/v1/claims`.
 ///
 /// Only the feature filters live here. The pagination parameters live in
@@ -440,5 +567,31 @@ mod tests {
         let set: UpdateClaimRequest = serde_json::from_str(&format!(r#"{{"project_id":"{id}"}}"#))
             .expect("a UUID is a valid patch");
         assert_eq!(set.project_change(), (false, Some(id)));
+    }
+
+    /// The two nullable item fields carry the same tri-state as `project_id`,
+    /// for the same reason: `null` must mean "clear", not "absent".
+    #[test]
+    fn an_item_category_and_receipt_are_kept_cleared_or_set_by_the_three_body_forms() {
+        let kept: UpdateItemRequest =
+            serde_json::from_str("{}").expect("an empty body is a valid patch");
+        assert_eq!(kept.category_change(), (false, None));
+        assert_eq!(kept.receipt_url_change(), (false, None));
+
+        let cleared: UpdateItemRequest =
+            serde_json::from_str(r#"{"category": null, "receipt_url": null}"#)
+                .expect("an explicit null is a valid patch");
+        assert_eq!(cleared.category_change(), (true, None));
+        assert_eq!(cleared.receipt_url_change(), (true, None));
+
+        let set: UpdateItemRequest = serde_json::from_str(
+            r#"{"category":"Travel","receipt_url":"https://example.test/a.pdf"}"#,
+        )
+        .expect("two strings are a valid patch");
+        assert_eq!(set.category_change(), (false, Some("Travel")));
+        assert_eq!(
+            set.receipt_url_change(),
+            (false, Some("https://example.test/a.pdf"))
+        );
     }
 }

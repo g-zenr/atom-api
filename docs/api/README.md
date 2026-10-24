@@ -21,14 +21,14 @@ The per-feature endpoint references are:
 | Notes | [`../features/notes/api.md`](../features/notes/api.md) | 5 |
 | Projects | [`../features/projects/api.md`](../features/projects/api.md) | 5 |
 | Tasks | [`../features/tasks/api.md`](../features/tasks/api.md) | 5 |
-| Reimbursements | [`../features/reimbursements/api.md`](../features/reimbursements/api.md) | 5 of the 12 it specifies — the item and lifecycle operations are not built |
+| Reimbursements | [`../features/reimbursements/api.md`](../features/reimbursements/api.md) | all 12 it specifies |
 
-**The document describes 27 operations**: 25 under `/api/v1` and the two health
-probes outside it. The reimbursement feature contributes five of them — list,
-create, read, patch and delete a claim. Its other seven operations (three item
-endpoints and four lifecycle actions) are specified in its `api.md` and are
-**not** in the document, because no handler exists. A reader who counts the
-inventory below must not count them.
+**The document describes 34 operations**: 32 under `/api/v1` and the two health
+probes outside it. The reimbursement feature contributes twelve of them — five
+claim operations, three item operations and four lifecycle actions. A reader who
+counts the inventory below must agree with those numbers; the contract test
+`the_route_table_and_the_document_describe_the_same_operations` fails if they
+disagree in either direction.
 
 ## 1. Where the OpenAPI document lives
 
@@ -142,6 +142,13 @@ is required.
 | `GET` | `/api/v1/claims/{claim_id}` | bearer | `200` | reimbursements |
 | `PATCH` | `/api/v1/claims/{claim_id}` | bearer | `200` | reimbursements |
 | `DELETE` | `/api/v1/claims/{claim_id}` | bearer | `204` | reimbursements |
+| `POST` | `/api/v1/claims/{claim_id}/items` | bearer | `201` | reimbursements |
+| `PATCH` | `/api/v1/claims/{claim_id}/items/{item_id}` | bearer | `200` | reimbursements |
+| `DELETE` | `/api/v1/claims/{claim_id}/items/{item_id}` | bearer | `204` | reimbursements |
+| `POST` | `/api/v1/claims/{claim_id}/submit` | bearer | `200` | reimbursements |
+| `POST` | `/api/v1/claims/{claim_id}/approve` | bearer | `200` | reimbursements |
+| `POST` | `/api/v1/claims/{claim_id}/reject` | bearer | `200` | reimbursements |
+| `POST` | `/api/v1/claims/{claim_id}/pay` | bearer | `200` | reimbursements |
 | `GET` | `/api/v1/openapi.json` | — | `200` | the document itself |
 | `GET` | `/api/v1/docs/` | — | `200` | the explorer |
 

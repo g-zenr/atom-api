@@ -2,7 +2,7 @@
 
 use axum::Router;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use utoipa::OpenApi;
 use utoipa::openapi::OpenApi as OpenApiDocument;
 #[cfg(feature = "docs")]
@@ -54,6 +54,13 @@ use crate::tasks::handlers as task_handlers;
         claim_handlers::get_claim,
         claim_handlers::update_claim,
         claim_handlers::delete_claim,
+        claim_handlers::create_item,
+        claim_handlers::update_item,
+        claim_handlers::delete_item,
+        claim_handlers::submit_claim,
+        claim_handlers::approve_claim,
+        claim_handlers::reject_claim,
+        claim_handlers::pay_claim,
     ),
     components(
         schemas(
@@ -90,6 +97,8 @@ use crate::tasks::handlers as task_handlers;
             crate::reimbursements::dto::ItemResponse,
             crate::reimbursements::dto::CreateClaimRequest,
             crate::reimbursements::dto::UpdateClaimRequest,
+            crate::reimbursements::dto::CreateItemRequest,
+            crate::reimbursements::dto::UpdateItemRequest,
             crate::reimbursements::models::ClaimStatus,
             crate::pagination::Pagination,
         )
@@ -193,6 +202,15 @@ pub const ROUTE_TABLE: &[(&str, &str)] = &[
     ("GET", "/claims/{claim_id}"),
     ("PATCH", "/claims/{claim_id}"),
     ("DELETE", "/claims/{claim_id}"),
+    // --- expense claim items ---
+    ("POST", "/claims/{claim_id}/items"),
+    ("PATCH", "/claims/{claim_id}/items/{item_id}"),
+    ("DELETE", "/claims/{claim_id}/items/{item_id}"),
+    // --- expense claim lifecycle ---
+    ("POST", "/claims/{claim_id}/submit"),
+    ("POST", "/claims/{claim_id}/approve"),
+    ("POST", "/claims/{claim_id}/reject"),
+    ("POST", "/claims/{claim_id}/pay"),
 ];
 
 /// Every operation outside [`API_PREFIX`], as `(METHOD, path)`.
@@ -258,6 +276,27 @@ pub fn api_routes() -> Router<AppState> {
                 .patch(claim_handlers::update_claim)
                 .delete(claim_handlers::delete_claim),
         )
+        .route(
+            "/claims/{claim_id}/items",
+            post(claim_handlers::create_item),
+        )
+        .route(
+            "/claims/{claim_id}/items/{item_id}",
+            patch(claim_handlers::update_item).delete(claim_handlers::delete_item),
+        )
+        .route(
+            "/claims/{claim_id}/submit",
+            post(claim_handlers::submit_claim),
+        )
+        .route(
+            "/claims/{claim_id}/approve",
+            post(claim_handlers::approve_claim),
+        )
+        .route(
+            "/claims/{claim_id}/reject",
+            post(claim_handlers::reject_claim),
+        )
+        .route("/claims/{claim_id}/pay", post(claim_handlers::pay_claim))
 }
 
 /// The API explorer, as an Axum router.

@@ -21,13 +21,19 @@ each of them is in [§2](#2-the-per-feature-document-contract).
 | Notes | `ATOM-FEAT-NOTE-001` | Verified | [specification](notes/specification.md) · [architecture](notes/architecture.md) · [api](notes/api.md) · [testing](notes/testing.md) · [status](notes/status.md) |
 | Projects | `ATOM-FEAT-PROJ-001` | Verified | [specification](projects/specification.md) · [architecture](projects/architecture.md) · [api](projects/api.md) · [testing](projects/testing.md) · [status](projects/status.md) |
 | Tasks | `ATOM-FEAT-TASK-001` | Verified | [specification](tasks/specification.md) · [architecture](tasks/architecture.md) · [api](tasks/api.md) · [testing](tasks/testing.md) · [status](tasks/status.md) |
-| Reimbursements | `ATOM-FEAT-REIMB-001` | Accepted | [specification](reimbursements/specification.md) · [architecture](reimbursements/architecture.md) · [api](reimbursements/api.md) · [testing](reimbursements/testing.md) · [status](reimbursements/status.md) |
+| Reimbursements | `ATOM-FEAT-REIMB-001` | Implemented | [specification](reimbursements/specification.md) · [architecture](reimbursements/architecture.md) · [api](reimbursements/api.md) · [testing](reimbursements/testing.md) · [status](reimbursements/status.md) |
 | Job application tracking | `ATOM-FEAT-JOB-001` | Accepted | [specification](job-applications/specification.md) · [architecture](job-applications/architecture.md) · [api](job-applications/api.md) · [testing](job-applications/testing.md) · [status](job-applications/status.md) |
 | Local machine learning | `ATOM-FEAT-ML-001` | Accepted | [specification](ml/specification.md) · [architecture](ml/architecture.md) · [api](ml/api.md) · [testing](ml/testing.md) · [status](ml/status.md) |
 
-The three Phase 2 features are `Accepted`: their requirements are recorded in
-[`project-truth.md`](../project-truth.md) §18 with acceptance criteria, and
-Reimbursements now has its schema: `migrations/0004_expense_claims.sql` and `src/reimbursements/{mod,models}.rs` exist, with `tests/claims_schema.rs` proving the constraints. Its endpoints, service and repository do not exist. None of the three is `Implemented` or `Verified`.
+The three Phase 2 features were accepted in
+[`project-truth.md`](../project-truth.md) §18 with acceptance criteria.
+Reimbursements is `Implemented`: `migrations/0004_expense_claims.sql`,
+`src/reimbursements/` and all twelve published endpoints exist, and
+`tests/claims_schema.rs`, `tests/claims_api.rs` and `tests/openapi_contract.rs`
+are written against them. It is not `Verified` — no run of that suite is
+recorded, and no reviewer has read the chain that completed it. Job
+applications and local machine learning remain `Accepted`: neither has a
+migration, a module, an endpoint or a test.
 
 The status column summarises the feature as a whole. The per-requirement
 evidence behind it is in each feature's `status.md`; a feature can contain both

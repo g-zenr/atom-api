@@ -55,6 +55,8 @@ pub struct Messages {
     pub validation: ValidationMessages,
     /// The messages for a resource that does not exist.
     pub resources: ResourceMessages,
+    /// The messages for a request the current state refuses.
+    pub conflicts: ConflictMessages,
 }
 
 /// The messages that are not specific to one feature.
@@ -131,6 +133,14 @@ pub struct ValidationMessages {
     pub currency_invalid: String,
     /// A submission-date range runs backwards.
     pub date_range_order: String,
+    /// A money value is not a four-decimal string.
+    pub money_scale: String,
+    /// A receipt reference is not an absolute `http` or `https` URL.
+    pub receipt_url_invalid: String,
+    /// A claim with no items cannot be submitted.
+    pub items_required: String,
+    /// A claim with a zero total cannot be submitted.
+    pub total_positive: String,
 }
 
 /// The messages for a resource that does not exist.
@@ -147,6 +157,22 @@ pub struct ResourceMessages {
     pub task_not_found: String,
     /// 404, when the expense claim does not exist.
     pub claim_not_found: String,
+    /// 404, when the expense item does not exist.
+    pub item_not_found: String,
+}
+
+/// The messages for a request the current state refuses.
+///
+/// These are the `409 conflict` texts. They are kept apart from
+/// [`ValidationMessages`] because the request itself was well formed: what
+/// failed is the state of the resource, not a field.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConflictMessages {
+    /// 409, when an item is written on a claim that is not a draft.
+    pub claim_not_editable: String,
+    /// 409, when a lifecycle action is not allowed from the current status.
+    pub transition_not_allowed: String,
 }
 
 impl Messages {

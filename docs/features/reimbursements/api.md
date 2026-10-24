@@ -1,6 +1,6 @@
 # Reimbursements — API
 
-> **Status:** Accepted
+> **Status:** Implemented
 > **Last updated:** 2026-10-24
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-REIMB-001`](specification.md)
@@ -10,12 +10,11 @@ API root. The general rules are in
 [`conventions.md`](../../api/conventions.md) and the error codes in
 [`error-contract.md`](../../api/error-contract.md).
 
-**Five of the twelve operations answer today; seven do not.** The claim
-operations (`GET`/`POST /claims`, `GET`/`PATCH`/`DELETE /claims/{claim_id}`) are
-served and appear in `/api/v1/openapi.json`; the item operations and the four
-lifecycle actions are specified here and are not built. Each section below says
-which half it is. The operation is part of the published API when the route
-exists and `tests/openapi_contract.rs` asserts it, which is true for the five.
+**All twelve operations answer.** The claim operations, the three item
+operations and the four lifecycle actions are served, appear in
+`/api/v1/openapi.json`, and are asserted by `tests/claims_api.rs` and
+`tests/openapi_contract.rs`. The feature is `Implemented`; it is not `Verified`,
+because no reviewer has read the chain that completed it.
 
 ## 1. Endpoint summary
 
@@ -555,13 +554,12 @@ A `ClaimDetailResponse` with `status` `paid` and `paid_at` set.
 
 ## 15. Notes on the OpenAPI document
 
-The five claim operations are registered in `src/api/routes.rs` and appear in the
+All twelve operations are registered in `src/api/routes.rs` and appear in the
 document at `/api/v1/openapi.json` with the `ClaimResponse`,
-`ClaimDetailResponse`, `ClaimPage`, `ItemResponse`, `CreateClaimRequest` and
-`UpdateClaimRequest` schemas. `CreateItemRequest` and `UpdateItemRequest` are
-specified below and are published when the item routes exist. The `bearer`
-security scheme applies to all of them. The list operation publishes `limit`,
-`offset`, `status`, `currency`,
+`ClaimDetailResponse`, `ClaimPage`, `ItemResponse`, `CreateClaimRequest`,
+`UpdateClaimRequest`, `CreateItemRequest` and `UpdateItemRequest` schemas. The
+`bearer` security scheme applies to all of them. The list operation publishes
+`limit`, `offset`, `status`, `currency`,
 `search`, `submitted_from` and `submitted_to` **once each**, and the contract
 test asserts that set exactly
 ([`conventions.md`](../../api/conventions.md) §5).

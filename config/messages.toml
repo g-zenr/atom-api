@@ -120,6 +120,24 @@ currency_invalid = "must be exactly three letters"
 # correct.
 date_range_order = "must not be later than submitted_to"
 
+# The money value is not in the published four-decimal form.
+#
+# `NUMERIC(19,4)` rounds a value it is given instead of refusing it, so this
+# check is the only thing that keeps `"12.5"` from silently becoming
+# `"12.5000"` on the way back out (ADR-0007).
+money_scale = "must be a decimal string with at most fifteen integer digits and exactly four decimal places"
+
+# The receipt is a reference, not an upload, and the scheme is part of the
+# contract: only `http` and `https` are accepted.
+receipt_url_invalid = "must be an absolute http or https URL of at most 2048 characters"
+
+# A claim can only be submitted with something to reimburse.
+#
+# The two violations name `items` and `total_amount` respectively, because the
+# claim has no item to point at.
+items_required = "must contain at least one item"
+total_positive = "must be greater than zero"
+
 [messages.resources]
 # 404, when the user does not exist.
 user_not_found = "The requested user does not exist."
@@ -135,3 +153,20 @@ task_not_found = "The requested task does not exist."
 
 # 404, when the expense claim does not exist, or is not owned by the caller.
 claim_not_found = "The requested expense claim does not exist."
+
+# 404, when the expense item does not exist, is not owned by the caller, or is
+# addressed under a claim it does not belong to.
+item_not_found = "The requested expense item does not exist."
+
+[messages.conflicts]
+# 409, when an item is written on a claim that is no longer a draft.
+#
+# REIMB-R06 restricts every item write to `draft`; the message states the rule
+# rather than the current status, so it stays true as the claim moves on.
+claim_not_editable = "Items can only be added, changed or deleted while the claim is a draft."
+
+# 409, when a lifecycle action is applied to a status the table does not allow.
+#
+# The message never names the current status or the refused action: the caller
+# already knows both, and the text stays valid for every refused pair.
+transition_not_allowed = "The claim's current status does not allow this action."

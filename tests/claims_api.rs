@@ -1,13 +1,16 @@
-//! HTTP-level tests for the reimbursement claim CRUD endpoints.
+//! HTTP-level tests for the reimbursement claim endpoints.
 //!
-//! The chain `C-R2` publishes five operations under `/api/v1/claims`: list,
-//! create, read, patch and delete. This file holds the 34 acceptance tests the
-//! design document (`docs/architecture/reimbursements-crud-design.md` §12)
-//! fixes, grouped the way it groups them: CRUD, ownership, money on the wire,
-//! `422` validation, `400`/`413` malformed, listing and filters, and the
+//! `C-R2` publishes five operations under `/api/v1/claims`: list, create, read,
+//! patch and delete. `C-R3`/`C-R4` publish seven more: the three item writes and
+//! the four lifecycle actions. This file holds the 55 acceptance tests those
+//! chains name, grouped the way the design document
+//! (`docs/architecture/reimbursements-crud-design.md` §12) and
+//! [`docs/features/reimbursements/api.md`] §7-§14 group them: CRUD, ownership,
+//! money on the wire, `422` validation, `400`/`413` malformed, listing and
+//! filters, line items and the total invariant, the lifecycle, and the
 //! credential.
 //!
-//! Two rules shape the file:
+//! Three rules shape the file:
 //!
 //! * **Behaviour, not implementation.** Every assertion is on the status code
 //!   and the observable body, never on a log line, a timing value or a random
@@ -17,13 +20,15 @@
 //!   database. Every test registers its own accounts, and every count is
 //!   restricted to the ids that test created, so no test can see another's
 //!   rows and no test truncates a table.
+//! * **The mutating call is never the evidence.** Where an invariant is about
+//!   stored state - the total, the lifecycle stamps - the assertion is on a
+//!   later read of the resource, not on the response that wrote it.
 //!
-//! Where a row cannot be produced through the API in this chain - a claim in
-//! `submitted` or `approved`, an item, a fixed `created_at` - the fixture is
-//! written as SQL against the same database, exactly as
-//! `tests/claims_schema.rs` does. The assertion is still on the API response:
-//! the SQL only builds the state, it never stands in for the behaviour under
-//! test.
+//! Where a row cannot be produced through the API in this chain - a fixed
+//! `created_at` - the fixture is written as SQL against the same database,
+//! exactly as `tests/claims_schema.rs` does. The assertion is still on the API
+//! response: the SQL only builds the state, it never stands in for the
+//! behaviour under test.
 
 pub mod common;
 
@@ -2163,6 +2168,1664 @@ async fn the_claim_detail_items_are_in_chronological_order() {
 }
 
 // ---------------------------------------------------------------------------
+// 12.8 - line items: writing one, and the total it maintains (R3)
+// ---------------------------------------------------------------------------
+
+/// The path of one claim's item collection.
+fn items_path(claim_id: &str) -> String {
+    format!("{CLAIMS}/{claim_id}/items")
+}
+
+/// The path of one item inside its claim.
+fn item_path(claim_id: &str, item_id: &str) -> String {
+    format!("{CLAIMS}/{claim_id}/items/{item_id}")
+}
+
+/// The path of one lifecycle action.
+fn action_path(claim_id: &str, action: &str) -> String {
+    format!("{CLAIMS}/{claim_id}/{action}")
+}
+
+/// The body of a minimal item request.
+fn item_body(description: &str, amount: &str, incurred_on: &str) -> Value {
+    json!({
+        "description": description,
+        "amount": amount,
+        "incurred_on": incurred_on,
+    })
+}
+
+/// Adds an item to a claim and returns the raw response.
+async fn post_item(app: &Router, token: &str, claim_id: &str, body: Value) -> TestResponse {
+    send(
+        app,
+        request(Method::POST, &items_path(claim_id), Some(token), Some(body)),
+    )
+    .await
+}
+
+/// Patches one item of a claim and returns the raw response.
+async fn patch_item(
+    app: &Router,
+    token: &str,
+    claim_id: &str,
+    item_id: &str,
+    body: Value,
+) -> TestResponse {
+    send(
+        app,
+        request(
+            Method::PATCH,
+            &item_path(claim_id, item_id),
+            Some(token),
+            Some(body),
+        ),
+    )
+    .await
+}
+
+/// Deletes one item of a claim and returns the raw response.
+async fn delete_item(app: &Router, token: &str, claim_id: &str, item_id: &str) -> TestResponse {
+    send(
+        app,
+        request(
+            Method::DELETE,
+            &item_path(claim_id, item_id),
+            Some(token),
+            None,
+        ),
+    )
+    .await
+}
+
+/// Fires one lifecycle action and returns the raw response.
+async fn act(app: &Router, token: &str, claim_id: &str, action: &str) -> TestResponse {
+    send(
+        app,
+        request(
+            Method::POST,
+            &action_path(claim_id, action),
+            Some(token),
+            None,
+        ),
+    )
+    .await
+}
+
+/// Reads one claim's detail and returns the `200` body.
+async fn detail_of(app: &Router, token: &str, claim_id: &str) -> Value {
+    get_claim(app, token, claim_id)
+        .await
+        .expect_status(StatusCode::OK)
+}
+
+/// The identifier of a created item.
+fn item_id_of(item: &Value) -> String {
+    item["id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the item response must carry an id: {item}"))
+        .to_string()
+}
+
+/// Reads a four-decimal money string as units of one ten-thousandth.
+fn scaled(text: &str) -> i128 {
+    let (integer, fraction) = text
+        .split_once('.')
+        .unwrap_or_else(|| panic!("{text:?} must carry a decimal point"));
+
+    let integer: i128 = integer
+        .parse()
+        .unwrap_or_else(|error| panic!("{text:?} must have a whole part: {error}"));
+    let fraction: i128 = fraction
+        .parse()
+        .unwrap_or_else(|error| panic!("{text:?} must have a fractional part: {error}"));
+
+    integer * 10_000 + fraction
+}
+
+/// Renders units of one ten-thousandth as a four-decimal money string.
+fn render_money(units: i128) -> String {
+    format!("{}.{:04}", units / 10_000, units % 10_000)
+}
+
+/// Adds the amounts of a claim detail's items exactly, as scaled integers.
+///
+/// The arithmetic is on `i128` units of one ten-thousandth, never on a float.
+/// The assertion this feeds is that the server's stored total and the client's
+/// sum agree digit for digit, and an approximate sum could let a wrong total
+/// pass a test that was supposed to catch it.
+fn sum_of(items: &Value) -> String {
+    let items = items
+        .as_array()
+        .unwrap_or_else(|| panic!("a claim detail must carry an items array: {items}"));
+
+    let mut total: i128 = 0;
+    for (index, item) in items.iter().enumerate() {
+        let amount = assert_money(&item["amount"], &format!("items[{index}].amount"));
+        total += scaled(&amount);
+    }
+
+    render_money(total)
+}
+
+/// Creates a claim with one item and walks it to `status` through the API.
+///
+/// The state is built by the operations under test rather than by SQL, so a
+/// lifecycle that cannot reach one of its own states fails here instead of
+/// quietly making the transition test vacuous.
+async fn claim_in_status(app: &Router, token: &str, title: &str, status: &str) -> String {
+    let created = create_claim(app, token, title).await;
+    let claim_id = id_of(&created);
+
+    post_item(
+        app,
+        token,
+        &claim_id,
+        item_body("One line", "10.0000", "2026-03-01"),
+    )
+    .await
+    .expect_status(StatusCode::CREATED);
+
+    match status {
+        "draft" => {}
+        "submitted" => {
+            act(app, token, &claim_id, "submit")
+                .await
+                .expect_status(StatusCode::OK);
+        }
+        "approved" => {
+            act(app, token, &claim_id, "submit")
+                .await
+                .expect_status(StatusCode::OK);
+            act(app, token, &claim_id, "approve")
+                .await
+                .expect_status(StatusCode::OK);
+        }
+        "rejected" => {
+            act(app, token, &claim_id, "submit")
+                .await
+                .expect_status(StatusCode::OK);
+            act(app, token, &claim_id, "reject")
+                .await
+                .expect_status(StatusCode::OK);
+        }
+        "paid" => {
+            act(app, token, &claim_id, "submit")
+                .await
+                .expect_status(StatusCode::OK);
+            act(app, token, &claim_id, "approve")
+                .await
+                .expect_status(StatusCode::OK);
+            act(app, token, &claim_id, "pay")
+                .await
+                .expect_status(StatusCode::OK);
+        }
+        other => panic!("`{other}` is not one of the five published statuses"),
+    }
+
+    let claim = detail_of(app, token, &claim_id).await;
+    assert_eq!(
+        claim["status"], status,
+        "the fixture must reach the {status} status"
+    );
+
+    claim_id
+}
+
+#[tokio::test]
+async fn an_item_can_be_added_to_a_draft_claim() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "item-create").await;
+
+    let created = create_claim(&app, &user.access_token, "Berlin trip").await;
+    let claim_id = id_of(&created);
+
+    // Every published field of §8, with the trimming and lower-casing the
+    // contract promises: a padded description is trimmed and a mixed-case
+    // category is stored as its lower-case token.
+    let response = post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        json!({
+            "description": "  Train, return  ",
+            "amount": "125.8000",
+            "incurred_on": "2026-10-20",
+            "category": "Travel",
+            "receipt_url": "https://receipts.example.test/2026/10/20-train.pdf",
+        }),
+    )
+    .await;
+    let item = response.expect_status(StatusCode::CREATED);
+
+    let item_id = item_id_of(&item);
+    assert_eq!(
+        item["claim_id"], claim_id,
+        "the item must be addressed by the claim it was posted under"
+    );
+    assert_eq!(
+        item["description"], "Train, return",
+        "an item description is trimmed before it is stored"
+    );
+    assert_eq!(
+        assert_money(&item["amount"], "amount"),
+        "125.8000",
+        "an item amount is a money string at scale four"
+    );
+    assert_eq!(item["incurred_on"], "2026-10-20");
+    assert_eq!(
+        item["category"], "travel",
+        "a category is trimmed and lower-cased"
+    );
+    assert_eq!(
+        item["receipt_url"], "https://receipts.example.test/2026/10/20-train.pdf",
+        "a receipt reference is stored as it arrived"
+    );
+    assert!(item["created_at"].is_string());
+    assert!(item["updated_at"].is_string());
+
+    // The item is denominated in its claim, so it carries no currency, and the
+    // owner is never published.
+    assert!(
+        item.get("currency").is_none(),
+        "ItemResponse carries no currency: {item}"
+    );
+    assert!(
+        item.get("user_id").is_none(),
+        "user_id must not be published: {item}"
+    );
+
+    // The two optional fields default to null, not to an empty string.
+    let response = post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        item_body("Coffee", "4.5000", "2026-10-21"),
+    )
+    .await;
+    let minimal = response.expect_status(StatusCode::CREATED);
+    assert!(
+        minimal["category"].is_null(),
+        "an absent category must be null: {minimal}"
+    );
+    assert!(
+        minimal["receipt_url"].is_null(),
+        "an absent receipt_url must be null: {minimal}"
+    );
+
+    // The claim detail is where an item is read back.
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(claim["status"], "draft");
+    assert_eq!(
+        claim["items"].as_array().map(Vec::len),
+        Some(2),
+        "the detail must list both items: {claim}"
+    );
+    let returned: Vec<String> = claim["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["id"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert!(
+        returned.contains(&item_id),
+        "the added item must be readable through the claim: {returned:?}"
+    );
+    assert_eq!(sum_of(&claim["items"]), "130.3000");
+}
+
+#[tokio::test]
+async fn adding_an_item_recomputes_the_total() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "item-total").await;
+
+    let created = create_claim(&app, &user.access_token, "Recomputed claim").await;
+    let claim_id = id_of(&created);
+
+    // Before any item the total is zero, and every add moves it by exactly the
+    // amount added - read back from the claim, not from the item response.
+    let before = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(
+        assert_money(&before["total_amount"], "total_amount"),
+        "0.0000"
+    );
+
+    let steps = [
+        ("125.8000", "125.8000"),
+        ("24.0000", "149.8000"),
+        ("0.0001", "149.8001"),
+    ];
+
+    for (amount, expected) in steps {
+        post_item(
+            &app,
+            &user.access_token,
+            &claim_id,
+            item_body("A line", amount, "2026-10-20"),
+        )
+        .await
+        .expect_status(StatusCode::CREATED);
+
+        let claim = detail_of(&app, &user.access_token, &claim_id).await;
+        assert_eq!(
+            assert_money(&claim["total_amount"], "total_amount"),
+            expected,
+            "the total must be the sum of the items after adding {amount}"
+        );
+        assert_eq!(
+            sum_of(&claim["items"]),
+            expected,
+            "the items and the total must agree after adding {amount}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_item_amount_round_trips_with_four_decimals() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "item-money").await;
+
+    // Every case is its own claim: the largest accepted value is only
+    // representable once, and a single-item claim makes the total equal to the
+    // amount, so a rounding step anywhere is visible.
+    for amount in ["125.8000", "0.0000", "999999999999999.9999"] {
+        let created = create_claim(&app, &user.access_token, "Round trip").await;
+        let claim_id = id_of(&created);
+
+        let response = post_item(
+            &app,
+            &user.access_token,
+            &claim_id,
+            item_body("A line", amount, "2026-10-20"),
+        )
+        .await;
+        let item = response.expect_status(StatusCode::CREATED);
+
+        assert_eq!(
+            assert_money(&item["amount"], "amount"),
+            amount,
+            "the response must echo the amount at the scale it was sent with"
+        );
+
+        // The stored value, read back through a different operation.
+        let claim = detail_of(&app, &user.access_token, &claim_id).await;
+        assert_eq!(claim["items"].as_array().map(Vec::len), Some(1));
+        assert_eq!(
+            assert_money(&claim["items"][0]["amount"], "items[0].amount"),
+            amount,
+            "the stored amount must be the value that was sent"
+        );
+        assert_eq!(
+            assert_money(&claim["total_amount"], "total_amount"),
+            amount,
+            "a one-item claim's total is that item's amount, at scale four"
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_item_amount_must_be_a_four_decimal_string() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "item-amount").await;
+
+    let created = create_claim(&app, &user.access_token, "Amount shapes").await;
+    let claim_id = id_of(&created);
+
+    // Each of these is a different way to be "numerically right and
+    // contractually wrong": the wire form is a string with exactly four
+    // decimals, and the server refuses rather than rounds (ADR-0007).
+    for amount in ["12.5", "12.500", "1,000.0000", "1e3", "-1.0000"] {
+        let response = post_item(
+            &app,
+            &user.access_token,
+            &claim_id,
+            item_body("Bad amount", amount, "2026-10-20"),
+        )
+        .await;
+        let body = response.expect_status(StatusCode::UNPROCESSABLE_ENTITY);
+        assert_field_error(&body, "validation_failed", "amount");
+    }
+
+    // A JSON number in the amount position never reaches the rule: money is a
+    // string in the request contract, so the body fails to deserialize.
+    let response = post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        json!({ "description": "Numeric amount", "amount": 12.5, "incurred_on": "2026-10-20" }),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::UNPROCESSABLE_ENTITY);
+    assert_error(&body, "validation_failed");
+
+    // Sixteen integer digits are outside the published maximum of fifteen.
+    let response = post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        item_body("Too large", "9999999999999999.0000", "2026-10-20"),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::UNPROCESSABLE_ENTITY);
+    assert_field_error(&body, "validation_failed", "amount");
+
+    // Nothing refused was written, and the total did not move.
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(
+        claim["items"].as_array().map(Vec::len),
+        Some(0),
+        "a refused amount must not create an item: {claim}"
+    );
+    assert_eq!(
+        assert_money(&claim["total_amount"], "total_amount"),
+        "0.0000"
+    );
+}
+
+#[tokio::test]
+async fn an_item_cannot_be_added_to_a_submitted_claim() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "item-not-draft").await;
+
+    // Every status other than `draft` refuses an item write with a conflict,
+    // and the claim's own content does not move.
+    for status in ["submitted", "approved", "rejected", "paid"] {
+        let claim_id = claim_in_status(&app, &user.access_token, status, status).await;
+        let before = detail_of(&app, &user.access_token, &claim_id).await;
+
+        let response = post_item(
+            &app,
+            &user.access_token,
+            &claim_id,
+            item_body("Late line", "5.0000", "2026-10-22"),
+        )
+        .await;
+        let body = response.expect_status(StatusCode::CONFLICT);
+        assert_error(&body, "conflict");
+
+        let after = detail_of(&app, &user.access_token, &claim_id).await;
+        assert_eq!(
+            after["items"].as_array().map(Vec::len),
+            Some(1),
+            "a refused item write must not add an item to a {status} claim: {after}"
+        );
+        assert_eq!(
+            after["total_amount"], before["total_amount"],
+            "a refused item write must not move the total of a {status} claim"
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_item_cannot_be_changed_or_deleted_after_submission() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "item-locked").await;
+
+    let created = create_claim(&app, &user.access_token, "Locked claim").await;
+    let claim_id = id_of(&created);
+
+    let item = post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        item_body("Train, return", "125.8000", "2026-10-20"),
+    )
+    .await
+    .expect_status(StatusCode::CREATED);
+    let item_id = item_id_of(&item);
+
+    act(&app, &user.access_token, &claim_id, "submit")
+        .await
+        .expect_status(StatusCode::OK);
+
+    let response = patch_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        &item_id,
+        json!({ "amount": "1.0000" }),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::CONFLICT);
+    assert_error(&body, "conflict");
+
+    let response = delete_item(&app, &user.access_token, &claim_id, &item_id).await;
+    let body = response.expect_status(StatusCode::CONFLICT);
+    assert_error(&body, "conflict");
+
+    // The item is untouched and still there: neither refused write landed.
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(claim["items"].as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        claim["items"][0]["id"].as_str(),
+        Some(item_id.as_str()),
+        "the item must survive the refused delete"
+    );
+    assert_eq!(
+        assert_money(&claim["items"][0]["amount"], "items[0].amount"),
+        "125.8000",
+        "the amount must survive the refused patch"
+    );
+    assert_eq!(
+        assert_money(&claim["total_amount"], "total_amount"),
+        "125.8000"
+    );
+    assert_eq!(claim["status"], "submitted");
+}
+
+#[tokio::test]
+async fn an_item_can_be_partially_updated() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "item-patch").await;
+
+    let created = create_claim(&app, &user.access_token, "Patchable claim").await;
+    let claim_id = id_of(&created);
+
+    let item = post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        json!({
+            "description": "Train, return",
+            "amount": "125.8000",
+            "incurred_on": "2026-10-20",
+            "category": "travel",
+            "receipt_url": "https://receipts.example.test/train.pdf",
+        }),
+    )
+    .await
+    .expect_status(StatusCode::CREATED);
+    let item_id = item_id_of(&item);
+
+    // One field: everything else is left untouched.
+    let response = patch_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        &item_id,
+        json!({ "amount": "129.9000" }),
+    )
+    .await;
+    let updated = response.expect_status(StatusCode::OK);
+
+    assert_eq!(assert_money(&updated["amount"], "amount"), "129.9000");
+    assert_eq!(updated["description"], "Train, return");
+    assert_eq!(updated["incurred_on"], "2026-10-20");
+    assert_eq!(updated["category"], "travel");
+    assert_eq!(
+        updated["receipt_url"], "https://receipts.example.test/train.pdf",
+        "an omitted receipt_url must not be cleared"
+    );
+    assert_eq!(updated["id"], item_id);
+
+    // The total follows the item, because the item is the only source of it.
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(
+        assert_money(&claim["total_amount"], "total_amount"),
+        "129.9000",
+        "an item patch must recompute the claim total"
+    );
+
+    // Another field, and the amount stays where the previous patch put it.
+    let response = patch_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        &item_id,
+        json!({ "description": "  Train, return (updated)  ", "incurred_on": "2026-10-19" }),
+    )
+    .await;
+    let updated = response.expect_status(StatusCode::OK);
+    assert_eq!(
+        updated["description"], "Train, return (updated)",
+        "a patched description is trimmed"
+    );
+    assert_eq!(updated["incurred_on"], "2026-10-19");
+    assert_eq!(
+        assert_money(&updated["amount"], "amount"),
+        "129.9000",
+        "an omitted amount must not be rewritten"
+    );
+
+    // An explicit null clears the two nullable fields and nothing else.
+    let response = patch_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        &item_id,
+        json!({ "category": null, "receipt_url": null }),
+    )
+    .await;
+    let cleared = response.expect_status(StatusCode::OK);
+    assert!(
+        cleared["category"].is_null(),
+        "`category: null` must clear the category: {cleared}"
+    );
+    assert!(
+        cleared["receipt_url"].is_null(),
+        "`receipt_url: null` must clear the reference: {cleared}"
+    );
+    assert_eq!(cleared["description"], "Train, return (updated)");
+
+    // The persisted state agrees with the last response.
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    let stored = &claim["items"][0];
+    assert!(stored["category"].is_null());
+    assert!(stored["receipt_url"].is_null());
+    assert_eq!(stored["incurred_on"], "2026-10-19");
+}
+
+#[tokio::test]
+async fn deleting_an_item_recomputes_the_total() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "item-delete").await;
+
+    let created = create_claim(&app, &user.access_token, "Deletable items").await;
+    let claim_id = id_of(&created);
+
+    let first = post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        item_body("Train", "125.8000", "2026-10-20"),
+    )
+    .await
+    .expect_status(StatusCode::CREATED);
+    let first_id = item_id_of(&first);
+
+    let second = post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        item_body("Taxi", "24.0000", "2026-10-21"),
+    )
+    .await
+    .expect_status(StatusCode::CREATED);
+    let second_id = item_id_of(&second);
+
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(
+        assert_money(&claim["total_amount"], "total_amount"),
+        "149.8000"
+    );
+
+    // Deleting one item answers 204 with no body.
+    let response = delete_item(&app, &user.access_token, &claim_id, &first_id).await;
+    assert_eq!(
+        response.status,
+        StatusCode::NO_CONTENT,
+        "a delete answers 204; body was {}",
+        response.body
+    );
+    assert!(
+        response.body.is_null(),
+        "a 204 carries no body: {}",
+        response.body
+    );
+
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(
+        assert_money(&claim["total_amount"], "total_amount"),
+        "24.0000",
+        "the total must be the remaining items' sum after a delete"
+    );
+    assert_eq!(claim["items"].as_array().map(Vec::len), Some(1));
+    assert_eq!(claim["items"][0]["id"].as_str(), Some(second_id.as_str()));
+
+    // Deleting the last one returns the total to zero, not to null.
+    delete_item(&app, &user.access_token, &claim_id, &second_id)
+        .await
+        .expect_status(StatusCode::NO_CONTENT);
+
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(claim["items"].as_array().map(Vec::len), Some(0));
+    assert_eq!(
+        assert_money(&claim["total_amount"], "total_amount"),
+        "0.0000",
+        "a claim with no items has a total of zero at scale four"
+    );
+
+    // Deleting the same item twice is a 404, not a 204.
+    let response = delete_item(&app, &user.access_token, &claim_id, &second_id).await;
+    let body = response.expect_status(StatusCode::NOT_FOUND);
+    assert_error(&body, "not_found");
+}
+
+#[tokio::test]
+async fn an_item_of_another_users_claim_is_invisible() {
+    let state = test_state().await;
+    let app = app(state);
+    let owner = register_user(&app, "item-owner").await;
+    let other = register_user(&app, "item-other").await;
+
+    let created = create_claim(&app, &owner.access_token, "Private claim").await;
+    let claim_id = id_of(&created);
+
+    let item = post_item(
+        &app,
+        &owner.access_token,
+        &claim_id,
+        item_body("Private line", "125.8000", "2026-10-20"),
+    )
+    .await
+    .expect_status(StatusCode::CREATED);
+    let item_id = item_id_of(&item);
+
+    // CREATE under somebody else's claim.
+    let response = post_item(
+        &app,
+        &other.access_token,
+        &claim_id,
+        item_body("Intruder line", "9.9900", "2026-10-21"),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::NOT_FOUND);
+    assert_error(&body, "not_found");
+
+    // UPDATE and DELETE of somebody else's item.
+    let response = patch_item(
+        &app,
+        &other.access_token,
+        &claim_id,
+        &item_id,
+        json!({ "amount": "0.0001" }),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::NOT_FOUND);
+    assert_error(&body, "not_found");
+
+    let response = delete_item(&app, &other.access_token, &claim_id, &item_id).await;
+    let body = response.expect_status(StatusCode::NOT_FOUND);
+    assert_error(&body, "not_found");
+
+    // The other account's collection is still empty, so the claim was not
+    // adopted either.
+    let response = list_claims(&app, &other.access_token, "").await;
+    let page = response.expect_status(StatusCode::OK);
+    assert_pagination(&page, 0, 20, 0);
+
+    // The owner's claim and item are unchanged.
+    let claim = detail_of(&app, &owner.access_token, &claim_id).await;
+    assert_eq!(claim["items"].as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        claim["items"][0]["id"].as_str(),
+        Some(item_id.as_str()),
+        "the item must survive the other account's delete"
+    );
+    assert_eq!(
+        assert_money(&claim["items"][0]["amount"], "items[0].amount"),
+        "125.8000",
+        "the amount must survive the other account's patch"
+    );
+    assert_eq!(
+        assert_money(&claim["total_amount"], "total_amount"),
+        "125.8000"
+    );
+}
+
+#[tokio::test]
+async fn an_item_id_under_the_wrong_claim_is_not_found() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "item-wrong-claim").await;
+
+    // Both claims belong to the caller, so ownership is not the reason for the
+    // refusal: the item simply is not addressable under the other claim.
+    let first = create_claim(&app, &user.access_token, "First claim").await;
+    let first_id = id_of(&first);
+    let second = create_claim(&app, &user.access_token, "Second claim").await;
+    let second_id = id_of(&second);
+
+    let item = post_item(
+        &app,
+        &user.access_token,
+        &second_id,
+        item_body("Second claim line", "42.0000", "2026-10-20"),
+    )
+    .await
+    .expect_status(StatusCode::CREATED);
+    let item_id = item_id_of(&item);
+
+    // The item of the second claim, addressed under the first one.
+    let response = patch_item(
+        &app,
+        &user.access_token,
+        &first_id,
+        &item_id,
+        json!({ "amount": "1.0000" }),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::NOT_FOUND);
+    assert_error(&body, "not_found");
+
+    let response = delete_item(&app, &user.access_token, &first_id, &item_id).await;
+    let body = response.expect_status(StatusCode::NOT_FOUND);
+    assert_error(&body, "not_found");
+
+    // An item that exists nowhere is the same answer.
+    let missing = Uuid::new_v4().to_string();
+    let response = patch_item(
+        &app,
+        &user.access_token,
+        &first_id,
+        &missing,
+        json!({ "amount": "1.0000" }),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::NOT_FOUND);
+    assert_error(&body, "not_found");
+
+    // The item is still in the claim it belongs to, untouched, and the first
+    // claim never gained one.
+    let claim = detail_of(&app, &user.access_token, &second_id).await;
+    assert_eq!(claim["items"].as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        assert_money(&claim["items"][0]["amount"], "items[0].amount"),
+        "42.0000"
+    );
+
+    let empty = detail_of(&app, &user.access_token, &first_id).await;
+    assert_eq!(empty["items"].as_array().map(Vec::len), Some(0));
+    assert_eq!(
+        assert_money(&empty["total_amount"], "total_amount"),
+        "0.0000"
+    );
+}
+
+#[tokio::test]
+async fn a_receipt_url_must_be_absolute_http_or_https() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "item-receipt").await;
+
+    let created = create_claim(&app, &user.access_token, "Receipt claim").await;
+    let claim_id = id_of(&created);
+
+    // A reference with no scheme, a scheme the API never returns, a
+    // protocol-relative form, a non-http scheme and a relative path.
+    for receipt_url in [
+        "receipts.example.test/2026/10/20.pdf",
+        "ftp://receipts.example.test/2026/10/20.pdf",
+        "//receipts.example.test/2026/10/20.pdf",
+        "javascript:alert(1)",
+        "/receipts/2026/10/20.pdf",
+        "http:/receipts.example.test/2026/10/20.pdf",
+    ] {
+        let response = post_item(
+            &app,
+            &user.access_token,
+            &claim_id,
+            json!({
+                "description": "Bad reference",
+                "amount": "1.0000",
+                "incurred_on": "2026-10-20",
+                "receipt_url": receipt_url,
+            }),
+        )
+        .await;
+        let body = response.expect_status(StatusCode::UNPROCESSABLE_ENTITY);
+        assert_field_error(&body, "validation_failed", "receipt_url");
+    }
+
+    // One character over the published bound of 2048.
+    let over = format!("https://receipts.example.test/{}", "x".repeat(2_049 - 30));
+    assert_eq!(over.chars().count(), 2_049);
+    let response = post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        json!({
+            "description": "Long reference",
+            "amount": "1.0000",
+            "incurred_on": "2026-10-20",
+            "receipt_url": over,
+        }),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::UNPROCESSABLE_ENTITY);
+    assert_field_error(&body, "validation_failed", "receipt_url");
+
+    // At the bound it is accepted, so the refusal above is the length and not
+    // "a long URL is never a URL".
+    let at_bound = format!("https://receipts.example.test/{}", "x".repeat(2_048 - 30));
+    assert_eq!(at_bound.chars().count(), 2_048);
+    let response = post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        json!({
+            "description": "Long but allowed",
+            "amount": "1.0000",
+            "incurred_on": "2026-10-20",
+            "receipt_url": at_bound,
+        }),
+    )
+    .await;
+    let accepted = response.expect_status(StatusCode::CREATED);
+    assert_eq!(accepted["receipt_url"], at_bound);
+
+    // The two schemes the contract names are accepted, and the reference is
+    // never fetched - the test asserts the stored value only, because the
+    // host does not resolve and the suite must not reach the network.
+    let response = post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        json!({
+            "description": "Secure reference",
+            "amount": "2.0000",
+            "incurred_on": "2026-10-21",
+            "receipt_url": "https://receipts.example.test/2026/10/21.pdf",
+        }),
+    )
+    .await;
+    response.expect_status(StatusCode::CREATED);
+
+    let response = post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        json!({
+            "description": "Plain reference",
+            "amount": "3.0000",
+            "incurred_on": "2026-10-22",
+            "receipt_url": "http://example.test/receipt.pdf",
+        }),
+    )
+    .await;
+    response.expect_status(StatusCode::CREATED);
+
+    // The refused bodies created nothing.
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(
+        claim["items"].as_array().map(Vec::len),
+        Some(3),
+        "only the three accepted items may exist: {claim}"
+    );
+}
+
+#[tokio::test]
+async fn the_claim_total_equals_the_sum_of_its_items() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "item-total-invariant").await;
+
+    let created = create_claim(&app, &user.access_token, "Invariant claim").await;
+    let claim_id = id_of(&created);
+
+    // ADD. The stored total is read back through the claim detail, not taken
+    // from the response of the mutating call, and it is compared both with the
+    // items the server returned and with an independently computed expectation.
+    let mut expected: i128 = 0;
+    for amount in ["125.8000", "24.0000", "0.0001"] {
+        post_item(
+            &app,
+            &user.access_token,
+            &claim_id,
+            item_body("A line", amount, "2026-10-20"),
+        )
+        .await
+        .expect_status(StatusCode::CREATED);
+
+        expected += scaled(amount);
+
+        let claim = detail_of(&app, &user.access_token, &claim_id).await;
+        let stored = assert_money(&claim["total_amount"], "total_amount");
+
+        assert_eq!(
+            stored,
+            sum_of(&claim["items"]),
+            "after adding {amount} the stored total must equal the sum of the items"
+        );
+        assert_eq!(
+            stored,
+            render_money(expected),
+            "after adding {amount} the stored total must equal the expected sum"
+        );
+    }
+
+    assert_eq!(render_money(expected), "149.8001");
+
+    // UPDATE. One amount is replaced; the total is read back again.
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    let item_id = claim["items"][0]["id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the detail must carry item ids: {claim}"))
+        .to_string();
+    let replaced = claim["items"][0]["amount"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+
+    patch_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        &item_id,
+        json!({ "amount": "200.0000" }),
+    )
+    .await
+    .expect_status(StatusCode::OK);
+
+    expected = expected - scaled(&replaced) + scaled("200.0000");
+
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    let stored = assert_money(&claim["total_amount"], "total_amount");
+    assert_eq!(
+        stored,
+        sum_of(&claim["items"]),
+        "after an item update the stored total must equal the sum of the items"
+    );
+    assert_eq!(
+        stored,
+        render_money(expected),
+        "after an item update the stored total must equal the expected sum"
+    );
+    assert_eq!(render_money(expected), "224.0001");
+
+    // DELETE. One item is removed; the total is read back a third time.
+    let removed = claim["items"][1]["amount"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    let removed_id = claim["items"][1]["id"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+
+    delete_item(&app, &user.access_token, &claim_id, &removed_id)
+        .await
+        .expect_status(StatusCode::NO_CONTENT);
+
+    expected -= scaled(&removed);
+
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    let stored = assert_money(&claim["total_amount"], "total_amount");
+    assert_eq!(
+        stored,
+        sum_of(&claim["items"]),
+        "after a delete the stored total must equal the sum of the items"
+    );
+    assert_eq!(
+        stored,
+        render_money(expected),
+        "after a delete the stored total must equal the expected sum"
+    );
+    assert_eq!(render_money(expected), "200.0001");
+
+    // Removing the rest leaves a zero total, which is still the exact sum.
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    for item in claim["items"].as_array().unwrap() {
+        let item_id = item["id"].as_str().unwrap_or_default();
+        delete_item(&app, &user.access_token, &claim_id, item_id)
+            .await
+            .expect_status(StatusCode::NO_CONTENT);
+    }
+
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(claim["items"].as_array().map(Vec::len), Some(0));
+    assert_eq!(
+        assert_money(&claim["total_amount"], "total_amount"),
+        sum_of(&claim["items"]),
+        "an empty claim's total must equal the empty sum"
+    );
+    assert_eq!(
+        assert_money(&claim["total_amount"], "total_amount"),
+        "0.0000"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 12.9 - lifecycle actions (R4)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_draft_can_be_submitted_approved_and_paid() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "lifecycle-happy").await;
+
+    let created = create_claim(&app, &user.access_token, "Reimbursement").await;
+    let claim_id = id_of(&created);
+
+    post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        item_body("Train, return", "125.8000", "2026-10-20"),
+    )
+    .await
+    .expect_status(StatusCode::CREATED);
+
+    // draft -> submitted
+    let response = act(&app, &user.access_token, &claim_id, "submit").await;
+    let submitted = response.expect_status(StatusCode::OK);
+
+    assert_eq!(submitted["status"], "submitted");
+    assert!(submitted["submitted_at"].is_string());
+    assert!(submitted["decided_at"].is_null());
+    assert!(submitted["paid_at"].is_null());
+    assert_eq!(
+        assert_money(&submitted["total_amount"], "total_amount"),
+        "125.8000",
+        "a transition must not disturb the total"
+    );
+    assert_eq!(
+        submitted["items"].as_array().map(Vec::len),
+        Some(1),
+        "a lifecycle response is the claim detail, with its items"
+    );
+
+    // submitted -> approved
+    let response = act(&app, &user.access_token, &claim_id, "approve").await;
+    let approved = response.expect_status(StatusCode::OK);
+
+    assert_eq!(approved["status"], "approved");
+    assert!(approved["decided_at"].is_string());
+    assert!(approved["paid_at"].is_null());
+    assert_eq!(
+        approved["submitted_at"], submitted["submitted_at"],
+        "an approval must not move the submission instant"
+    );
+
+    // approved -> paid
+    let response = act(&app, &user.access_token, &claim_id, "pay").await;
+    let paid = response.expect_status(StatusCode::OK);
+
+    assert_eq!(paid["status"], "paid");
+    assert!(paid["paid_at"].is_string());
+    assert_eq!(
+        paid["submitted_at"], submitted["submitted_at"],
+        "a payment must not move the submission instant"
+    );
+    assert_eq!(
+        paid["decided_at"], approved["decided_at"],
+        "a payment must not move the decision instant"
+    );
+
+    // Every step was committed, not only answered.
+    let stored = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(stored["status"], "paid");
+    assert_eq!(stored["submitted_at"], submitted["submitted_at"]);
+    assert_eq!(stored["decided_at"], approved["decided_at"]);
+    assert_eq!(stored["paid_at"], paid["paid_at"]);
+    assert_eq!(
+        assert_money(&stored["total_amount"], "total_amount"),
+        "125.8000"
+    );
+}
+
+#[tokio::test]
+async fn a_claim_without_items_cannot_be_submitted() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "lifecycle-no-items").await;
+
+    let created = create_claim(&app, &user.access_token, "Empty claim").await;
+    let claim_id = id_of(&created);
+    assert_eq!(
+        assert_money(&created["total_amount"], "total_amount"),
+        "0.0000"
+    );
+
+    let response = act(&app, &user.access_token, &claim_id, "submit").await;
+    let body = response.expect_status(StatusCode::UNPROCESSABLE_ENTITY);
+    assert_field_error(&body, "validation_failed", "items");
+
+    // The refusal is a refusal: the claim is still a draft with no stamps.
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(claim["status"], "draft");
+    assert!(claim["submitted_at"].is_null());
+    assert!(claim["decided_at"].is_null());
+    assert!(claim["paid_at"].is_null());
+
+    // With one item the same call succeeds, so the precondition is the reason
+    // and not the operation itself.
+    post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        item_body("A line", "1.0000", "2026-10-20"),
+    )
+    .await
+    .expect_status(StatusCode::CREATED);
+
+    let response = act(&app, &user.access_token, &claim_id, "submit").await;
+    let submitted = response.expect_status(StatusCode::OK);
+    assert_eq!(submitted["status"], "submitted");
+}
+
+#[tokio::test]
+async fn a_claim_with_a_zero_total_cannot_be_submitted() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "lifecycle-zero").await;
+
+    let created = create_claim(&app, &user.access_token, "Zero claim").await;
+    let claim_id = id_of(&created);
+
+    // A zero-amount item is legal (§2.7 allows `0.0000`), so the claim does
+    // have an item and the only thing wrong is the total.
+    post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        item_body("A free line", "0.0000", "2026-10-20"),
+    )
+    .await
+    .expect_status(StatusCode::CREATED);
+
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(claim["items"].as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        assert_money(&claim["total_amount"], "total_amount"),
+        "0.0000"
+    );
+
+    let response = act(&app, &user.access_token, &claim_id, "submit").await;
+    let body = response.expect_status(StatusCode::UNPROCESSABLE_ENTITY);
+    assert_field_error(&body, "validation_failed", "total_amount");
+
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(claim["status"], "draft");
+    assert!(claim["submitted_at"].is_null());
+
+    // The smallest representable amount is enough, so the rule is "above zero"
+    // and not "at least one cent" or any other rounded boundary.
+    post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        item_body("One unit", "0.0001", "2026-10-21"),
+    )
+    .await
+    .expect_status(StatusCode::CREATED);
+
+    let response = act(&app, &user.access_token, &claim_id, "submit").await;
+    let submitted = response.expect_status(StatusCode::OK);
+    assert_eq!(submitted["status"], "submitted");
+    assert_eq!(
+        assert_money(&submitted["total_amount"], "total_amount"),
+        "0.0001"
+    );
+}
+
+#[tokio::test]
+async fn a_submitted_claim_cannot_be_approved_twice() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "lifecycle-double-approve").await;
+
+    let claim_id = claim_in_status(&app, &user.access_token, "Once only", "submitted").await;
+
+    let response = act(&app, &user.access_token, &claim_id, "approve").await;
+    let approved = response.expect_status(StatusCode::OK);
+    assert_eq!(approved["status"], "approved");
+    let decided_at = approved["decided_at"].clone();
+
+    let response = act(&app, &user.access_token, &claim_id, "approve").await;
+    let body = response.expect_status(StatusCode::CONFLICT);
+    assert_error(&body, "conflict");
+
+    // The second call changed nothing, including the instant the first one
+    // stamped.
+    let stored = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(stored["status"], "approved");
+    assert_eq!(
+        stored["decided_at"], decided_at,
+        "a refused approval must not re-stamp the decision"
+    );
+    assert!(stored["paid_at"].is_null());
+}
+
+#[tokio::test]
+async fn every_forbidden_transition_is_refused() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "lifecycle-forbidden").await;
+
+    // One claim per status. A refusal cannot change a status, so each claim is
+    // reused for every refused action aimed at its status.
+    let mut claims = std::collections::BTreeMap::new();
+    for status in ["draft", "submitted", "approved", "rejected", "paid"] {
+        let claim_id = claim_in_status(&app, &user.access_token, status, status).await;
+        claims.insert(status, claim_id);
+    }
+
+    // The twenty status/action pairs of §11-§14 minus the five the contract
+    // allows: draft/submit, submitted/approve, submitted/reject,
+    // approved/pay and rejected/submit (the reopen).
+    let refused: [(&str, &str); 15] = [
+        ("draft", "approve"),
+        ("draft", "reject"),
+        ("draft", "pay"),
+        ("submitted", "submit"),
+        ("submitted", "pay"),
+        ("approved", "submit"),
+        ("approved", "approve"),
+        ("approved", "reject"),
+        ("rejected", "approve"),
+        ("rejected", "reject"),
+        ("rejected", "pay"),
+        ("paid", "submit"),
+        ("paid", "approve"),
+        ("paid", "reject"),
+        ("paid", "pay"),
+    ];
+
+    for (status, action) in refused {
+        let claim_id = claims
+            .get(status)
+            .unwrap_or_else(|| panic!("no fixture claim for the {status} status"))
+            .clone();
+
+        let before = detail_of(&app, &user.access_token, &claim_id).await;
+        assert_eq!(
+            before["status"], status,
+            "the fixture for {status}/{action} must start in {status}"
+        );
+
+        let response = act(&app, &user.access_token, &claim_id, action).await;
+        let body = response.expect_status(StatusCode::CONFLICT);
+        assert_error(&body, "conflict");
+
+        let after = detail_of(&app, &user.access_token, &claim_id).await;
+        assert_eq!(
+            after["status"], status,
+            "{action} on a {status} claim must be refused, but the status became {}",
+            after["status"]
+        );
+        for field in ["submitted_at", "decided_at", "paid_at"] {
+            assert_eq!(
+                after[field], before[field],
+                "a refused {action} on a {status} claim must not write `{field}`"
+            );
+        }
+        assert_eq!(
+            after["total_amount"], before["total_amount"],
+            "a refused {action} on a {status} claim must not move the total"
+        );
+    }
+
+    // The five allowed pairs are not in the refused table, and each of them is
+    // exercised by its own test, so this table is the complement and not a
+    // second opinion about the whole lifecycle.
+    for (status, action) in [
+        ("draft", "submit"),
+        ("submitted", "approve"),
+        ("submitted", "reject"),
+        ("approved", "pay"),
+        ("rejected", "submit"),
+    ] {
+        assert!(
+            !refused.contains(&(status, action)),
+            "{status}/{action} is an allowed transition and must not be listed as refused"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_rejected_claim_reopens_and_can_be_resubmitted() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "lifecycle-reopen").await;
+
+    let created = create_claim(&app, &user.access_token, "Reopening claim").await;
+    let claim_id = id_of(&created);
+
+    post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        item_body("Train, return", "125.8000", "2026-10-20"),
+    )
+    .await
+    .expect_status(StatusCode::CREATED);
+
+    act(&app, &user.access_token, &claim_id, "submit")
+        .await
+        .expect_status(StatusCode::OK);
+
+    let response = act(&app, &user.access_token, &claim_id, "reject").await;
+    let rejected = response.expect_status(StatusCode::OK);
+    assert_eq!(rejected["status"], "rejected");
+    assert!(rejected["submitted_at"].is_string());
+    assert!(rejected["decided_at"].is_string());
+
+    // `submit` on a rejected claim reopens it. The `draft` arm of
+    // `expense_claims_lifecycle_timestamps_chk` requires all three stamps to be
+    // null, so a partial clear is a 23514 at commit; a wrong answer here is a
+    // 500 and this assertion is what makes it fail as a test rather than as a
+    // server error nobody read.
+    let response = act(&app, &user.access_token, &claim_id, "submit").await;
+    let reopened = response.expect_status(StatusCode::OK);
+
+    assert_eq!(
+        reopened["status"], "draft",
+        "a rejected claim reopens to draft"
+    );
+    assert!(
+        reopened["submitted_at"].is_null(),
+        "the reopen must clear submitted_at, but it is {}",
+        reopened["submitted_at"]
+    );
+    assert!(
+        reopened["decided_at"].is_null(),
+        "the reopen must clear decided_at, but it is {}",
+        reopened["decided_at"]
+    );
+    assert!(reopened["paid_at"].is_null());
+
+    // The same nulls are what the row holds, not only what the response said.
+    let stored = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(stored["status"], "draft");
+    assert!(stored["submitted_at"].is_null());
+    assert!(stored["decided_at"].is_null());
+    assert!(stored["paid_at"].is_null());
+    assert_eq!(
+        stored["items"].as_array().map(Vec::len),
+        Some(1),
+        "the items survive the reopen"
+    );
+
+    // A reopened claim is a draft again, so it can be edited and resubmitted.
+    post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        item_body("Taxi", "24.0000", "2026-10-21"),
+    )
+    .await
+    .expect_status(StatusCode::CREATED);
+
+    let response = act(&app, &user.access_token, &claim_id, "submit").await;
+    let resubmitted = response.expect_status(StatusCode::OK);
+
+    assert_eq!(resubmitted["status"], "submitted");
+    assert!(resubmitted["submitted_at"].is_string());
+    assert!(
+        resubmitted["decided_at"].is_null(),
+        "a resubmission is not a decision: {}",
+        resubmitted["decided_at"]
+    );
+    assert_eq!(
+        assert_money(&resubmitted["total_amount"], "total_amount"),
+        "149.8000",
+        "both items count after a reopen and a resubmit"
+    );
+}
+
+#[tokio::test]
+async fn paid_is_terminal() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "lifecycle-terminal").await;
+
+    let claim_id = claim_in_status(&app, &user.access_token, "Terminal claim", "paid").await;
+
+    let before = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(before["status"], "paid");
+
+    // No action moves a paid claim, including another payment.
+    for action in ["submit", "approve", "reject", "pay"] {
+        let response = act(&app, &user.access_token, &claim_id, action).await;
+        let body = response.expect_status(StatusCode::CONFLICT);
+        assert_error(&body, "conflict");
+
+        let after = detail_of(&app, &user.access_token, &claim_id).await;
+        assert_eq!(
+            after["status"], "paid",
+            "{action} must not move a paid claim, but the status became {}",
+            after["status"]
+        );
+        for field in ["submitted_at", "decided_at", "paid_at", "total_amount"] {
+            assert_eq!(
+                after[field], before[field],
+                "a refused {action} on a paid claim must not write `{field}`"
+            );
+        }
+    }
+
+    // The claim is still readable, with its items and its three stamps.
+    let stored = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(stored["status"], "paid");
+    assert!(stored["submitted_at"].is_string());
+    assert!(stored["decided_at"].is_string());
+    assert!(stored["paid_at"].is_string());
+    assert_eq!(stored["items"].as_array().map(Vec::len), Some(1));
+}
+
+#[tokio::test]
+async fn a_lifecycle_action_on_another_users_claim_is_not_found() {
+    let state = test_state().await;
+    let app = app(state);
+    let owner = register_user(&app, "lifecycle-owner").await;
+    let other = register_user(&app, "lifecycle-other").await;
+
+    // `approved` is the sharpest fixture: with ownership ignored, `pay` would
+    // succeed and `approve` would answer 409, so every answer other than 404
+    // is visibly different from "not the caller's".
+    let claim_id = claim_in_status(&app, &owner.access_token, "Owner's claim", "approved").await;
+
+    let before = detail_of(&app, &owner.access_token, &claim_id).await;
+
+    for action in ["submit", "approve", "reject", "pay"] {
+        let response = act(&app, &other.access_token, &claim_id, action).await;
+        let body = response.expect_status(StatusCode::NOT_FOUND);
+        assert_error(&body, "not_found");
+    }
+
+    // The owner's claim is untouched, and the other account owns nothing.
+    let after = detail_of(&app, &owner.access_token, &claim_id).await;
+    assert_eq!(after["status"], "approved");
+    for field in ["submitted_at", "decided_at", "paid_at"] {
+        assert_eq!(
+            after[field], before[field],
+            "a foreign lifecycle action must not write `{field}`"
+        );
+    }
+
+    let response = list_claims(&app, &other.access_token, "").await;
+    let page = response.expect_status(StatusCode::OK);
+    assert_pagination(&page, 0, 20, 0);
+}
+
+#[tokio::test]
+async fn the_lifecycle_timestamps_are_set_by_the_transition() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "lifecycle-stamps").await;
+
+    let created = create_claim(&app, &user.access_token, "Stamped claim").await;
+    let claim_id = id_of(&created);
+
+    post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        item_body("Train, return", "125.8000", "2026-10-20"),
+    )
+    .await
+    .expect_status(StatusCode::CREATED);
+
+    // A draft carries no stamp at all.
+    let draft = detail_of(&app, &user.access_token, &claim_id).await;
+    assert!(draft["submitted_at"].is_null());
+    assert!(draft["decided_at"].is_null());
+    assert!(draft["paid_at"].is_null());
+
+    // `submit` sets submitted_at and nothing else.
+    let submitted = act(&app, &user.access_token, &claim_id, "submit")
+        .await
+        .expect_status(StatusCode::OK);
+    let submitted_at = instant(&submitted, "submitted_at");
+    assert!(submitted["decided_at"].is_null());
+    assert!(submitted["paid_at"].is_null());
+
+    // `approve` adds decided_at and leaves submitted_at where it was.
+    let approved = act(&app, &user.access_token, &claim_id, "approve")
+        .await
+        .expect_status(StatusCode::OK);
+    let decided_at = instant(&approved, "decided_at");
+    assert_eq!(
+        instant(&approved, "submitted_at"),
+        submitted_at,
+        "an approval must not restamp the submission"
+    );
+    assert!(approved["paid_at"].is_null());
+    assert!(
+        decided_at >= submitted_at,
+        "a decision cannot predate the submission ({decided_at} < {submitted_at})"
+    );
+
+    // `pay` adds paid_at and leaves the other two where they were.
+    let paid = act(&app, &user.access_token, &claim_id, "pay")
+        .await
+        .expect_status(StatusCode::OK);
+    let paid_at = instant(&paid, "paid_at");
+    assert_eq!(instant(&paid, "submitted_at"), submitted_at);
+    assert_eq!(instant(&paid, "decided_at"), decided_at);
+    assert!(
+        paid_at >= decided_at,
+        "a payment cannot predate the decision ({paid_at} < {decided_at})"
+    );
+
+    // `reject` is the other decision: it stamps decided_at too, and it stamps
+    // nothing else.
+    let rejected_claim = claim_in_status(&app, &user.access_token, "Rejected", "submitted").await;
+    let rejected = act(&app, &user.access_token, &rejected_claim, "reject")
+        .await
+        .expect_status(StatusCode::OK);
+    assert_eq!(rejected["status"], "rejected");
+    assert!(rejected["submitted_at"].is_string());
+    assert!(rejected["decided_at"].is_string());
+    assert!(
+        rejected["paid_at"].is_null(),
+        "a rejection is not a payment: {}",
+        rejected["paid_at"]
+    );
+    assert!(
+        instant(&rejected, "decided_at") >= instant(&rejected, "submitted_at"),
+        "a rejection cannot predate the submission"
+    );
+
+    // The three instants of the paid claim are the stored ones, and the last
+    // transition is what stamped the last one.
+    let stored = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(instant(&stored, "submitted_at"), submitted_at);
+    assert_eq!(instant(&stored, "decided_at"), decided_at);
+    assert_eq!(instant(&stored, "paid_at"), paid_at);
+}
+
+// ---------------------------------------------------------------------------
 // 12.7 - the credential
 // ---------------------------------------------------------------------------
 
@@ -2172,12 +3835,24 @@ async fn the_claim_routes_require_a_credential() {
     let app = app(state);
     let user = register_user(&app, "claim-credential").await;
 
-    // A real claim, so an authenticated DELETE would have something to remove
-    // and the 401 cannot be confused with a 404.
+    // A real claim with a real item, so an authenticated DELETE would have
+    // something to remove and the 401 cannot be confused with a 404.
     let created = create_claim(&app, &user.access_token, "Guarded claim").await;
     let claim_id = id_of(&created);
 
-    let operations: [(Method, String, Option<Value>); 5] = [
+    let item = post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        item_body("Guarded line", "10.0000", "2026-10-20"),
+    )
+    .await
+    .expect_status(StatusCode::CREATED);
+    let item_id = item_id_of(&item);
+
+    // All twelve operations of the feature: the five claim routes and the
+    // seven that write an item or move the lifecycle.
+    let operations: [(Method, String, Option<Value>); 12] = [
         (Method::GET, CLAIMS.to_string(), None),
         (
             Method::POST,
@@ -2191,6 +3866,33 @@ async fn the_claim_routes_require_a_credential() {
             Some(json!({ "title": "hijacked" })),
         ),
         (Method::DELETE, format!("{CLAIMS}/{claim_id}"), None),
+        (
+            Method::POST,
+            items_path(&claim_id),
+            Some(item_body("Intruder line", "1.0000", "2026-10-20")),
+        ),
+        (
+            Method::PATCH,
+            item_path(&claim_id, &item_id),
+            Some(json!({ "amount": "0.0001" })),
+        ),
+        (Method::DELETE, item_path(&claim_id, &item_id), None),
+        (
+            Method::POST,
+            action_path(&claim_id, "submit"),
+            Some(json!({})),
+        ),
+        (
+            Method::POST,
+            action_path(&claim_id, "approve"),
+            Some(json!({})),
+        ),
+        (
+            Method::POST,
+            action_path(&claim_id, "reject"),
+            Some(json!({})),
+        ),
+        (Method::POST, action_path(&claim_id, "pay"), Some(json!({}))),
     ];
 
     for (method, uri, body) in operations {
@@ -2207,8 +3909,20 @@ async fn the_claim_routes_require_a_credential() {
         }
     }
 
-    // Nothing the unauthenticated calls sent landed.
+    // Nothing the unauthenticated calls sent landed: the claim is still a
+    // draft holding the one item it started with, with its own title and
+    // amount, and it never left `draft`.
     let response = get_claim(&app, &user.access_token, &claim_id).await;
     let stored = response.expect_status(StatusCode::OK);
     assert_eq!(stored["title"], "Guarded claim");
+    assert_eq!(
+        stored["status"], "draft",
+        "no unauthenticated call may move the lifecycle"
+    );
+    assert_eq!(stored["items"].as_array().map(Vec::len), Some(1));
+    assert_eq!(stored["items"][0]["id"].as_str(), Some(item_id.as_str()));
+    assert_eq!(
+        assert_money(&stored["items"][0]["amount"], "items[0].amount"),
+        "10.0000"
+    );
 }

@@ -1,6 +1,6 @@
 # Reimbursements — specification
 
-> **Status:** Accepted
+> **Status:** Implemented
 > **Last updated:** 2026-10-24
 > **Owner:** maintained by the `docs` agent
 > **Feature identifier:** `ATOM-FEAT-REIMB-001`
@@ -28,11 +28,11 @@ property true.
 
 ## 2. Status
 
-**Accepted, not built.** The requirements are recorded in
+**Implemented, not `Verified`.** The requirements are recorded in
 [`project-truth.md`](../../project-truth.md) §18.1 as `REIMB-R01`…`R11` and
-agreed on 2026-10-24. No code, migration or test for this feature exists in
-the repository, so the feature is **not** `Implemented` and **not**
-`Verified`. See [status.md](status.md).
+agreed on 2026-10-24. All twelve published operations are served, with the
+migration, the module and the tests to match; no reviewer has read the chain
+that completed them, so nothing is `Verified`. See [status.md](status.md).
 
 The claim model and the lifecycle rest on assumptions **A1** and **A6** in
 [`../../engineering/runs/chain/plan.md`](../../engineering/runs/chain/plan.md) §3,

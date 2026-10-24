@@ -143,7 +143,7 @@ CI was the first execution. `KI-019` records that history and is closed.
   directions**: a route the document does not describe fails, and an operation
   the router does not serve fails. It also pins the published query parameter
   set of each list operation. After the claim-CRUD chain the document describes
-  **27 operations** — 25 under `/api/v1` and the two health probes — and the
+  **34 operations** — 32 under `/api/v1` and the two health probes — and the
   claims list operation is one of the four pinned parameter sets.
 - The request and response shapes are additionally checked by the integration
   suite, which asserts on the real JSON body: field names, field types, the
@@ -424,9 +424,13 @@ its `status.md`.
 | **Degradation** — ML off and model missing return lexical results with `200` | Integration, with two configurations | A unit test can prove the selection function; only the request path proves the response shape and the status. |
 | **Seeder** — the guards, determinism, the money and ownership invariants | Integration, driving the binary | The seeder is not reachable through the router. |
 
-One Phase 2 schema exists to prove today: `tests/claims_schema.rs` applies
-migration `0004` and asserts the reimbursement constraints, the cascades and
-the money scale. See §7.2.1 for the feature-by-feature state.
+One Phase 2 feature has all three of its layers in the tree today: the
+reimbursement schema (`tests/claims_schema.rs` applies migration `0004` and
+asserts the constraints, the cascades and the money scale), its endpoint layer
+(`tests/claims_api.rs` drives all twelve published operations, including every
+item write and every lifecycle action) and its contract layer
+(`tests/openapi_contract.rs` pins the surface at 34 operations). See §7.2.1 for
+the feature-by-feature state.
 
 ### 7.2 The layers in the Phase 2 suite
 
@@ -449,18 +453,22 @@ the tree, so an empty layer is visible instead of assumed.
 
 | Feature | Covered today | Not covered |
 | ------- | ------------- | ----------- |
-| Reimbursements | The **schema layer**: `tests/claims_schema.rs` applies `0004` and asserts the constraints, the composite ownership key, the cascades, the `SET NULL` and the four-decimal money scale. The **seeded claims**: two cases in `tests/seeder.rs` assert the profile counts and the total invariant. The **claim endpoint layer**: `tests/claims_api.rs` drives the five claim operations — 34 cases covering create/read/patch/delete, the listing with its filters, pagination and order, money on the wire, the ignored `currency` and `status` fields, ownership with a second account, `400`/`413`/`422` mapping and the credential — plus five unit tests inside the module, and two new cases in `tests/openapi_contract.rs` for the money schema types and the nullable `project_id`. | The **item endpoints** (R3) and the **lifecycle** (R4): no `POST`/`PATCH`/`DELETE …/items`, no `/submit`, `/approve`, `/reject`, `/pay`, so the total-sum test, the draft-only guards, every transition case and the end-to-end flow are absent. `total_amount` stays `"0.0000"` for every claim the API can create, and every claim it creates stays `draft`. |
+| Reimbursements | The **schema layer**: `tests/claims_schema.rs` applies `0004` and asserts the constraints, the composite ownership key, the cascades, the `SET NULL` and the four-decimal money scale. The **seeded claims**: two cases in `tests/seeder.rs` assert the profile counts and the total invariant on data the API did not write. The **claim endpoint layer**: 34 cases in `tests/claims_api.rs` covering create/read/patch/delete, the listing with its filters, pagination and order, money on the wire, the ignored `currency` and `status` fields, ownership with a second account, `400`/`413`/`422` mapping and the credential. The **item endpoint layer and the lifecycle**: 21 further cases in the same file — the three item writes, the total recomputed after every one of them, the four-decimal input rule, the draft-only guard in every non-draft status, the five allowed edges and all fifteen refused ones, the reopen clearing both `submitted_at` and `decided_at`, the submit preconditions and `paid` as terminal. All twelve operations are also asserted to answer `401` without a credential. The **contract layer**: three cases in `tests/openapi_contract.rs` for the money schema types, the nullable `project_id` and the seven new operations' success statuses, with the surface pinned at 34. The **unit layer**: ten tests inside `src/reimbursements/` and three money tests in `src/helpers/validation.rs`. | The **flow across the seeder and the API**: no test reads a seeded claim through the router, so the seeder's five statuses and the endpoint's transition rules have never met in one test. `a_claim_can_be_deleted_in_any_status` (so `REIMB-R11`'s "in any status" is unasserted), the twelve-operation ownership sweep with a second account's token, and five smaller rules with no HTTP case: the 1–500 item-description bound, a non-date `incurred_on`, a non-UUID `item_id`, a file body on the item route, and any concurrency case. The `408` and `500` paths are not asserted on a claims route. No run is recorded, so nothing in the feature is `Verified`. |
 | Job applications | Nothing. | Everything: no migration, no module, no endpoint and no test. |
 | Local machine learning | Nothing. | Everything: no migration, no module, no endpoint and no test. |
 
 A schema test is not an endpoint test, and neither is a claim test an item test.
-The reimbursement feature stays `Accepted`: two of its eleven requirements
-(`REIMB-R02` and `R09`) are proved at the claim level, seven are partly proved,
-and two (`R05` and `R06`) have no test at all. `R03`, `R05`, `R06` and `R11`
-still have no test of the behaviour they name, because that behaviour needs the
-item writes or the lifecycle. The requirement-by-requirement map is
+The reimbursement feature is `Implemented`: every one of its eleven
+requirements (`REIMB-R01`…`R11`) names at least one test, the total invariant
+(`R03`) is asserted after insert, update and delete, and the lifecycle (`R04`,
+`R05`, `R06`) has one case per edge plus every refusal. It is **not** `Verified`
+— no run of the suite is recorded — and four requirement halves are still
+unasserted: `R11`'s deletion in a non-draft status, `R08`'s refusal of a file
+body, `R03`'s concurrency case, and the item-description and `incurred_on`
+validations. The requirement-by-requirement map, including what each still
+waits for, is
 [`../features/reimbursements/testing.md`](../features/reimbursements/testing.md)
-§2.9.
+§2.9, and the gaps are collected in its §3.
 
 ### 7.3 The size target
 
@@ -486,9 +494,13 @@ An indicative allocation, not a quota:
 | Contract and hardening | about 20 |
 
 The claim-CRUD chain contributes 34 integration cases in `tests/claims_api.rs`
-and five unit tests in the module towards those floors. The counted totals are
-re-measured by the chain's gate and recorded in the run's ledger; this document
-does not carry a number it has not seen measured.
+and five unit tests in the module towards those floors. The item and lifecycle
+wave adds 21 endpoint cases to the same file, one contract case in
+`tests/openapi_contract.rs` and eight unit tests — four in `service.rs`, one in
+`dto.rs` and three money tests in `helpers/validation.rs`. The counted totals
+are re-measured by the chain's gate and recorded in the run's ledger; this
+document does not carry a number it has not seen measured, and the number of
+names in a file is not a number of passing tests.
 
 ### 7.4 The rule: a test that cannot fail is not evidence
 

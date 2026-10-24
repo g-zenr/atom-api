@@ -1,4 +1,4 @@
-**Status:** Accepted
+**Status:** Implemented
 
 # Reimbursements — status
 
@@ -8,44 +8,58 @@
 
 ## 1. The status
 
-The feature is **Accepted**. The requirements `REIMB-R01`…`R11` are agreed in
-[`project-truth.md`](../../project-truth.md) §18.1, with acceptance criteria. Two
-chains have landed parts of it and neither changes the feature status:
+The feature is **`Implemented`**, and it is **not `Verified`**.
 
-- **`C-R1` (D2.R1)** — the schema: migration `0004_expense_claims.sql` creates
+All twelve published operations answer. The five claim operations landed in
+`C-R2`; the three item operations and the four lifecycle actions landed in the
+`C-R3`/`C-R4` wave:
+
+- **`C-R1`** — the schema: `migrations/0004_expense_claims.sql` creates
   `expense_claims`, `expense_items` and the `expense_claim_status` enum, and
   `src/reimbursements/models.rs` holds the row types.
-- **`C-R2` (D2.R2)** — the claim endpoints: five operations on
-  `/api/v1/claims` and `/api/v1/claims/{claim_id}`, and the full module
+- **`C-R2`** — the claim endpoints: `GET`/`POST /api/v1/claims` and
+  `GET`/`PATCH`/`DELETE /api/v1/claims/{claim_id}`, with the full module
   layering (`dto`, `service`, `repository`, `handlers`).
+- **`C-R3`/`C-R4`** — `POST /claims/{claim_id}/items`,
+  `PATCH`/`DELETE /claims/{claim_id}/items/{item_id}` and
+  `POST …/submit`, `…/approve`, `…/reject`, `…/pay`; the `SUM` that maintains
+  the total inside the item transaction; the transition table; and
+  `helpers::validation::validate_money`.
 
-**The feature is not `Implemented`.** Items and the lifecycle are the other half
-of the accepted scope, and neither is built: there is no `/claims/{claim_id}/items`
-route and no `/submit`, `/approve`, `/reject` or `/pay`. A client can create,
-list, read, change and delete a claim; it cannot add a single line item to one,
-so a claim's `total_amount` stays `"0.0000"` for every claim this API can create,
-and every claim it creates stays in `draft`.
+`Implemented` is used in the `AGENTS.md` §6 sense: **the code exists**. Whether
+it compiles is the chain's gate, measured by the agents that run `cargo`, and
+this document does not claim a compile it did not see. `Verified` would
+additionally require a passing recorded check, and there is none: no run of
+`tests/claims_api.rs` is recorded anywhere in this session, and neither
+`code-reviewer` nor `quality-gate` has read `C-R2`, `C-R3` or `C-R4`. Nothing in
+this feature is `Verified` — not a requirement, not an endpoint, not a test
+file.
 
-A requirement therefore keeps a state that names **which half exists**, and that
-parenthetical is not a promotion. "Partly built" below is shorthand for "one
-half of the requirement exists"; it is not one of the seven statuses in
-`AGENTS.md` §6 and it is not a step towards `Verified`.
+**The evidence column below names the test that is written against each rule.**
+A named test is not a passing run. The distinction is the whole difference
+between `Implemented` and `Verified`, and no row in this document crosses it.
 
-| Requirement | State | Which half exists | Evidence |
-| ----------- | ----- | ----------------- | -------- |
-| `REIMB-R01` Claim with line items | Partly built | Schema (R1) and the claim half of the endpoints (R2). The **item** half — adding, changing, removing a line item — is R3. | Both tables and both row types exist. `POST`, `GET`, `PATCH` and `DELETE` answer for a claim, and `GET /claims/{id}` returns `items`, which is `[]` for every claim the API can create. |
-| `REIMB-R02` One currency per claim | Built, at the claim level | Schema (R1) and the endpoint rules (R2). | `currency CHAR(3)` with `expense_claims_currency_chk`; required on create, trimmed and upper-cased, three letters or `422`; **not writable afterwards** — see §1.1. Asserted by `the_claim_currency_is_required_and_upper_cased` and `the_claim_currency_is_not_patchable`. No conversion exists anywhere. |
-| `REIMB-R03` Total equals the sum of the items | Not built | Schema (R1) only. The invariant is maintained by item writes, which are R3. | The columns and `expense_claims_total_amount_chk` exist, and the seeder keeps the sum; no endpoint writes an item, so no endpoint can break or prove the invariant. R2 reads the total and never accepts it from a client. |
-| `REIMB-R04` The five-state lifecycle | Not built | Schema (R1) only. The transitions need the four action endpoints (R4). | `expense_claim_status` and `expense_claims_lifecycle_timestamps_chk` exist. R2 publishes `status` and can never change it: it is not a field of `UpdateClaimRequest` (`the_claim_status_is_not_patchable`). Every claim the API creates is `draft`. |
-| `REIMB-R05` Submission preconditions | Not built | Nothing. It is a service rule over the items and the status. | A service rule, because it reads another table; no constraint can express it. R4. |
-| `REIMB-R06` Items change only in draft | Not built | Nothing. There is no item write to guard. | A service guard before every item write. R3. |
-| `REIMB-R07` Money as `NUMERIC(19,4)` and a string | Partly built | The **response** half (R1 schema, R2 wire form). The four-decimal **input** rule has no caller until R3. | Both money columns are `NUMERIC(19,4)`, selected as `::text`; `total_amount` and `amount` are JSON strings in the published document and in every response. No `f32`, no `f64`, no decimal crate, no arithmetic in Rust. [`ADR-0007`](../../decisions/ADR-0007-money-representation.md). |
-| `REIMB-R08` A receipt is a reference | Partly built | Column (R1) and the published response field (R2). The validator and the endpoint that accept one are R3. | `receipt_url TEXT` with `expense_items_receipt_url_chk`; `ItemResponse.receipt_url` is published. No route accepts a file, so the "never bytes" half holds vacuously. [`ADR-0009`](../../decisions/ADR-0009-receipt-references.md). |
-| `REIMB-R09` Optional project link | Built, at the claim level | Schema (R1) and the endpoint rules (R2). | `project_id` with `ON DELETE SET NULL`; create and `PATCH` verify the project belongs to the caller and answer `404` otherwise, in the statement itself. `PATCH {"project_id": null}` clears the link. Asserted by `a_claim_cannot_reference_another_users_project` and `deleting_the_project_clears_the_link_and_keeps_the_claim`. |
-| `REIMB-R10` Owner-scoped reads and writes | Partly built | Schema (R1) and the claim half of the endpoints (R2). The item half is R3. | `user_id` on both tables and the composite key `expense_items_claim_fk (claim_id, user_id)`; every claim statement carries `user_id` in its own `WHERE` and a foreign claim answers `404`, never `403`. The item statements do not exist yet. |
-| `REIMB-R11` Deletion in any status | Partly built | The endpoint (R2) and the cascades (R1). The statuses it must work in cannot be reached through the API until R4. | `DELETE /api/v1/claims/{claim_id}` answers `204` and has no status guard; `ON DELETE CASCADE` on the composite key removes the items. Only a `draft` claim can be produced by the API today, so "in any status" is unproven until R4 exists. |
+### 1.1 The requirements
 
-### 1.1 The `currency` rule on `PATCH`: ignored with `200`, not a `422`
+Every requirement now has code. The state column uses the seven words of
+`AGENTS.md` §6 and nothing else; the earlier "partly built" shorthand is gone,
+because there is no half left to name.
+
+| Requirement | State | What exists | What proves it |
+| ----------- | ----- | ----------- | -------------- |
+| `REIMB-R01` Claim with line items | `Implemented` | Five claim operations and three item operations. `CreateItemRequest` carries `description`, `amount`, `incurred_on`, `category` and `receipt_url` only — an item body cannot set `id`, `claim_id`, `user_id`, `currency` or a timestamp, so the item is denominated in its claim by construction. The detail read lists the items. | `a_claim_can_be_created_read_and_deleted`; `an_item_can_be_added_to_a_draft_claim` (`201`, trimmed description, lower-cased category, no `currency` field on the item, `category`/`receipt_url` `null` when absent, both items readable through the claim); `an_item_can_be_partially_updated`; `the_claim_detail_items_are_in_chronological_order`; `an_item_amount_must_be_a_four_decimal_string` (a refused body creates no item and moves no total). **Unproved:** the 500/501-character item-description bound and a non-date `incurred_on` are not asserted at HTTP level — see §2. |
+| `REIMB-R02` One currency per claim | `Implemented` | `currency CHAR(3)` with `expense_claims_currency_chk`; required on create, trimmed and upper-cased, three letters or `422`; not writable afterwards (§1.2). An item has no currency column and no currency field, and no conversion exists anywhere in the feature. | `the_claim_currency_is_required_and_upper_cased`; `the_claim_currency_is_not_patchable`; `a_claim_rejects_a_currency_that_is_not_three_upper_case_letters` (`23514`); `an_item_can_be_added_to_a_draft_claim`, which asserts the item response carries no `currency` key. |
+| `REIMB-R03` The total equals the sum of the items | `Implemented` | This is the requirement that was waiting for the item writes. Every item write is one transaction: `SELECT status … FOR UPDATE` on the claim row, the `INSERT`/`UPDATE`/`DELETE` of the item, then `UPDATE expense_claims SET total_amount = COALESCE((SELECT SUM(amount) FROM expense_items WHERE claim_id = $1 AND user_id = $2), 0)` — the `SUM` runs in SQL, and the commit is the last step, so the item and the total cannot diverge. `SUM` over no rows is `NULL`, so the `COALESCE` stores `0` and the last delete renders `"0.0000"`. | `adding_an_item_recomputes_the_total`; `deleting_an_item_recomputes_the_total` (one item removed, then the last one, then a second delete is `404`); `the_claim_total_equals_the_sum_of_its_items` (add, update and delete each re-read through `GET`, compared with the returned items **and** with an independent `i128` sum, ending at `"0.0000"`); `an_item_can_be_partially_updated` (the total follows a changed amount). Data half: `money_is_stored_with_four_decimal_places`, `a_seeded_claim_total_equals_the_sum_of_its_items`. **Unproved:** two concurrent item writes are not exercised, and a direct SQL edit of an item still bypasses the recompute (§2, [architecture.md](architecture.md) §10). |
+| `REIMB-R04` The five-state lifecycle | `Implemented` | Four action routes over one table of five edges (`draft -submit-> submitted`, `submitted -approve-> approved`, `submitted -reject-> rejected`, `approved -pay-> paid`, `rejected -submit-> draft`); the other fifteen pairs are `409`. Each action is one guarded `UPDATE` whose `WHERE` names the expected source status, so two concurrent actions cannot both win. The reopen clears **`submitted_at` and `decided_at` in the same statement**, because `expense_claims_lifecycle_timestamps_chk` requires all three stamps to be null for a `draft`. `paid` is terminal. | `a_draft_can_be_submitted_approved_and_paid`; `every_forbidden_transition_is_refused` (fifteen cases, each asserting the status and all three stamps are unchanged); `a_submitted_claim_cannot_be_approved_twice`; `a_rejected_claim_reopens_and_can_be_resubmitted` (both stamps null in the response **and** in a following `GET`, then an item write, then a resubmit); `paid_is_terminal`; `the_lifecycle_timestamps_are_set_by_the_transition`. Unit: `the_transition_table_allows_exactly_the_five_edges` (5 of 20), `a_reviewed_claim_cannot_be_reopened`. Schema: `the_lifecycle_constraint_accepts_every_consistent_status`, `the_lifecycle_constraint_rejects_a_submitted_claim_without_a_submission_timestamp`. |
+| `REIMB-R05` Submission preconditions | `Implemented` | The rule is **inside the submit statement**, not a check before it: `WHERE … AND (status = 'rejected' OR (total_amount > 0 AND EXISTS (SELECT 1 FROM expense_items WHERE claim_id = $1 AND user_id = $2)))`. A `draft` that fails it updates no row, and the service then reads the claim once to choose the field: no items → `422` naming `items`, items but a zero total → `422` naming `total_amount`. A `rejected` claim reopens without the precondition, because a rejection freezes its items. | `a_claim_without_items_cannot_be_submitted` (`422` naming `items`; the claim stays `draft` with three null stamps; one item then makes the same call `200`); `a_claim_with_a_zero_total_cannot_be_submitted` (a `"0.0000"` item is legal, so the total is the only fault: `422` naming `total_amount`; `"0.0001"` is enough, which proves "above zero" and not a rounded boundary). |
+| `REIMB-R06` Items change only in draft | `Implemented` | Each item write locks the claim row and reads its status first (`SELECT status … FOR UPDATE`); a row that is not `draft` returns `409 conflict` with the `claim_not_editable` message, and nothing is written. The reopen is what makes a rejected claim editable again. | `an_item_cannot_be_added_to_a_submitted_claim` (`submitted`, `approved`, `rejected` and `paid` each `409`, item count and total unchanged); `an_item_cannot_be_changed_or_deleted_after_submission` (`PATCH` and `DELETE` both `409`, the item and total intact, status still `submitted`); `a_rejected_claim_reopens_and_can_be_resubmitted` (an item is added **after** the reopen and is accepted with `201`). |
+| `REIMB-R07` Money as `NUMERIC(19,4)` and a string | `Implemented` | Both money columns are `NUMERIC(19,4)`, selected as `::text`; every request and response money value is a JSON string. The four-decimal **input** rule now has a caller: `validate_money` accepts `^[0-9]{1,15}\.[0-9]{4}$` and **refuses rather than rounds**, because the column rounds silently. No `f32`, no `f64`, no decimal crate, no arithmetic in Rust. | `an_item_amount_round_trips_with_four_decimals` (`"125.8000"`, `"0.0000"`, `"999999999999999.9999"` each echoed and re-read, with the one-item total equal to the amount); `an_item_amount_must_be_a_four_decimal_string` (`"12.5"`, `"12.500"`, `"1,000.0000"`, `"1e3"`, `"-1.0000"`, a JSON number and sixteen integer digits are each `422`; nothing is written); `money_round_trips_with_four_decimals`; `a_money_field_is_never_a_json_number_in_a_response`; `the_claim_money_fields_are_strings_in_the_document`; `the_total_is_not_accepted_from_the_client`. Unit: `money_requires_exactly_four_decimals`, `money_is_bounded_to_fifteen_integer_digits`, `a_negative_amount_is_refused`. Schema: `money_is_stored_with_four_decimal_places`. A JSON number never reaches the validator — the body fails to deserialize and the shared extractor reports one `422 validation_failed` for the whole body; the endpoint test asserts the code; the field-`body` shape is the extractor's documented behaviour ([`../../api/error-contract.md`](../../api/error-contract.md) §3) rather than something this test pins. |
+| `REIMB-R08` A receipt is a reference | `Implemented` | `receipt_url TEXT` with `expense_items_receipt_url_chk`; the create and patch validators accept an absolute `http`/`https` URL of at most 2048 characters and store it verbatim. The field is a tri-state on `PATCH`: absent keeps it, `null` clears it. Nothing fetches the URL and nothing logs it. | `a_receipt_url_must_be_absolute_http_or_https` (six refused forms — no scheme, `ftp:`, protocol-relative, `javascript:`, relative, single-slash — each `422` naming `receipt_url`; 2049 characters refused and 2048 accepted; `https` and `http` both accepted and stored verbatim; only the accepted items exist afterwards); `an_item_can_be_partially_updated` (`null` clears it); unit `a_receipt_must_be_an_absolute_http_url`. **Unproved:** no test posts a `multipart/form-data` or base64 file body — the "never bytes" half holds because no route parses a file, not because a test refused one (§2). |
+| `REIMB-R09` Optional project link | `Implemented` | `project_id` with `ON DELETE SET NULL`; create and `PATCH` verify the project belongs to the caller inside the write statement and answer `404` otherwise; `PATCH {"project_id": null}` clears the link. Unchanged by this wave — the item and lifecycle routes carry no project input. | `a_claim_can_be_created_with_a_project_of_the_caller`; `a_claim_cannot_reference_another_users_project`; `deleting_the_project_clears_the_link_and_keeps_the_claim`; `a_project_id_that_is_not_a_uuid_is_refused`; `the_update_claim_request_publishes_a_nullable_project_id`; `deleting_a_project_clears_the_claim_link_and_keeps_the_claim` (schema). |
+| `REIMB-R10` Owner-scoped reads and writes | `Implemented` | Every claim statement and every item statement carries `user_id` in its own `WHERE`; an item predicate carries **`claim_id` and `user_id`**, so an id from one account cannot be combined with a claim id from another, and an item id under the wrong claim of the same owner matches no row. A miss is `404` with the resource's catalogue message — never `403`. | `a_claim_of_another_user_is_invisible`; `the_listing_only_contains_the_callers_claims`; `a_claim_cannot_reference_another_users_project`; `an_item_of_another_users_claim_is_invisible` (create, patch and delete all `404`; the other account's listing stays empty; the owner's item and total unchanged); `an_item_id_under_the_wrong_claim_is_not_found` (both claims owned by the caller, so ownership is not the reason; also an id that exists nowhere); `a_lifecycle_action_on_another_users_claim_is_not_found` (all four actions, `404`, nothing written, the other account's listing empty); `the_claim_routes_require_a_credential` (all twelve operations, no token and a bad token, `401`, and nothing sent landed). |
+| `REIMB-R11` Deletion in any status | `Implemented` | `DELETE /api/v1/claims/{claim_id}` is one statement with **no status predicate** — `DELETE FROM expense_claims WHERE id = $1 AND user_id = $2` — so the status cannot be the reason a deletion is refused; the items follow through `expense_items_claim_fk … ON DELETE CASCADE`, in the same statement. The four lifecycle actions now make every status reachable through the API, which they were not in `C-R2`. | `a_claim_can_be_created_read_and_deleted` (a `draft`: `204`, then `404`); `a_claim_of_another_user_is_invisible` (the foreign delete is `404` and the claim survives); `deleting_a_claim_deletes_its_items` and `deleting_an_account_deletes_its_claims_and_items` (schema). **Unproved:** no endpoint test deletes a `submitted`, `approved`, `rejected` or `paid` claim. The code has no guard to fail, but the requirement says "in any status" and only `draft` is asserted at HTTP level; that case is `a_claim_can_be_deleted_in_any_status` in `D2.R5` (§2). |
+
+### 1.2 The `currency` rule on `PATCH`: ignored with `200`, not a `422`
 
 A `PATCH /api/v1/claims/{claim_id}` body carrying `currency` — or `status`, or
 `total_amount` — is **accepted with `200`, and the field is ignored**.
@@ -54,7 +68,10 @@ A `PATCH /api/v1/claims/{claim_id}` body carrying `currency` — or `status`, or
 `serde` ignores an unknown key by default, so a fourth key never reaches the
 service; and the `SET` clause of the one update statement names those three
 fields plus `updated_at`, and nothing else. There is no code path in which a
-handler could pass a currency through.
+handler could pass a currency through. The same holds for the item bodies: an
+item body carrying `currency`, `claim_id`, `user_id` or a timestamp is accepted
+and ignored, because `CreateItemRequest` and `UpdateItemRequest` do not have
+those fields.
 
 **This corrects three documents.** The `C-R1` `I6` line in the run ledger,
 [`schema.md`](../../database/schema.md) §11.1, and the earlier §1 and
@@ -82,43 +99,40 @@ The behaviour is asserted, not assumed:
 send the ignored fields, require `200`, and require the stored values to be
 unchanged ([testing.md](testing.md) §2.5).
 
-The sibling correction in the database document — `schema.md` §11.1 — and the
-one-line correction of the `C-R1` `I6` line in the ledger belong to the
-`database` agent and the orchestrator; this document records the ruling and
-does not edit their files.
-
-[`project-truth.md`](../../project-truth.md) §17 records the area's progress and
-names migration `0004_expense_claims.sql`, `src/reimbursements/` and
-`tests/claims_schema.rs`; this document is the feature-level detail behind that
-entry.
-
 ## 2. What is still missing
 
-1. **Items (`R3`).** Three endpoints — add, change and delete a line item on a
-   draft claim — the total recomputation in the same transaction, the money
-   input validator, and the draft-only guard (`REIMB-R06`). Everything that
-   makes `REIMB-R03` true at the API level is here.
-2. **The lifecycle (`R4`).** `POST …/submit`, `…/approve`, `…/reject`, `…/pay`,
-   `ensure_transition`, the submission preconditions (`REIMB-R05`) and the only
-   writer of `status` and the three lifecycle timestamps.
-3. **The flow tests (`R5`).** The end-to-end cases in [testing.md](testing.md)
-   §2.3 — a draft submitted, approved and paid — and the ownership sweep over
-   all twelve operations. They cannot be written before R3 and R4 exist.
-4. **A recorded run.** The five claim operations are `Implemented` in the
-   `AGENTS.md` §6 sense: the code exists. `Implemented` also requires that the
-   tree compiles, and that is the chain's gate — not this document. **No run of
-   `tests/claims_api.rs` is recorded anywhere yet**, so nothing in this feature
-   is `Verified`: not a requirement, not an endpoint, not a test file.
-5. **The chain's review rows.** The `code-reviewer` and `quality-gate` verdicts
-   for `C-R2` are outstanding, as they are for `D1`, `D2.S1` and `D2.R1`. The
-   `/api/v1/openapi.json` change is part of what those reviewers read.
+1. **The flow and the ownership sweep (`D2.R5`).** `a_draft_can_be_submitted_approved_and_paid`
+   walks one claim through `submit`, `approve` and `pay`, but that claim is
+   built through the API in the test. The chain still owes:
+   - a flow over a **seeded** claim, read through the API, so the seeder's five
+     statuses and the endpoint rules meet in one test;
+   - `a_claim_can_be_deleted_in_any_status`, which is the missing half of
+     `REIMB-R11`;
+   - the sweep that calls all twelve operations with a second account's token.
+     `the_claim_routes_require_a_credential` covers twelve operations with no
+     credential, which is a different question.
+2. **A recorded run.** Nothing in
+   [`testing.md`](testing.md) has a recorded passing run. Until one exists,
+   `Implemented` is the strongest honest status and every "what proves it"
+   sentence above means "a test is written for it".
+3. **The review rows.** `code-reviewer` and `quality-gate` have not read this
+   chain, `C-R2`, `D2.S1` or `D1`. The twelve-operation surface and the seven
+   new operations are part of what they have to read.
+4. **Five small test gaps inside the operations that now exist**, each a rule
+   in the code with no endpoint assertion: the 1–500 item-description bound, a
+   non-date `incurred_on` (`422` with field `body`), a non-UUID `item_id`
+   (`400`), a `multipart`/file body on the item route, and any concurrency
+   case. The last one is design-only: the row lock and the guarded `UPDATE` are
+   what prevent two writers from both winning
+   ([architecture.md](architecture.md) §2.6–§2.7), and no test runs two writers
+   at once. [testing.md](testing.md) §3 lists them with the rule each would
+   prove.
 
-Only after 1–3 is the **feature** `Implemented`; it becomes `Verified` when the
-tests in [testing.md](testing.md) pass in a recorded run. The feature is not
-promoted because the code exists, and an endpoint reaching `Implemented` does
-not promote the requirement it serves.
+A requirement is not `Verified` because a test exists next to it. The feature
+becomes `Verified` when the tests in [testing.md](testing.md) pass in a
+recorded run, and not before.
 
-## 3. What a future change must do to keep it `Accepted` and then `Verified`
+## 3. What a future change must do to keep it `Implemented` and then `Verified`
 
 - **Do not change an accepted requirement silently.** A revision goes through
   [`project-truth.md`](../../project-truth.md) §18.4, in a new change.
@@ -130,20 +144,25 @@ not promote the requirement it serves.
 - A change that starts storing receipt bytes needs a new ADR that supersedes
   [`ADR-0009`](../../decisions/ADR-0009-receipt-references.md).
 - A change to the lifecycle needs a test for every allowed and every forbidden
-  edge.
+  edge. The table is proved exhaustively today
+  (`the_transition_table_allows_exactly_the_five_edges`); a sixth edge means
+  twenty-five combinations, not twenty.
 - **A change that makes `currency`, `status` or `total_amount` a `422` on
   `PATCH` is a contract change**, not a validation improvement: it contradicts
-  [`api.md`](api.md) §6 and §1.1 above, and it needs the published document
+  [`api.md`](api.md) §6 and §1.2 above, and it needs the published document
   changed first.
+- **A change to an item write must keep the three steps in one transaction**
+  (lock, write, recompute). Moving the `SUM` into Rust, or out of the
+  transaction, breaks `REIMB-R03` in a way no `CHECK` would catch.
 
 ## 4. Related documents
 
 | Document | Contents |
 | -------- | -------- |
 | [`specification.md`](specification.md) | Purpose, scope, non-goals, accepted requirements, user-facing behaviour, acceptance criteria, limitations. |
-| [`architecture.md`](architecture.md) | The layering that exists, the six claim methods and their nine statements, the two list shapes, the `project_id` tri-state, the invariants and what is still planned. |
-| [`api.md`](api.md) | The twelve planned endpoints with their request and response shapes, status codes and error cases. Five answer today. |
-| [`testing.md`](testing.md) | The schema tests, the seeder cases, the 34 claim endpoint tests, the two document tests, and what R3–R5 still owe. |
+| [`architecture.md`](architecture.md) | The layering that exists, the twelve service methods and the nineteen statements, the item transaction, the transition table, the two list shapes, the `project_id` tri-state, the invariants and the limitations. |
+| [`api.md`](api.md) | The twelve endpoints with their request and response shapes, status codes and error cases. All twelve answer. |
+| [`testing.md`](testing.md) | The schema tests, the seeder cases, the 55 endpoint tests, the contract tests, the unit tests, and what R5 still owes. |
 | [`../../api/conventions.md`](../../api/conventions.md) | Pagination, money, filtering and timestamps. |
 | [`../../database/schema.md`](../../database/schema.md) | The tables; §11 is the column, constraint and index definition that migration `0004` implements. |
 | [`../../decisions/ADR-0007-money-representation.md`](../../decisions/ADR-0007-money-representation.md) | The money decision. |

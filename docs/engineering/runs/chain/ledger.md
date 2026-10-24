@@ -989,6 +989,48 @@ Contract `C-R2`. Agents: `rust-backend`, `test-engineer`, `docs`, `database`.
 
 Facts this chain established and that the documents now carry: `currency`, `status` and `total_amount` are **not** patchable and a body carrying them is accepted and ignored (the published `api.md` beat the `422` wording in `schema.md`); `project_id` needs a `double_option` deserializer or "clear the link" is inexpressible; and `tests/openapi_contract.rs` had to move its pin from 22 to 27, which is the drift that pin exists to catch.
 
+### C-R3/C-R4 - Items, the total invariant and the lifecycle (locked 2026-10-24, PHASE=2)
+
+One wave, two chains, because they share the claim detail read, one transaction boundary and one reviewer. Authority: `docs/features/reimbursements/api.md` §7-§14 is the published contract for these operations; `docs/database/schema.md` §11 is the schema; `C-R2` still governs the five claim operations.
+
+**ENDPOINTS** - seven, taking the surface from 27 to **34**:
+
+| Method | Path | Success | Errors beyond the shared 400/401/408/500 |
+| ------ | ---- | ------- | ---------------------------------------- |
+| `POST` | `/claims/{claim_id}/items` | `201` `ItemResponse` | 404, 409, 413, 422 |
+| `PATCH` | `/claims/{claim_id}/items/{item_id}` | `200` `ItemResponse` | 404, 409, 413, 422 |
+| `DELETE` | `/claims/{claim_id}/items/{item_id}` | `204` | 404, 409 |
+| `POST` | `/claims/{claim_id}/submit` | `200` `ClaimDetailResponse` | 404, 409, 422 |
+| `POST` | `/claims/{claim_id}/approve` | `200` `ClaimDetailResponse` | 404, 409 |
+| `POST` | `/claims/{claim_id}/reject` | `200` `ClaimDetailResponse` | 404, 409 |
+| `POST` | `/claims/{claim_id}/pay` | `200` `ClaimDetailResponse` | 404, 409 |
+
+**TYPES** - `CreateItemRequest` (`description`, `amount`, `incurred_on`, `category`, `receipt_url`), `UpdateItemRequest` (all optional, absent = untouched), `LifecycleAction`. Item bodies carry **no** `currency`: an item is denominated in its claim, and a body carrying one is ignored as unknown. `amount` is a money **string** validated by a new `helpers::validation::validate_money` with `^[0-9]{1,15}\.[0-9]{4}$` - refused, never rounded, because `NUMERIC(19,4)` rounds silently and `ADR-0007` promises the round trip is identity.
+
+**SQL** - every statement owner-scoped; `404` never `403`:
+- The item write is **one transaction**: lock/verify the claim is a `draft` of the caller, write the item, `UPDATE expense_claims SET total_amount = COALESCE((SELECT SUM(amount) FROM expense_items WHERE claim_id = $1 AND user_id = $2), 0), updated_at = NOW()`, commit. The item and the total cannot diverge.
+- An item id that exists under a different claim of the same owner is `404`, not `403` and not `200`.
+- A lifecycle action updates `status` and the timestamp the `CHECK` requires in one statement, guarded by `WHERE user_id = $n AND status = $expected`; zero rows affected means `409` (or `404` if the claim is not the caller's).
+
+**INVARIANTS** - I1 items are writable only while the claim is `draft` (`409` otherwise); I2 `total_amount` equals `SUM(amount)` after every item write; I3 money is four decimals on the wire and refused otherwise; I4 transitions: `draft -submit-> submitted`, `submitted -approve-> approved`, `submitted -reject-> rejected`, `approved -pay-> paid`, `rejected -submit-> draft` (reopen, clearing `submitted_at` **and** `decided_at`); every other pair is `409`; `paid` is terminal; I5 submit requires at least one item and a total above zero (`422` naming `items` or `total_amount`); I6 `PATCH` on an item is partial.
+
+**TESTS** - `tests/claims_api.rs` gains: `an_item_can_be_added_to_a_draft_claim`, `adding_an_item_recomputes_the_total`, `an_item_amount_round_trips_with_four_decimals`, `an_item_amount_must_be_a_four_decimal_string`, `an_item_cannot_be_added_to_a_submitted_claim`, `an_item_cannot_be_changed_or_deleted_after_submission`, `an_item_can_be_partially_updated`, `deleting_an_item_recomputes_the_total`, `an_item_of_another_users_claim_is_invisible`, `an_item_id_under_the_wrong_claim_is_not_found`, `a_receipt_url_must_be_absolute_http_or_https`, `the_claim_total_equals_the_sum_of_its_items`, `a_draft_can_be_submitted_approved_and_paid`, `a_claim_without_items_cannot_be_submitted`, `a_claim_with_a_zero_total_cannot_be_submitted`, `a_submitted_claim_cannot_be_approved_twice`, `every_forbidden_transition_is_refused`, `a_rejected_claim_reopens_and_can_be_resubmitted`, `paid_is_terminal`, `a_lifecycle_action_on_another_users_claim_is_not_found`, `the_lifecycle_timestamps_are_set_by_the_transition`.
+
+Plus unit tests in `src/reimbursements/service.rs` for the transition table (5 allowed, 15 refused of 20 combinations) and in `src/helpers/validation.rs` for `validate_money` (accepts four decimals, refuses three, five, a sign, a comma, an exponent). `CONTRACT_OPERATIONS` moves 27 -> 34.
+
+**FILES** (exclusive)
+
+| Owner | Files |
+| ----- | ----- |
+| `rust-backend` | `src/reimbursements/{dto,service,repository,handlers}.rs`, `src/helpers/validation.rs`, `src/api/routes.rs`, `config/messages.toml`, `src/config/messages.rs` |
+| `test-engineer` | `tests/claims_api.rs`, `tests/openapi_contract.rs` |
+| `docs` | `docs/features/reimbursements/{status,architecture,testing}.md`, `docs/testing/strategy.md` |
+| orchestrator | `docs/engineering/**` |
+
+**SEEDER** - no table and no column changes, so the seeder is untouched. Its seeded claims already cover all five statuses, so the flow tests can read them.
+
+---
+
 ## Parked
 
 | Item | Blocker | Next step |

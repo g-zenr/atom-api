@@ -100,6 +100,61 @@ pub fn field_error(field: &str, message: String, messages: &Messages) -> AppErro
 /// one has one too.
 pub const MAX_SEARCH_LENGTH: usize = 200;
 
+/// The number of decimal places a money value carries.
+///
+/// Mirrors the `4` of `NUMERIC(19,4)` in `migrations/0004_expense_claims.sql`
+/// and the wire form of `ADR-0007`: four decimals, always, in both directions.
+pub const MONEY_SCALE: usize = 4;
+
+/// The maximum number of integer digits a money value may carry.
+///
+/// Mirrors the `15` of `NUMERIC(19,4)`: nineteen digits in total, four of them
+/// fractional. The largest accepted magnitude is therefore
+/// `"999999999999999.9999"`, which is the bound the published contract states.
+pub const MONEY_MAX_INTEGER_DIGITS: usize = 15;
+
+/// Validates the textual form of a money value and returns it unchanged.
+///
+/// The accepted form is `^[0-9]{1,15}\.[0-9]{4}$`: one to fifteen ASCII
+/// digits, one decimal point, exactly four digits. No sign, no leading or
+/// trailing space, no grouping separator, no exponent, no currency symbol and
+/// no empty string.
+///
+/// Nothing parses, rounds, compares or does arithmetic on the value. The
+/// database sums money, in SQL (`ADR-0007`). This check exists because
+/// `NUMERIC(19,4)` **rounds** a value it is given rather than refusing it —
+/// `"12.50001"` would be stored as `"12.5000"` — so the four-decimal rule on
+/// **input** is the service's job. Accepting `"12.5"` would also break the
+/// round trip the decision promises: the client would send one string and read
+/// back another.
+///
+/// # Errors
+///
+/// Returns [`AppError`] with a field violation when the value is not in the
+/// accepted form.
+pub fn validate_money(field: &str, value: &str, messages: &Messages) -> AppResult<String> {
+    let valid = match value.split_once('.') {
+        Some((integer, fraction)) => {
+            !integer.is_empty()
+                && integer.len() <= MONEY_MAX_INTEGER_DIGITS
+                && integer.bytes().all(|byte| byte.is_ascii_digit())
+                && fraction.len() == MONEY_SCALE
+                && fraction.bytes().all(|byte| byte.is_ascii_digit())
+        }
+        None => false,
+    };
+
+    if !valid {
+        return Err(field_error(
+            field,
+            messages.validation.money_scale.clone(),
+            messages,
+        ));
+    }
+
+    Ok(value.to_string())
+}
+
 /// Validates a search term.
 ///
 /// The term is trimmed, and a term that is empty after trimming means "no
@@ -192,5 +247,70 @@ mod tests {
             body.error.details[0].message,
             format!("must be at most {MAX_SEARCH_LENGTH} characters long")
         );
+    }
+
+    /// The four-decimal rule, enforced by the service because the column is
+    /// permissive: `NUMERIC(19,4)` rounds what it is given instead of
+    /// refusing it, so `"1.00000"` would silently become `"1.0000"`.
+    #[test]
+    fn money_requires_exactly_four_decimals() {
+        let messages = test_messages();
+
+        for accepted in ["0.0000", "1.0000", "125.8000", "999999999999999.9999"] {
+            assert_eq!(
+                validate_money("amount", accepted, &messages).unwrap(),
+                accepted,
+                "{accepted:?} is in the accepted form and must round-trip unchanged"
+            );
+        }
+
+        // Three decimals, five decimals, a missing point, a sign, a grouping
+        // separator, an exponent, a currency symbol and the empty string.
+        for refused in [
+            "1",
+            "1.0",
+            "1.000",
+            "1.00000",
+            "",
+            "abc",
+            "-1.0000",
+            "+1.0000",
+            "1,000.0000",
+            "1e3",
+            "€1.0000",
+            " 1.0000",
+            "1.0000 ",
+            "1.0000.0000",
+        ] {
+            let error = validate_money("amount", refused, &messages)
+                .expect_err("a value that is not four-decimal money must be refused");
+            let body = error.body();
+            assert_eq!(body.error.details[0].field, "amount");
+            assert_eq!(
+                body.error.details[0].message, messages.validation.money_scale,
+                "{refused:?} must be refused with the money-scale message"
+            );
+        }
+    }
+
+    /// The column holds nineteen digits in total, four of them fractional, so
+    /// the integer part may carry fifteen digits and no more.
+    #[test]
+    fn money_is_bounded_to_fifteen_integer_digits() {
+        let messages = test_messages();
+
+        assert!(validate_money("amount", "999999999999999.0000", &messages).is_ok());
+        assert!(validate_money("amount", "1000000000000000.0000", &messages).is_err());
+    }
+
+    /// `NUMERIC(19,4)` refuses a negative amount through
+    /// `expense_items_amount_chk`; the service refuses it without a round trip
+    /// so that the client gets a `422` naming the field.
+    #[test]
+    fn a_negative_amount_is_refused() {
+        let messages = test_messages();
+
+        assert!(validate_money("amount", "-0.0100", &messages).is_err());
+        assert!(validate_money("amount", "0.0000", &messages).is_ok());
     }
 }
