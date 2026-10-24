@@ -949,7 +949,7 @@ reported all six gates as **not run**. To its credit each one said so rather tha
 recording a pass, and two of them still found real defects by reading the tree.
 But a gate that cannot run a gate is not a gate, and the consequence was visible
 in the record at the time: **no chain in the run had a verdict**, so nothing was
-`Verified`, and three features sat at `Implemented` with 483 passing tests and no
+`Verified`, and three features sat at `Implemented` with 504 passing tests and no
 independent evidence.
 
 **Workaround used in the run.** The orchestrator ran the six gates itself and
@@ -977,7 +977,7 @@ is missing is evidence, and no amount of prose substitutes for it.
 read-only entry point, sets `TEST_DATABASE_URL` itself, refuses a connection
 string whose database name lacks `test`, and exits non-zero if any gate fails.
 The `quality-gate` role allow-lists exactly that script. The first executable
-verdict is `ATOM-REVIEW-20261024-011`: six gates at `0`, 483 tests, **FAIL on
+verdict is `ATOM-REVIEW-20261024-011`: six gates at `0`, 504 tests, **FAIL on
 documentation** with five blocking findings, all now repaired. `KI-023` is
 closed; the remaining gap is the missing re-gate, not the mechanism.
 

@@ -25,7 +25,7 @@ recorded.
 Eleven reviews have been performed:
 
 - `ATOM-REVIEW-20261024-011`, the first **executable** quality-gate verdict,
-  over `D0`–`D5`. It measured all six gates at `0` and 483 tests and returned
+  over `D0`–`D5`. It measured all six gates at `0` and 504 tests and returned
   **FAIL on documentation**, with five blocking findings (`B1`–`B5`), all
   repaired; it also confirmed that `ML-R02` is honestly recorded as unmet.
 - `ATOM-REVIEW-20261024-010`, the code review of job application chains
@@ -195,7 +195,7 @@ read-only entry point, `powershell -NoProfile -ExecutionPolicy Bypass -File .\sc
 | - | ---- | ---- |
 | 1 | `cargo fmt --all -- --check` | `0` |
 | 2 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | `0` |
-| 3 | `cargo test --all-targets --locked` | `0` — **483 tests**, 0 failed on Windows (**485** on CI, where the two unix-only `shutdown` tests run) |
+| 3 | `cargo test --all-targets --locked` | `0` — **504 tests**, 0 failed on Windows (**485** on CI, where the two unix-only `shutdown` tests run) |
 | 4 | `cargo check --no-default-features --all-targets --locked` | `0` |
 | 5 | `cargo run --quiet --bin atom-docs` | `0` |
 | 6 | `cargo run --quiet --bin atom-docs -- --strict` | `0` |
@@ -206,8 +206,8 @@ read-only entry point, `powershell -NoProfile -ExecutionPolicy Bypass -File .\sc
 | - | ------- | ----------- |
 | 1 | `docs/features/ml/testing.md` asserted the opposite of the tree: `a4d33a3` as "the committed state", no `#[test]` in `src/ml/`, no `--with-embeddings` flag, and "no case has been run". The tree has 40 passing `ml_api` cases, 39 module cases, the flag and 20 passing seeder cases. | The introduction and §3/§4/§6 were rewritten to the measured state; the real gaps (no real-model run, no quality evaluation, concurrency) were kept. |
 | 2 | `docs/database/schema.md` said the `embeddings` Rust side did not exist and that no statement used the table. `src/ml/{repository,service,handlers}.rs` and the purge in `src/notes/repository.rs` exist, and the 40 cases exercise the three routes. | The three places were corrected; the six-migration and `0006` claims were already true and left alone. |
-| 3 | `docs/engineering/implementation-status.md` was stale: five migrations, a `D3.J5` run of 387 tests, and a six-test seeder binary. | Six migrations `0001`-`0006`; the last full run is `D5`, 483 on Windows (485 CI), 191 unit, 20 seeder integration and 12 in the binary. |
-| 4 | `docs/engineering/runs/chain/ledger.md` had no `D4`/`D5` scorecards, its queue rows still said `pending`, and `Resume` said 302 tests. | `D4.M1`-`M6` and `D5.H1`/`H2`/`H4` scorecards added (rows 10-11 `Fail`), the queue rows set, and `Resume` rewritten to 483 tests and `58f9532`. |
+| 3 | `docs/engineering/implementation-status.md` was stale: five migrations, a `D3.J5` run of 387 tests, and a six-test seeder binary. | Six migrations `0001`-`0006`; the last full run is `D5`, 504 on Windows (506 CI), 212 unit, 20 seeder integration and 12 in the binary. |
+| 4 | `docs/engineering/runs/chain/ledger.md` had no `D4`/`D5` scorecards, its queue rows still said `pending`, and `Resume` said 302 tests. | `D4.M1`-`M6` and `D5.H1`/`H2`/`H4` scorecards added (rows 10-11 `Fail`), the queue rows set, and `Resume` rewritten to 504 tests and `58f9532`. |
 | 5 | Two `#[allow(clippy::cast_possible_truncation)]` in `src/ml/burn_embedder.rs` suppressed a lint instead of fixing the cast. | Removed; the casts are now unconditional and the lint stays at `-D warnings`. |
 
 #### What the gate confirmed as honest

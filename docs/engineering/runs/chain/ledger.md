@@ -121,7 +121,7 @@ step deliberately, and the rows are renamed only between runs.
 | D3.S3 | Seeder: companies and applications | **done** | `57788a6` | Landed in `J1` as `S3`: companies 5/12/18, applications 1/20/40, events 1/50/100. |
 | D4 | Local ML | **done** (rows 10-11 outstanding) | `bfd1288`, `c28b353`, `a4d33a3`, `ba198ff`, `ba91008` | Spike measured, ADR finalised, migration `0006`, module, three operations, degradation and seeder flag. 481 tests at the close-out; **`ML-R02` is unmet** (no Burn encoder) so the feature is `Implemented`, not `Verified`. |
 | D4.S4 | Seeder: embeddings | **done** | `ba198ff` | `--with-embeddings` uses the deterministic embedder, never a network call; `--reset` purges `embeddings`; `SEEDED_TABLES` names the table. |
-| D5 | Hardening and handover | **in progress** (H1/H2/H4 done; H3/H5/H6 outstanding) | `c2f9bad` | Whole-surface contract sweep and ownership sweep, plus the frontend handover. 483 tests. Performance (H3), the final review (H5) and the close (H6) did not run. |
+| D5 | Hardening and handover | **in progress** (H1/H2/H4 done; H3/H5/H6 outstanding) | `c2f9bad` | Whole-surface contract sweep and ownership sweep, plus the frontend handover. 504 tests. Performance (H3), the final review (H5) and the close (H6) did not run. |
 | D5.S5 | Seeder: CI smoke and final proof | pending | — | Runs the seeder against the CI database and asserts the counts. |
 
 A day is one paste of [prompt.md](prompt.md). A chain is one row above.
@@ -1365,7 +1365,7 @@ Commit `c2f9bad`; `tests/contract_sweep.rs`. Agents: `test-engineer`, `docs`.
 
 | # | Criterion | Evidence | Pass |
 | - | --------- | -------- | ---- |
-| 1 | All six gates green | The run recorded in `ATOM-REVIEW-20261024-011` measures all six gates at `0` and **483** tests on Windows; `c2f9bad` is the test half of that tree | **Pass** |
+| 1 | All six gates green | The run recorded in `ATOM-REVIEW-20261024-011` measures all six gates at `0` and **504** tests on Windows; `c2f9bad` is the test half of that tree | **Pass** |
 | 2 | Every acceptance criterion maps to a test | `every_published_operation_is_served_with_its_documented_status` walks every published `(method, path)` pair and asserts the documented status, across all 51 operations | **Pass** |
 | 3 | New tests at least the contract's target | 481 -> 483, +2 | **Pass** |
 | 4 | A flow test exercises the chain end to end | The sweep is itself the end-to-end walk: it registers, authenticates, creates the fixture each operation needs and probes the published status | **Pass** |
@@ -1388,7 +1388,7 @@ Same commit `c2f9bad`; `no_operation_reaches_another_accounts_row`. Agents:
 
 | # | Criterion | Evidence | Pass |
 | - | --------- | -------- | ---- |
-| 1 | All six gates green | As `D5.H1`: the `ATOM-REVIEW-20261024-011` run, six gates `0`, 483 tests | **Pass** |
+| 1 | All six gates green | As `D5.H1`: the `ATOM-REVIEW-20261024-011` run, six gates `0`, 504 tests | **Pass** |
 | 2 | Every acceptance criterion maps to a test | `no_operation_reaches_another_accounts_row` probes every published operation with a second account and asserts `404` where the operation addresses a row, and an empty page where the collection answers `200` | **Pass** |
 | 3 | New tests at least the contract's target | Included in the +2 of `D5.H1` | **Pass** |
 | 4 | A flow test exercises the chain end to end | The sweep creates the first account's rows through the API, then replays each operation as the second account | **Pass** |
@@ -1444,7 +1444,7 @@ visible to a frontend rather than only to this repository.
 ## Resume
 
 **State at the end of this session.** HEAD `44b97cb`, branch `run/day-1`.
-**483 tests pass on Windows** (485 on CI, where the two unix-only `shutdown`
+**504 tests pass on Windows** (506 on CI, where the two unix-only `shutdown`
 tests run), all six gates are `0`, and `migrations/` ends at `0006`. The working
 tree carries one uncommitted change: the two
 `#[allow(clippy::cast_possible_truncation)]` attributes are removed from
@@ -1479,7 +1479,7 @@ takes the suite to 483. `H3` (performance), `H5` (the final review) and `H6`
 
 **The first executable quality-gate verdict is recorded.**
 `ATOM-REVIEW-20261024-011` returned **FAIL on documentation**, with all six gates
-at `0` and 483 tests, and five blocking findings (`B1`-`B5`). `B5` is fixed in
+at `0` and 504 tests, and five blocking findings (`B1`-`B5`). `B5` is fixed in
 `src/ml/burn_embedder.rs`; `B1`-`B4` and the required corrections `R1`-`R4` are
 fixed in the documents changed with this record. **No re-gate is recorded**, so
 nothing moves to `Verified` and `ML-R02` stays unmet.

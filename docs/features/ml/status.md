@@ -18,7 +18,7 @@ be**, because `ML-R02` is unmet: no code path produces an embedding from a Burn
 model. The suite is not the gap — the 40 `ml_api` cases, the 39 cases in
 `src/ml/` and the seeder case pass in the run recorded in §1.5, and the first
 executable `quality-gate` run over `D0`-`D5` measured all six gates at `0` and
-483 tests (`ATOM-REVIEW-20261024-011`). Everything the feature can claim from a
+504 tests (`ATOM-REVIEW-20261024-011`). Everything the feature can claim from a
 deterministic embedder is covered; the requirement it cannot meet is the model.
 
 The requirements `ML-R01`…`R09` are agreed in
@@ -145,7 +145,7 @@ code would be a contract change (`architecture.md` §12.9).
 | `cargo fmt --all` | No changes after the final pass. |
 | `cargo check --all-targets --locked` | `0` |
 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | `0` |
-| `TEST_DATABASE_URL=…/atom_test cargo test --all-targets --locked` | `0` — 191 library tests, 40 in `tests/ml_api.rs`, 20 in `tests/seeder.rs`, 10 in `tests/openapi_contract.rs`, and every other binary green. |
+| `TEST_DATABASE_URL=…/atom_test cargo test --all-targets --locked` | `0` — 212 library tests, 40 in `tests/ml_api.rs`, 20 in `tests/seeder.rs`, 10 in `tests/openapi_contract.rs`, and every other binary green. |
 | `cargo check --no-default-features --all-targets --locked` | `0` — the API builds without Burn. |
 | `cargo run --bin atom-docs` | `atom-docs: OK (0 warning(s))` |
 

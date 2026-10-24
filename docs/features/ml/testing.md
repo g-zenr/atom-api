@@ -33,7 +33,7 @@ were removed and committed in `505a189`; zero suppressions remain in `src/` or
 seven configuration cases and the seeder case passed in the runs recorded in
 [status.md](status.md) §1.5 and `ATOM-CHANGE-20261024-011`. The first executable
 `quality-gate` run over `D0`–`D5` measured the six gates at `0` and the full
-suite at **483 on Windows** (`ATOM-REVIEW-20261024-011`). What no case proves is
+suite at **504 on Windows** (`ATOM-REVIEW-20261024-011`). What no case proves is
 a real model: `ML-R02` is unmet, so every executed path uses `Deterministic`, and
 the quality run in §5 has not happened. Nothing in this feature is `Verified`.
 

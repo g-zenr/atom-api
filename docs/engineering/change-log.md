@@ -54,7 +54,7 @@ define the target state. The requirements live in
 The `quality-gate` could not execute a gate for the whole of the Phase 2 run
 (`KI-023`). `scripts/gate.ps1` and one allow rule fixed that, and the first
 executable verdict returned **FAIL on documentation with all six gates green and
-483 tests**. Every blocking finding is fixed here.
+504 tests**. Every blocking finding is fixed here.
 
 #### What the gate found, and what was done
 
@@ -73,7 +73,7 @@ in `505a189`), and this entry was missing.
 #### Checks and results
 
 `script/gate.ps1` at `505a189`: `fmt` 0, `clippy` 0, `test` 0, `nodefault` 0,
-`docs` 0, `strict` 0. **483 tests on Windows**, 485 on CI where the two unix
+`docs` 0, `strict` 0. **504 tests on Windows**, 506 on CI where the two unix
 `shutdown` cases run.
 
 #### What is not verified
@@ -153,7 +153,7 @@ Run from the repository root on Windows, `TEST_DATABASE_URL` pointing at
 | `cargo check --all-targets --locked` | `0` |
 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | `0` |
 | `cargo check --no-default-features --all-targets --locked` | `0` |
-| `cargo test --all-targets --locked` | `0` — 191 library tests, 40 in `tests/ml_api.rs`, 20 in `tests/seeder.rs`, 10 in `tests/openapi_contract.rs` |
+| `cargo test --all-targets --locked` | `0` — 212 library tests, 40 in `tests/ml_api.rs`, 20 in `tests/seeder.rs`, 10 in `tests/openapi_contract.rs` |
 | `cargo run --bin atom-docs` | `OK (0 warning(s))` |
 
 The manual degradation run on `atom_dev` — `200` with lexical results for a

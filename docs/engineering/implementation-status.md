@@ -73,7 +73,7 @@ A feature is never `Verified` because the code exists or compiles.
 | Edge rate limiting | `Proposed` | The requirement in [`../project-truth.md`](../project-truth.md) §9.10 applies to a production deployment. | — |
 | The rest of the roadmap | `Proposed` | By design, apart from the seeder and the reimbursements schema above. See [`../roadmap.md`](../roadmap.md). | — |
 The last full run of the test suite on a Windows host was on 2026-10-24, over
-the `D5` work: **483 tests pass** - 191 unit, 3 `atom-docs`, 12 `atom-seed`,
+the `D5` work: **504 tests pass** - 212 unit, 3 `atom-docs`, 12 `atom-seed`,
 29 authentication, 56 claims, 3 claims flow, 10 `claims_schema`,
 2 `contract_sweep`, 2 explorer, 51 `job_applications_api`, 2 job application
 flow, 11 `jobs_schema`, 4 `list_query`, 40 `ml_api`, 12 notes,
