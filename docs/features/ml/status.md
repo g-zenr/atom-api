@@ -2,7 +2,7 @@
 
 # Local machine learning — status
 
-> **Last updated:** 2026-10-24 (chain `D4.M3`–`M6`)
+> **Last updated:** 2026-10-25 (chain `D4.M3`–`M6`; gate `ATOM-REVIEW-20261024-011`)
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-ML-001`](specification.md)
 
@@ -14,9 +14,12 @@ The feature is **Implemented**. It is **not** `Verified`, and one requirement,
 `Implemented` is used exactly as [`AGENTS.md`](../../../AGENTS.md) §6 defines it:
 the code exists. It is not evidence that the code behaves correctly, and this
 document does not claim that it does. **`Verified` is not claimed and must not
-be**, because no gate run and no test run over this tree is recorded anywhere:
-the suite exists and has never been executed. The distinction is not pedantry —
-the suite as a whole cannot pass as it stands, for the three reasons in §1.3.
+be**, because `ML-R02` is unmet: no code path produces an embedding from a Burn
+model. The suite is not the gap — the 40 `ml_api` cases, the 39 cases in
+`src/ml/` and the seeder case pass in the run recorded in §1.5, and the first
+executable `quality-gate` run over `D0`-`D5` measured all six gates at `0` and
+483 tests (`ATOM-REVIEW-20261024-011`). Everything the feature can claim from a
+deterministic embedder is covered; the requirement it cannot meet is the model.
 
 The requirements `ML-R01`…`R09` are agreed in
 [`project-truth.md`](../../project-truth.md) §18.3, with acceptance criteria. The
@@ -25,9 +28,12 @@ finalised with the spike's measured result in its §8.
 
 ### 1.1 What exists
 
-Read from the working tree on 2026-10-24. The committed state is `a4d33a3`; the
-whole feature landed **uncommitted** in the `D4.M3`–`M6` chain, so a row is a
-statement about the working tree and nothing else.
+Read from the working tree on 2026-10-25. The feature is committed: the spike at
+`bfd1288`, the finalised ADR at `a4d33a3`, the module, schema, operations and
+seeder flag at `ba198ff`, and the close-out at `ba91008`. The only uncommitted
+change to the feature is the removal of two
+`#[allow(clippy::cast_possible_truncation)]` attributes in
+`src/ml/burn_embedder.rs`.
 
 | Piece | State | Evidence |
 | ----- | ----- | -------- |

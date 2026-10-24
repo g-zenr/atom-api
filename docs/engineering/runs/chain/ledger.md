@@ -1,7 +1,7 @@
 # Phase 2 run — ledger
 
 > **Status:** In progress (run state)
-> **Last updated:** 2026-10-24 (D0, D1 and D2.S1 committed; review rows closing)
+> **Last updated:** 2026-10-25 (D4 and D5.H1/H2/H4 recorded; first executable gate verdict in `ATOM-REVIEW-20261024-011`)
 > **Owner:** maintained by the orchestrator
 
 This file is the only source of truth for resuming the run. It is updated after
@@ -119,9 +119,9 @@ step deliberately, and the rows are renamed only between runs.
 | D2.R6 | Close: review, gate, commit | **done** | `a9b2db1` | Two independent reviews ran: `code-reviewer` FAIL on documentation plus one rank-1 requirement contradiction, all fixed; `quality-gate` could not execute (shell denied) and reported every gate as not run rather than passing, and its four static findings were fixed. 302 tests. The seeder already carried claims from `R1` (S2), so no seeder work remained. |
 | D3 | Job applications | **done** (J6 review outstanding) | `57788a6`, `5a125e5`, `c273f29` | Schema, 14 operations, stage machine, flow. 387 tests. |
 | D3.S3 | Seeder: companies and applications | **done** | `57788a6` | Landed in `J1` as `S3`: companies 5/12/18, applications 1/20/40, events 1/50/100. |
-| D4 | Local ML | pending | — | Blocked by D3; needs the embedding provider decision from Day 1. |
-| D4.S4 | Seeder: embeddings | pending | — | `--with-embeddings` uses the deterministic embedder, never a network call. |
-| D5 | Hardening and handover | pending | — | Blocked by D4. |
+| D4 | Local ML | **done** (rows 10-11 outstanding) | `bfd1288`, `c28b353`, `a4d33a3`, `ba198ff`, `ba91008` | Spike measured, ADR finalised, migration `0006`, module, three operations, degradation and seeder flag. 481 tests at the close-out; **`ML-R02` is unmet** (no Burn encoder) so the feature is `Implemented`, not `Verified`. |
+| D4.S4 | Seeder: embeddings | **done** | `ba198ff` | `--with-embeddings` uses the deterministic embedder, never a network call; `--reset` purges `embeddings`; `SEEDED_TABLES` names the table. |
+| D5 | Hardening and handover | **in progress** (H1/H2/H4 done; H3/H5/H6 outstanding) | `c2f9bad` | Whole-surface contract sweep and ownership sweep, plus the frontend handover. 483 tests. Performance (H3), the final review (H5) and the close (H6) did not run. |
 | D5.S5 | Seeder: CI smoke and final proof | pending | — | Runs the seeder against the CI database and asserts the counts. |
 
 A day is one paste of [prompt.md](prompt.md). A chain is one row above.
@@ -1220,6 +1220,212 @@ One wave, three chains: they share the DTO/repository shape, the ownership predi
 
 **Decision: ADVANCE on rows 1-9.** The sweep covers 13 attempts over 11 distinct operations, not literally all fourteen; the whole-surface enumeration is `tests/openapi_contract.rs`, pinned at 48 and compared in both directions.
 
+### D4.M1 - The local ML spike, 2026-10-24
+
+Acceptance is the plan §7 measurement, not a contract block; the decision it feeds
+is `ADR-0008`. Agents: `rust-backend`, `docs`.
+
+| # | Criterion | Evidence | Pass |
+| - | --------- | -------- | ---- |
+| 1 | All six gates green | `fmt=0`, `clippy=0`, `test=0` (387), `nodefault=0`, `docs=0`, `strict=0`, recorded in `ATOM-CHANGE-20261024-010` at `c28b353` | **Pass** |
+| 2 | Every acceptance criterion maps to a test | No test: the acceptance is a **measurement**, and `src/bin/atom-ml-spike.rs` is the executed check - a real SafeTensors file on `flex`, latency, peak RSS, determinism, `Disabled` and `Deterministic` | **Pass, as a measurement** |
+| 3 | New tests at least the contract's target | 387 -> 387; the spike adds no test | **N/A** |
+| 4 | A flow test exercises the chain end to end | None: no endpoint exists | **N/A** |
+| 5 | Ownership: the second account gets 404 | None: no endpoint exists | **N/A** |
+| 6 | Docs updated | `ADR-0008` §8, `features/ml/architecture.md`, `implementation-status.md`, `change-log.md` `-010` and its Correction | **Pass** |
+| 7 | Seeder updated for every new table | No table and no seed row | **N/A** |
+| 8 | OpenAPI changed only as intended | Unchanged: no route exists | **Pass** |
+| 9 | No forbidden construct added | **Fail:** `bfd1288` added two `#[allow(clippy::cast_possible_truncation)]` in `src/ml/burn_embedder.rs`. They are `B5` of `ATOM-REVIEW-20261024-011` and are removed in the working tree. | **Fail** |
+| 10 | code-reviewer pass on the chain diff | **Not run.** | **Fail** |
+| 11 | quality-gate pass on the evidence | **Not run for this chain**; the whole-run verdict is `ATOM-REVIEW-20261024-011`. | **Fail** |
+
+**Decision: ADVANCE on rows 1-8.** The spike proves the framework and the file,
+not an embedding: it ran a lookup, a mean-pool and a projection, and the
+Correction block in `ATOM-CHANGE-20261024-010` keeps that distinction. Rows 9-11
+are carried into the run-level gate.
+
+### D4.M2 - The ADR finalised, 2026-10-24
+
+Documents only, commit `a4d33a3`. Agents: `architect`, `docs`.
+
+| # | Criterion | Evidence | Pass |
+| - | --------- | -------- | ---- |
+| 1 | All six gates green | No gate run is separately recorded for this commit; the tree is green at the next chain's close (`ATOM-CHANGE-20261024-011`) | **Not recorded** |
+| 2 | Every acceptance criterion maps to a test | Not applicable: documents only | **N/A** |
+| 3 | New tests at least the contract's target | None | **N/A** |
+| 4 | A flow test exercises the chain end to end | None: no endpoint exists | **N/A** |
+| 5 | Ownership: the second account gets 404 | None: no endpoint exists | **N/A** |
+| 6 | Docs updated | `ADR-0008` §8-§11, `features/ml/architecture.md` §12 (the `M3`-`M6` build contract), `features/ml/status.md` | **Pass** |
+| 7 | Seeder updated for every new table | No table | **N/A** |
+| 8 | OpenAPI changed only as intended | Unchanged | **Pass** |
+| 9 | No forbidden construct added | Documents only | **Pass** |
+| 10 | code-reviewer pass on the chain diff | **Not run.** | **Fail** |
+| 11 | quality-gate pass on the evidence | **Not run for this chain**; the whole-run verdict is `ATOM-REVIEW-20261024-011`. | **Fail** |
+
+**Decision: ADVANCE on rows 2-9.** Row 1 has no separate record for this commit;
+the next chain's run covers the tree, and no gate is claimed that was not
+observed.
+
+### D4.M3 - The embeddings schema and the module, 2026-10-24
+
+Contract locked at `a4d33a3`; `migrations/0006_embeddings.sql` and
+`src/ml/{embedder,repository,service}.rs`. Agents: `database`, `rust-backend`,
+`test-engineer`, `docs`.
+
+| # | Criterion | Evidence | Pass |
+| - | --------- | -------- | ---- |
+| 1 | All six gates green | The close-out run in `ATOM-CHANGE-20261024-011` at `ba198ff`: `fmt=0`, `clippy=0`, `test=0` (481), `nodefault=0`, `docs=0`, `strict=0` | **Pass** |
+| 2 | Every acceptance criterion maps to a test | `ML-R04` -> `reindex_writes_one_row_per_source`, `reindex_writes_unit_vectors`, `reindexing_twice_leaves_the_same_rows`; the unit-length invariant -> `the_deterministic_embedder_returns_a_unit_vector`; `ML-R01` -> `the_deterministic_embedder_performs_no_io` | **Pass** |
+| 3 | New tests at least the contract's target | 387 -> 481 across `M3`-`M5`: +47 library (39 in `src/ml/`, 8 in `src/config/tests.rs`), +40 `ml_api`, +1 `seeder` integration, +6 in the `atom-seed` binary from `src/ml/hash_vector.rs` included by path | **Pass** |
+| 4 | A flow test exercises the chain end to end | `deleting_a_note_removes_its_embeddings` runs schema, repository and service through the note delete; no separate cross-operation journey is recorded | **Pass with caveat** |
+| 5 | Ownership: the second account gets 404 | `reindex_is_owner_scoped` and `search_never_returns_another_users_note`; every repository statement binds `user_id` | **Pass** |
+| 6 | Docs updated | `database/schema.md` §11.6, the `src/ml/` module documentation, `features/ml/{architecture,status,testing}.md`, change-log `-011` | **Pass** |
+| 7 | Seeder updated for every new table | `S4` landed in the same chain: `--with-embeddings`, the `embeddings` purge in `--reset`, `SEEDED_TABLES` gained the table | **Pass** |
+| 8 | OpenAPI changed only as intended | Unchanged in `M3`: the migration and module add no route; the surface is still 48 | **Pass** |
+| 9 | No forbidden construct added | No new `allow` in this chain; the two from `M1` are still present in `burn_embedder.rs` and are `B5`. | **Pass, with a carried finding** |
+| 10 | code-reviewer pass on the chain diff | **Not run.** | **Fail** |
+| 11 | quality-gate pass on the evidence | **Not run for this chain**; the whole-run verdict is `ATOM-REVIEW-20261024-011`. | **Fail** |
+
+**Decision: ADVANCE on rows 1-9.** The storage contract is enforced twice - the
+unique index and the dimension `CHECK` in SQL, and `embedder::normalise` in
+Rust - so a row cannot be stored unnormalised by either path.
+
+### D4.M4 - The three operations, 2026-10-24
+
+Same commit `ba198ff`, same run. Agents: `rust-backend`, `test-engineer`, `docs`.
+
+| # | Criterion | Evidence | Pass |
+| - | --------- | -------- | ---- |
+| 1 | All six gates green | As `D4.M3`: the `-011` run at `ba198ff`, 481 tests, six gates `0` | **Pass** |
+| 2 | Every acceptance criterion maps to a test | `ML-R05` -> the eleven search-mode cases (§2.1 of `testing.md`); `ML-R06` -> the seven degradation cases; `ML-R07` -> the seven reindex cases; `ML-R08` -> the four ownership cases | **Pass** |
+| 3 | New tests at least the contract's target | The 40 cases in `tests/ml_api.rs` are this chain's target; the count is included in the 481 above | **Pass** |
+| 4 | A flow test exercises the chain end to end | `a_match_ranks_the_callers_notes` and `reindex_reports_its_counts` exercise request -> service -> SQL -> response; `the_ml_routes_are_in_the_openapi_document` pins all three operations | **Pass** |
+| 5 | Ownership: the second account gets 404 | `matching_a_foreign_application_is_not_found`, `search_never_returns_another_users_note`, `the_ml_routes_require_a_credential` | **Pass** |
+| 6 | Docs updated | `features/ml/{api,testing,status}.md`, `docs/api/README.md`, `docs/api/conventions.md`, change-log `-011` | **Pass** |
+| 7 | Seeder updated for every new table | No table added here; `S4` is `D4.S4` and is recorded under `M3` | **N/A** |
+| 8 | OpenAPI changed only as intended | 48 -> 51 operations, the `ml` tag and ten component schemas; asserted in both directions and pinned | **Pass** |
+| 9 | No forbidden construct added | No new `allow`; the two from `M1` remain and are `B5`. | **Pass, with a carried finding** |
+| 10 | code-reviewer pass on the chain diff | **Not run.** | **Fail** |
+| 11 | quality-gate pass on the evidence | **Not run for this chain**; the whole-run verdict is `ATOM-REVIEW-20261024-011`. | **Fail** |
+
+**Decision: ADVANCE on rows 1-9.** The surface moved 48 -> 51 in one chain and
+the two-way contract test, not the handler annotations alone, is what holds it.
+
+### D4.M5 - Degradation, 2026-10-24
+
+Same commit `ba198ff`, same run. Agents: `rust-backend`, `test-engineer`, `docs`.
+
+| # | Criterion | Evidence | Pass |
+| - | --------- | -------- | ---- |
+| 1 | All six gates green | As `D4.M3`: the `-011` run at `ba198ff`, 481 tests, six gates `0` | **Pass** |
+| 2 | Every acceptance criterion maps to a test | `ML-R06` -> `search_degrades_to_lexical_when_ml_is_disabled`, `search_degrades_to_lexical_when_the_model_is_missing`, `a_degraded_response_is_a_complete_response`, `a_degraded_request_never_returns_500_or_503`, `lexical_mode_is_not_degraded`, `matching_returns_conflict_when_ml_is_disabled`, `reindex_is_refused_when_ml_is_disabled` | **Pass** |
+| 3 | New tests at least the contract's target | The seven cases above are included in the 40 `ml_api` cases | **Pass** |
+| 4 | A flow test exercises the chain end to end | Both degradation triggers run through the API, and the manual transcript in `features/ml/status.md` §1.6 records the same answers against `atom_dev` | **Pass** |
+| 5 | Ownership: the second account gets 404 | Every degradation case runs inside the owner-scoped suite; `search_never_returns_another_users_note` covers the degraded path too | **Pass** |
+| 6 | Docs updated | `features/ml/testing.md` §2.2, `features/ml/status.md` §1.6, `features/ml/api.md` §2.2, change-log `-011` | **Pass** |
+| 7 | Seeder updated for every new table | No table added here | **N/A** |
+| 8 | OpenAPI changed only as intended | Unchanged in this chain: the three operations were added by `M4`; 51 still asserted | **Pass** |
+| 9 | No forbidden construct added | No new `allow`; the two from `M1` remain and are `B5`. | **Pass, with a carried finding** |
+| 10 | code-reviewer pass on the chain diff | **Not run.** | **Fail** |
+| 11 | quality-gate pass on the evidence | **Not run for this chain**; the whole-run verdict is `ATOM-REVIEW-20261024-011`. | **Fail** |
+
+**Decision: ADVANCE on rows 1-9.** The third trigger, `inference_timeout`, is
+**not** forced end to end: it needs a fourth `Embedder` (`ML-R03` forbids one) or
+a slow model, so only its mapping is unit-tested. That gap is stated in
+`testing.md` §6.
+
+### D4.M6 - Evaluation and close, 2026-10-24
+
+Commit `ba91008`. Agents: `test-engineer`, `docs`.
+
+| # | Criterion | Evidence | Pass |
+| - | --------- | -------- | ---- |
+| 1 | All six gates green | `fmt 0`, `clippy 0`, `test 0` (481), `atom-docs --strict 0`, recorded in the commit; the full six-gate run at the next checkpoint is `ATOM-REVIEW-20261024-011` (483) | **Pass, four recorded / six at the next checkpoint** |
+| 2 | Every acceptance criterion maps to a test | `ML-R09`'s plumbing half -> `the_fixture_queries_find_the_expected_notes` (15 queries); the quality half is not measured, because there is no encoder | **Pass on the plumbing half** |
+| 3 | New tests at least the contract's target | 481 -> 481; the chain corrects a status, an `api.md` sentence and one `#[allow]` in `hash_vector.rs` | **N/A** |
+| 4 | A flow test exercises the chain end to end | The 15-query fixture; it proves the pipeline, not retrieval quality | **Pass, plumbing only** |
+| 5 | Ownership: the second account gets 404 | Unchanged from `M4`/`M5`; the 40 `ml_api` cases still pass | **Pass** |
+| 6 | Docs updated | `features/ml/{api,status,testing}.md`; change-log `-011` | **Pass** |
+| 7 | Seeder updated for every new table | `S4` landed in `ba198ff`; `the_seeder_writes_embeddings_only_with_the_flag` passes in the 20-case seeder suite | **Pass** |
+| 8 | OpenAPI changed only as intended | The surface stays at 51; `the_ml_routes_are_in_the_openapi_document` passes | **Pass** |
+| 9 | No forbidden construct added | One `#[allow(clippy::cast_possible_truncation)]` was **removed** from `hash_vector.rs`; the two in `burn_embedder.rs` remain and are `B5`. | **Pass, with a carried finding** |
+| 10 | code-reviewer pass on the chain diff | **Not run.** | **Fail** |
+| 11 | quality-gate pass on the evidence | **Not run for this chain**; the whole-run verdict is `ATOM-REVIEW-20261024-011`. | **Fail** |
+
+**Decision: ADVANCE on rows 1-9, with `ML-R02` recorded as not met.** The
+chain's own commit names one observed flake and does not hide it: a full parallel
+run once reported `all=101` while the seeder binaries were mid-reset, because
+`claims_flow`'s opportunistic seeded case reads rows a concurrent `--reset`
+deletes. The immediate rerun and every run since are green; the fix (that case
+taking the seeder's advisory lock) is not in this chain.
+
+### D5.H1 - The whole-surface contract sweep, 2026-10-24
+
+Commit `c2f9bad`; `tests/contract_sweep.rs`. Agents: `test-engineer`, `docs`.
+
+| # | Criterion | Evidence | Pass |
+| - | --------- | -------- | ---- |
+| 1 | All six gates green | The run recorded in `ATOM-REVIEW-20261024-011` measures all six gates at `0` and **483** tests on Windows; `c2f9bad` is the test half of that tree | **Pass** |
+| 2 | Every acceptance criterion maps to a test | `every_published_operation_is_served_with_its_documented_status` walks every published `(method, path)` pair and asserts the documented status, across all 51 operations | **Pass** |
+| 3 | New tests at least the contract's target | 481 -> 483, +2 | **Pass** |
+| 4 | A flow test exercises the chain end to end | The sweep is itself the end-to-end walk: it registers, authenticates, creates the fixture each operation needs and probes the published status | **Pass** |
+| 5 | Ownership: the second account gets 404 | This chain asserts the published contract; the ownership half is `D5.H2` | **N/A** |
+| 6 | Docs updated | `docs/api/README.md` and the new `docs/api/frontend-handover.md` in the same commit | **Pass** |
+| 7 | Seeder updated for every new table | No table | **N/A** |
+| 8 | OpenAPI changed only as intended | No operation added; 51 still asserted in both directions | **Pass** |
+| 9 | No forbidden construct added | Test-only change: no `allow`, no `ignore`, no `unsafe`, no `unwrap` outside a test | **Pass** |
+| 10 | code-reviewer pass on the chain diff | **Not run.** | **Fail** |
+| 11 | quality-gate pass on the evidence | **Not run for this chain**; the whole-run verdict is `ATOM-REVIEW-20261024-011`. | **Fail** |
+
+**Decision: ADVANCE on rows 1-9.** The sweep is the first case that walks the
+published surface rather than one feature's slice of it; a handler that answers
+the wrong status for any of the 51 operations now fails.
+
+### D5.H2 - The ownership sweep, 2026-10-24
+
+Same commit `c2f9bad`; `no_operation_reaches_another_accounts_row`. Agents:
+`test-engineer`, `docs`.
+
+| # | Criterion | Evidence | Pass |
+| - | --------- | -------- | ---- |
+| 1 | All six gates green | As `D5.H1`: the `ATOM-REVIEW-20261024-011` run, six gates `0`, 483 tests | **Pass** |
+| 2 | Every acceptance criterion maps to a test | `no_operation_reaches_another_accounts_row` probes every published operation with a second account and asserts `404` where the operation addresses a row, and an empty page where the collection answers `200` | **Pass** |
+| 3 | New tests at least the contract's target | Included in the +2 of `D5.H1` | **Pass** |
+| 4 | A flow test exercises the chain end to end | The sweep creates the first account's rows through the API, then replays each operation as the second account | **Pass** |
+| 5 | Ownership: the second account gets 404 | The whole test is that criterion; the collection cases assert `200` with `total: 0` rather than a false `404` | **Pass** |
+| 6 | Docs updated | `docs/api/README.md` names both sweeps; `docs/api/frontend-handover.md` records what a client sees | **Pass** |
+| 7 | Seeder updated for every new table | No table | **N/A** |
+| 8 | OpenAPI changed only as intended | Unchanged; the sweep reads the document it asserts against | **Pass** |
+| 9 | No forbidden construct added | Test-only change; no `allow`, no `ignore`, no `unsafe` | **Pass** |
+| 10 | code-reviewer pass on the chain diff | **Not run.** | **Fail** |
+| 11 | quality-gate pass on the evidence | **Not run for this chain**; the whole-run verdict is `ATOM-REVIEW-20261024-011`. | **Fail** |
+
+**Decision: ADVANCE on rows 1-9.** The sweep distinguishes "the collection
+legitimately returns an empty page" from "the row must be invisible", which is
+the distinction a naive 404 assertion gets wrong.
+
+### D5.H4 - The frontend handover, 2026-10-24
+
+Commit `c2f9bad`; `docs/api/frontend-handover.md`. Agents: `docs`, `architect`.
+
+| # | Criterion | Evidence | Pass |
+| - | --------- | -------- | ---- |
+| 1 | All six gates green | Documents-only addition in the `483`-test tree; `atom-docs` and `--strict` are `0` in `ATOM-REVIEW-20261024-011` | **Pass** |
+| 2 | Every acceptance criterion maps to a test | Not applicable: the deliverable is a document | **N/A** |
+| 3 | New tests at least the contract's target | None | **N/A** |
+| 4 | A flow test exercises the chain end to end | Not applicable: no code | **N/A** |
+| 5 | Ownership: the second account gets 404 | Documented as the client-visible rule, not asserted here | **N/A** |
+| 6 | Docs updated | `docs/api/frontend-handover.md` (auth flow, error contract, pagination, money, list filters, both stage machines, ML degradation, versioning, five surprises), indexed from `docs/api/README.md` | **Pass** |
+| 7 | Seeder updated for every new table | No table | **N/A** |
+| 8 | OpenAPI changed only as intended | Unchanged | **Pass** |
+| 9 | No forbidden construct added | Documents only | **Pass** |
+| 10 | code-reviewer pass on the chain diff | **Not run.** | **Fail** |
+| 11 | quality-gate pass on the evidence | **Not run for this chain**; the whole-run verdict is `ATOM-REVIEW-20261024-011`. | **Fail** |
+
+**Decision: ADVANCE on rows 1-9.** The handover document describes the
+degradation rule as a client contract, which is what makes `ML-R02`'s gap
+visible to a frontend rather than only to this repository.
+
 ## Parked
 
 | Item | Blocker | Next step |
@@ -1237,43 +1443,58 @@ One wave, three chains: they share the DTO/repository shape, the ownership predi
 
 ## Resume
 
-**State at the end of this session: `D0` is `done` at `906d6dc`; `D1` at `ec41105` + `f88733c`;
-`D2.S1` at `5688de7` + `b635cc7`; `D2.R1` at `908166b`; `D2.R2` at `6595c21`; `D2.R3`/`R4` at
-`93fb2f0`; `D2.R5` at `02c5489`; `D2.R6` and the review repairs at `7bacf8f`, `7e920c5`
-and `a9b2db1`. The reimbursement feature is complete: twelve operations, 34 on
-the published surface, **302 tests**, six gates green.**
+**State at the end of this session.** HEAD `58f9532`, branch `run/day-1`.
+**483 tests pass on Windows** (485 on CI, where the two unix-only `shutdown`
+tests run), all six gates are `0`, and `migrations/` ends at `0006`. The working
+tree carries one uncommitted change: the two
+`#[allow(clippy::cast_possible_truncation)]` attributes are removed from
+`src/ml/burn_embedder.rs` (`B5` of the gate). The removal itself has not been
+gated yet - run `pwsh ./scripts/gate.ps1`.
+
 `D0` closed the Phase 1 leftovers the audit had deferred: the version prefix is
 declared once and mounted from that constant, the route table and the OpenAPI
 document are asserted against each other in both directions, each list endpoint
-parses its query string once, and the documentation checker now compares
-integer and boolean setting **values** against both operator reference tables —
-which is what caught `app.limits.shutdown_grace_seconds` documented as `100`
-against a file value of `10`.
+parses its query string once, and the documentation checker compares integer and
+boolean setting **values** against both operator reference tables - which is what
+caught `app.limits.shutdown_grace_seconds` documented as `100` against a file
+value of `10`. `D1` committed the Phase 2 intake: `project-truth.md` §18, three
+feature directories, three ADRs, the proposed schema and the seeding
+specification. `D2` delivered the seeder and the twelve reimbursement
+operations, and `D3` the fourteen job-application operations. Their per-chain
+scorecards are in `## Checkpoints`.
 
-`D1` accepted the Phase 2 requirements, wrote three feature directories and
-three ADRs, proposed the schema, and specified the seeder. Two independent
-reviews then found 11 blocking documentation contradictions and 6 conditions on
-the seeder guards; all are fixed, and the guard rules are contract amendments
-`A-C-S1-5`…`A-C-S1-10`.
+`D4` delivered local machine learning. `M1` is the spike at `bfd1288`, corrected
+in `c28b353`; `M2` the finalised `ADR-0008` at `a4d33a3`; `M3`-`M5` the `0006`
+migration, the module, the three operations, the degradation rule and the
+seeder's `--with-embeddings` at `ba198ff`; `M6` the close-out at `ba91008`. The
+surface is 51 operations and the close-out tree is 481 tests. **`ML-R02` is not
+met**: no Burn encoder produces a vector, so `ml.backend = flex` selects the
+disabled embedder and the scored modes degrade. The feature is `Implemented`,
+not `Verified`.
 
-`D2.S1` built `atom-seed`. **213 tests pass** on this Windows host (215 on CI,
-where the two unix-only shutdown tests run), all six gates are green at
-`5688de7`, and the documented setup was exercised for real: `createdb atom_dev`,
-`cargo run --bin atom-seed -- --profile dev --reset` → 2 users, 200 notes, 8
-projects, 60 tasks, five verification checks passed, two resets byte-identical
-apart from the deliberately fresh Argon2 salt.
+`D5` is **in progress**: `H1` (the whole-surface contract sweep), `H2` (the
+ownership sweep) and `H4` (`docs/api/frontend-handover.md`) are `c2f9bad`, which
+takes the suite to 483. `H3` (performance), `H5` (the final review) and `H6`
+(the close) did not run, and `D5.S5` (the seeder CI smoke) is still pending.
 
-**The first command of the next session** is the review these two chains are
-missing, not new work:
+**The first executable quality-gate verdict is recorded.**
+`ATOM-REVIEW-20261024-011` returned **FAIL on documentation**, with all six gates
+at `0` and 483 tests, and five blocking findings (`B1`-`B5`). `B5` is fixed in
+`src/ml/burn_embedder.rs`; `B1`-`B4` and the required corrections `R1`-`R4` are
+fixed in the documents changed with this record. **No re-gate is recorded**, so
+nothing moves to `Verified` and `ML-R02` stays unmet.
+
+**The first command of the next session** is the re-gate, then the remaining
+`D5` chains:
 
 ```powershell
-git diff 775dc57..HEAD -- src/bin/atom-seed.rs tests/seeder.rs
-git diff 775dc57..HEAD -- docs/features docs/decisions
+pwsh ./scripts/gate.ps1
 ```
 
-then `code-reviewer` over both, and `quality-gate` over the evidence in
-`## Checkpoints`. `D2.R1` (the `0004` migration and the reimbursements types)
-may start in parallel, because it touches no file either review reads.
+If it is green, run `code-reviewer` over `git diff 58f9532..HEAD` and
+`quality-gate` over the repairs. Then `D5.H3` (performance), `D5.H5` (the final
+review) and `D5.H6`/`D5.S5` (the close and the seeder CI smoke) are the only
+queue rows left.
 
 **The unattended automation is gone, deliberately.** `scripts/run-phase-2-overnight.ps1`,
 `scripts/watchdog-phase-2.ps1` and `scripts/watch-phase-2.ps1` were deleted on
@@ -1286,43 +1507,6 @@ session removed the sentinel, which is the collision the sentinel existed to
 prevent. Nothing in `docs/` links to the deleted scripts, so the documentation
 gate is unaffected; `scripts/check-docs.*`, `scripts/create-test-database.sh` and
 `scripts/validate-opencode.*` remain.
-
-`D0` closed the Phase 1 leftovers the audit had deferred: the version prefix is
-declared once and mounted from that constant, the route table and the OpenAPI
-document are asserted against each other in both directions, each list endpoint
-parses its query string once, and the documentation checker now compares
-integer and boolean setting **values** against both operator reference tables —
-which is what caught `app.limits.shutdown_grace_seconds` documented as `100`
-against a file value of `10`. 191 tests pass on this Windows host (193 on CI,
-where the two unix-only shutdown tests run). The scorecard is in
-`## Checkpoints`; the six exit codes are in `## Evidence`.
-
-`D1` committed the intake: `project-truth.md` §18, three feature directories,
-three ADRs, the proposed schema and the seeding specification. It adds no code,
-and nothing in it is `Implemented` or `Verified`.
-
-**The first command of the next session** is the review that `D1` is missing,
-not new work:
-
-```powershell
-git status --short
-cargo run --quiet --bin atom-docs -- --strict
-```
-
-then `code-reviewer` and `quality-gate` over `git diff 775dc57..ec41105`. Until
-that verdict exists, `D2` must not start: every `D2` chain builds on the
-reimbursements requirements and the seeding specification, and building on an
-unreviewed specification is how a wrong contract becomes a wrong module.
-
-**What the next session will find uncommitted.** A concurrent session began
-`D2.S1` while this one was finishing: `src/bin/atom-seed.rs`, a `[[bin]]` stanza
-in `Cargo.toml`, and edits to `.env.example`, `ci.yml`, `Makefile`,
-`docker-compose.yml`, `README.md`, `docs/architecture/**` and
-`docs/security/secure-development.md`. It was left untouched, because it has run
-no gate and because `atom-seed.rs` and its `Cargo.toml` stanza must be committed
-together. Decide deliberately whether that work is kept and finished or dropped;
-do not `git checkout --` over it. A `STOP-RUN` sentinel is in the repository root
-and was not created by this session.
 
 **Two things this run must not repeat.** First, `D0` was declared `in progress`
 by four consecutive sessions and finished by none; the queue row is the state,

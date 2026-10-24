@@ -220,7 +220,6 @@ impl BurnEmbedder {
                 hash ^= u64::from(*byte);
                 hash = hash.wrapping_mul(0x0000_0100_0000_01B3);
             }
-            #[allow(clippy::cast_possible_truncation)]
             let id = (hash % self.vocab_size as u64) as i32;
             ids.push(id);
         }
@@ -306,8 +305,6 @@ fn read_header(file: &mut File) -> Result<(HashMap<String, TensorInfo>, u64), Ml
             message: format!("implausible SafeTensors header length: {header_len}"),
         });
     }
-
-    #[allow(clippy::cast_possible_truncation)]
     let mut buffer = vec![0u8; header_len as usize];
     file.read_exact(&mut buffer)
         .map_err(|error| MlError::Model {

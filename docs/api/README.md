@@ -1,7 +1,7 @@
 # ATOM API
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-25
 > **Owner:** maintained by the `docs` agent
 
 This directory holds the HTTP contract of the ATOM API. It describes the
@@ -38,9 +38,11 @@ disagree in either direction.
 **The three machine-learning operations are published.** They answer, and they
 degrade as their contract says: a scored search returns lexical results with
 `200` when `ml.enabled` is `false` (the default), a match and a reindex return
-`409`. No run of their suite is recorded, so the feature is `Implemented` and
-not `Verified`; see [`../features/ml/status.md`](../features/ml/status.md) and
-[`../features/ml/testing.md`](../features/ml/testing.md).
+`409`. The suite ran green: 40 cases in `tests/ml_api.rs` pass in the run
+recorded in [`ATOM-CHANGE-20261024-011`](../engineering/change-log.md). The
+feature is `Implemented` and not `Verified`, because `ML-R02` — an embedding
+produced by Burn — is unmet; see [`../features/ml/status.md`](../features/ml/status.md)
+and [`../features/ml/testing.md`](../features/ml/testing.md).
 
 ## 1. Where the OpenAPI document lives
 

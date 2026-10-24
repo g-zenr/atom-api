@@ -1,7 +1,7 @@
 # Local machine learning — API
 
 > **Status:** Implemented
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-25
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-ML-001`](specification.md)
 
@@ -24,10 +24,10 @@ tree on 2026-10-24:
 | `src/ml/handlers.rs`, `service.rs`, `dto.rs`, `repository.rs` | Present |
 | The `embeddings` table | Present (migration `0006`) |
 
-What has **not** happened is a run. No case in [`testing.md`](testing.md) has
-been executed, so the answers below are what the code implements and asserts,
-not an observation. The evidence for the status, and the three gaps that keep it
-out of `Verified`, are in [status.md](status.md) §1.3.
+What has happened is a run: the 40 cases in [`testing.md`](testing.md) §2 pass,
+and the three operations below were observed against `atom_dev` in the manual
+degradation transcript. The evidence for the status, and the one requirement
+that keeps it out of `Verified`, are in [status.md](status.md) §1.3.
 
 ## 1. Endpoint summary
 

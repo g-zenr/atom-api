@@ -1,7 +1,7 @@
 # Local machine learning — specification
 
-> **Status:** Accepted
-> **Last updated:** 2026-10-24
+> **Status:** Implemented
+> **Last updated:** 2026-10-25
 > **Owner:** maintained by the `docs` agent
 > **Feature identifier:** `ATOM-FEAT-ML-001`
 > **Feature name:** Local embeddings, hybrid note search and application matching
@@ -30,11 +30,13 @@ is stated in §9 rather than hidden.
 
 ## 2. Status
 
-**Accepted, not built.** The requirements are recorded in
+**Implemented, not `Verified`.** The requirements are recorded in
 [`project-truth.md`](../../project-truth.md) §18.3 as `ML-R01`…`R09` and agreed
-on 2026-10-24. No code, migration or test for this feature exists, so the
-feature is **not** `Implemented` and **not** `Verified`. See
-[status.md](status.md).
+on 2026-10-24. Migration `0006_embeddings.sql`, the module `src/ml/`, the three
+published operations and the suite exist, and the suite is recorded green in
+`ATOM-CHANGE-20261024-011`. The feature is not `Verified` because `ML-R02` is
+unmet: no Burn encoder produces an embedding. See
+[status.md](status.md) §1.3-§1.4.
 
 The model rests on assumption **A4** in
 [`../../engineering/runs/chain/plan.md`](../../engineering/runs/chain/plan.md) §3,

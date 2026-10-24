@@ -1,7 +1,7 @@
 # Database schema
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-25
 > **Owner:** maintained by the `database` agent
 
 The complete Phase 1 schema of the ATOM database, table by table, as it is
@@ -10,9 +10,9 @@ are created by `migrations/0004_expense_claims.sql` and are served by the twelve
 claim operations of chains `R2`-`R4`; its next three are created by
 `migrations/0005_job_applications.sql` and are served by the fourteen
 operations of chains `J2`-`J4`; and its last, `embeddings`, is created by
-`migrations/0006_embeddings.sql`, for which chains `M3`-`M6` still owe the
-service, the repository statements and the three routes. No table in §11 is
-proposed any more, and `migrations/` ends at `0006`.
+`migrations/0006_embeddings.sql` and is served by the three machine-learning
+operations built in chains `M3`-`M6`. No table in §11 is proposed any more, and
+`migrations/` ends at `0006`.
 
 The conventions the schema follows are in
 [`../project-truth.md`](../project-truth.md) §12. The rules for changing it
@@ -46,7 +46,7 @@ users ──1:N──► refresh_sessions
 | `companies` | `migrations/0005_job_applications.sql` | One row per employer (§11.3). Served by `J2`'s five operations. |
 | `job_applications` | `migrations/0005_job_applications.sql` | One row per role being pursued at a company (§11.4). Served by the five application operations of `J3`. |
 | `application_events` | `migrations/0005_job_applications.sql` | One row per dated entry in an application's timeline (§11.5). Served by the four event operations of `J4`. |
-| `embeddings` | `migrations/0006_embeddings.sql` | One row per source, model and owner (§11.6). Written and read by chains `M3`-`M6`; no statement uses it yet. |
+| `embeddings` | `migrations/0006_embeddings.sql` | One row per source, model and owner (§11.6). Read and written by `src/ml/repository.rs` and purged by the delete statement of each source. |
 
 Two enum types are created by `migrations/0003_projects_and_tasks.sql`:
 `task_status` and `task_priority`. `migrations/0004_expense_claims.sql` adds a
@@ -413,15 +413,15 @@ written with that in mind, and the policy in
 >
 > `migrations/0006_embeddings.sql` creates `embeddings` with the three `CHECK`s
 > and the two indexes named in §11.6, and nothing else: no enum type, no
-> extension, and no foreign key on `source_id`. The table's Rust side does not
-> exist yet — `src/ml/` holds the `Embedder` surface only — so chains `M3`-`M6`
-> owe `src/ml/repository.rs`, the service, the three routes, and the
-> delete-and-purge statements in `src/notes/repository.rs` and
-> `src/job_applications/repository.rs` that compensate for the absent key
-> (§11.6). The migration was applied from `0001` to a clean scratch database
-> and its constraints and indexes were exercised; the access-path measurements
-> quoted in §11.6 are recorded evidence for those two indexes, not a claim that
-> a running endpoint uses them today.
+> extension, and no foreign key on `source_id`. The table's Rust side exists:
+> `src/ml/repository.rs` holds the statements that read and write it,
+> `src/ml/service.rs` and `src/ml/handlers.rs` serve the three routes, and the
+> delete statements in `src/notes/repository.rs` and
+> `src/job_applications/repository.rs` purge a source's embeddings in the same
+> statement that deletes it (§11.6). The migration was applied from `0001` to a
+> clean scratch database and its constraints and indexes were exercised; the
+> access-path measurements quoted in §11.6 are recorded evidence for those two
+> indexes, not a claim that a running endpoint uses them today.
 
 Six provisional assumptions underlie this section: **A1** (a claim has one
 currency and there is no FX), **A2** (a receipt is a reference), **A3**

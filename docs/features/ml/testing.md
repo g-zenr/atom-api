@@ -1,7 +1,7 @@
 # Local machine learning — testing
 
 > **Status:** Implemented
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-25
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-ML-001`](specification.md)
 
@@ -12,24 +12,30 @@ is in [`../../testing/strategy.md`](../../testing/strategy.md) §7.
 
 ## 0. What is on disk today
 
-Read from the working tree on 2026-10-24. The committed state is `a4d33a3`.
+Read from the working tree on 2026-10-25. The feature is committed: the spike at
+`bfd1288`, the finalised ADR at `a4d33a3`, the module, schema, three operations
+and seeder flag at `ba198ff`, and the close-out at `ba91008`. The only
+uncommitted change to the feature is the removal of two
+`#[allow(clippy::cast_possible_truncation)]` attributes in
+`src/ml/burn_embedder.rs`.
 
 | Layer | File | On disk | ML cases |
 | ----- | ---- | ------- | -------- |
 | Integration | `tests/ml_api.rs` | **Yes** — 40 cases, `#![cfg(feature = "ml")]` | 40 |
 | Test harness | `tests/common/mod.rs` | **Yes** — `test_state_with_deterministic_ml`, `test_state_with_ml_disabled`, `test_state_with_a_missing_model`, `test_state_with_candidate_limit` | support only |
-| Unit, the module | `src/ml/*.rs` | The files exist; **no test does** — no `#[test]`, no `#[cfg(test)]` | 0 |
-| Unit, the configuration | `src/config/tests.rs` | **Seven cases** exist: the defaults, the environment override, the backend vocabulary, the candidate-limit floor, the dimension, the timeout ceiling and the candidate-limit relation to the page maximum. **None has run.** | 7 |
-| Seeder | `tests/seeder.rs` | **One case**: `the_seeder_writes_embeddings_only_with_the_flag`. The seeder binary has **no `--with-embeddings` flag**, so the case cannot pass. | 1 |
+| Unit, the module | `src/ml/*.rs` | **Yes** — 39 cases across `deterministic.rs`, `dto.rs`, `embedder.rs`, `hash_vector.rs` and `service.rs` | 39 |
+| Unit, the configuration | `src/config/tests.rs` | **Seven ML cases** exist: the defaults, the environment override, the backend vocabulary, the candidate-limit floor, the dimension, the timeout ceiling and the candidate-limit relation to the page maximum. **All seven pass.** | 7 |
+| Seeder | `tests/seeder.rs` | **20 cases**, including `the_seeder_writes_embeddings_only_with_the_flag`. `src/bin/atom-seed.rs` implements `--with-embeddings`. | 20, one ML-specific |
 | Contract | `tests/openapi_contract.rs` | Pins the surface at **51**; the route table and the document now describe the same 51. | 0 ML cases |
 | Manual | this document, §5 | **Not run** | — |
 
-**No case has been run, and none has passed.** The suite is written; the run is
-missing. `tests/ml_api.rs` was written before the handlers, which is the rule
-([`../../testing/strategy.md`](../../testing/strategy.md) §7.4); the three
-operations are now mounted, so the endpoint cases can execute — they simply have
-not. The seeder case cannot pass until the flag exists, and the module's unit
-cases (§3.2) have not been written. Nothing in this feature is `Verified`.
+**Every automated case passes.** The 40 `ml_api` cases, the 39 module cases, the
+seven configuration cases and the seeder case passed in the runs recorded in
+[status.md](status.md) §1.5 and `ATOM-CHANGE-20261024-011`. The first executable
+`quality-gate` run over `D0`–`D5` measured the six gates at `0` and the full
+suite at **483 on Windows** (`ATOM-REVIEW-20261024-011`). What no case proves is
+a real model: `ML-R02` is unmet, so every executed path uses `Deterministic`, and
+the quality run in §5 has not happened. Nothing in this feature is `Verified`.
 
 ## 1. The rule that makes a test evidence
 
@@ -143,12 +149,12 @@ is §5, and it is unmeasured.
 
 ## 3. Unit tests
 
-**Seven configuration cases are on disk and none has run.** `src/ml/` has **no
-`#[test]` at all**, so every case in the second table is still to be written —
-including the one for the start-up selection rule, which is the only place the
-`Disabled`/`Deterministic`/`flex` decision is made.
+**39 cases in `src/ml/` and seven for the configuration are on disk and pass.**
+The start-up selection rule — the only place the
+`Disabled`/`Deterministic`/`flex` decision is made — is covered in
+`embedder.rs`.
 
-### 3.1 On disk, not run — `src/config/tests.rs`
+### 3.1 On disk and passing — `src/config/tests.rs`
 
 | Case | Rule it protects |
 | ---- | ---------------- |
@@ -160,7 +166,7 @@ including the one for the start-up selection rule, which is the only place the
 | `an_ml_timeout_above_the_request_timeout_is_refused` | The inference budget may not exceed `app.limits.request_timeout_seconds`. |
 | `the_candidate_limit_must_be_at_least_the_max_page_size` | A candidate limit below `api.pagination.max_limit` is refused, because a candidate set smaller than one page makes page two impossible. |
 
-### 3.2 Still to be written — `src/ml/`
+### 3.2 On disk and passing — `src/ml/`
 
 | File | Case | Rule it protects |
 | ---- | ---- | ---------------- |
@@ -179,8 +185,8 @@ including the one for the start-up selection rule, which is the only place the
 
 | Case | State | Rule it protects |
 | ---- | ----- | ---------------- |
-| `the_seeder_writes_embeddings_only_with_the_flag` | **On disk in `tests/seeder.rs`. Cannot pass:** `src/bin/atom-seed.rs` has no `--with-embeddings` flag. | Without the flag no `embeddings` row is written; with it every seeded note and application gets one unit vector from `Deterministic`, never a network call and never the Burn path. |
-| `a_reset_run_deletes_the_embeddings_too` | **Not on disk.** | The `embeddings` row of the seeder's delete order starts executing, so `--reset` leaves no orphan. |
+| `the_seeder_writes_embeddings_only_with_the_flag` | **On disk in `tests/seeder.rs` and passing.** | Without the flag no `embeddings` row is written; with it every seeded note and application gets one unit vector from `Deterministic`, never a network call and never the Burn path. |
+| `a_reset_run_deletes_the_embeddings_too` | **Not on disk.** The `DELETE FROM embeddings` statement exists in the seeder's reset order, but no case asserts that purge specifically. | The `embeddings` row of the seeder's delete order starts executing, so `--reset` leaves no orphan. |
 
 The seeder constructs `Deterministic` directly rather than reading
 `ml.backend`, which is what lets a seed run need no model file. The contract is
@@ -203,7 +209,7 @@ numbers do not belong there: they measured a lookup and a projection.
 
 | Gap | Why |
 | --- | --- |
-| **Any passing run.** | No case in this feature has been executed. The operations are mounted, so the endpoint cases can run; they have not. |
+| **A real-model run.** | No Burn encoder exists, so no case and no manual run has embedded through a model; every executed case uses `Deterministic`. `ML-R02` is unmet. |
 | **The Burn model's output, in CI.** | The weights are not in the repository, and downloading them in CI would break the no-outbound rule. `Deterministic` covers the plumbing. **No run of the Burn path has ever produced a vector.** |
 | **Retrieval quality of a real model.** | It is the manual run in §5, recorded rather than asserted. A quality threshold would be a product decision nobody has made. **It has not been measured.** |
 | **An inference timeout through the API.** | It needs a fourth `Embedder` (forbidden by `ML-R03`) or a real model slow enough to exceed the budget. The mapping is unit-tested; the end-to-end `408` on a match stays a gap. |
@@ -211,10 +217,10 @@ numbers do not belong there: they measured a lookup and a projection.
 | **A live `database_error`.** | Fault injection; the mapping is unit-tested in `src/`. |
 | **A cancellation of a blocking inference.** | Tokio cannot cancel `spawn_blocking`; a case would assert a property of the runtime rather than of ATOM. |
 | **Two models coexisting across a reindex.** | Specified in [`architecture.md`](architecture.md) §11; a case needs a second deterministic model id. |
-| **The seeder's reset against embeddings.** | The flag does not exist, so the delete order cannot be exercised. |
+| **The seeder's reset against embeddings.** | `--reset` purges `embeddings` (`DELETE FROM embeddings WHERE user_id = ANY($1)`), but no case asserts that purge specifically; `a_reset_deletes_rows_owned_by_the_seeded_accounts` covers the owned rows generically. |
 
-The first four rows are the ones a reader should weigh before trusting this
-feature.
+The first three rows and concurrency are the ones a reader should weigh before
+trusting this feature.
 
 ## 7. The error codes
 

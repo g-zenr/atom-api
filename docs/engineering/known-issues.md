@@ -686,7 +686,8 @@ test `a_body_limit_above_the_reader_ceiling_is_refused`.
 | `KI-019` | The shutdown drain has a test that has not run on a unix host | Closed | Low |
 | `KI-020` | The seeder's database-name guard refused the repository's own default database | Closed | Medium |
 | `KI-021` | The compose volume was mounted where PostgreSQL 18 no longer keeps its data | Closed | High |
-| `KI-023` | The quality gate cannot execute a gate, so no chain has a verdict | Open | High |
+| `KI-023` | The quality gate could not execute a gate, so no chain had a verdict | Closed | High |
+
 ### KI-019 — The shutdown drain had a test that had not run on a unix host
 
 **Status:** Closed · **Severity:** Low · **Closed:** 2026-10-24
@@ -929,9 +930,9 @@ of the feature, not the dependency.
 
 ---
 
-### KI-023 - The quality gate cannot execute a gate, so no chain has ever had a verdict
+### KI-023 - The quality gate could not execute a gate, so no chain had a verdict
 
-**Status:** Open - **Severity:** High - **Recorded:** 2026-10-25
+**Status:** Closed - **Severity:** High - **Recorded:** 2026-10-25 - **Closed:** 2026-10-25
 
 **Description.** `.opencode/agents/quality-gate.md` denies `shell` with a
 catch-all and then allows a short list: `git status *`, `git diff *`,
@@ -943,13 +944,13 @@ not match. `cargo run` is absent entirely, so the documentation checker cannot
 be run at all, and `psql` and `gh` are absent, so no database or CI evidence can
 be gathered.
 
-**Impact.** Every `quality-gate` attempt in the Phase 2 run reported all six
-gates as **not run**. To its credit each one said so rather than recording a
-pass, and two of them still found real defects by reading the tree. But a gate
-that cannot run a gate is not a gate, and the consequence is visible in the
-record: **no chain in the run has a verdict**, so nothing is `Verified`, and
-three features sit at `Implemented` with 483 passing tests and no independent
-evidence.
+**Impact.** Every `quality-gate` attempt in the Phase 2 run before `58f9532`
+reported all six gates as **not run**. To its credit each one said so rather than
+recording a pass, and two of them still found real defects by reading the tree.
+But a gate that cannot run a gate is not a gate, and the consequence was visible
+in the record at the time: **no chain in the run had a verdict**, so nothing was
+`Verified`, and three features sat at `Implemented` with 483 passing tests and no
+independent evidence.
 
 **Workaround used in the run.** The orchestrator ran the six gates itself and
 recorded the raw exit codes in the ledger. That is honest but it is
@@ -970,6 +971,15 @@ self-verification, which is exactly what the gate exists to avoid.
 
 **Not a documentation defect.** Nothing in `docs/` is wrong because of this; what
 is missing is evidence, and no amount of prose substitutes for it.
+
+**Resolution (2026-10-25).** The recommended fix 3 was implemented in `58f9532`:
+[`scripts/gate.ps1`](../../scripts/gate.ps1) runs all six gates from one
+read-only entry point, sets `TEST_DATABASE_URL` itself, refuses a connection
+string whose database name lacks `test`, and exits non-zero if any gate fails.
+The `quality-gate` role allow-lists exactly that script. The first executable
+verdict is `ATOM-REVIEW-20261024-011`: six gates at `0`, 483 tests, **FAIL on
+documentation** with five blocking findings, all now repaired. `KI-023` is
+closed; the remaining gap is the missing re-gate, not the mechanism.
 
 **Related.** [`.opencode/agents/quality-gate.md`](../../.opencode/agents/quality-gate.md),
 [`../testing/verification-policy.md`](../testing/verification-policy.md),

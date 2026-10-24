@@ -1,7 +1,7 @@
 # ATOM — module boundaries
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-25
 > **Owner:** maintained by the `architect` agent
 
 What each module owns, what it may depend on, and which invariant it is
@@ -157,13 +157,15 @@ Source: `src/tasks/handlers.rs`, `src/tasks/service.rs`,
 > `application_events` with their constraints and indexes. All fourteen
 > published operations are served, and `tests/jobs_schema.rs`,
 > `tests/job_applications_api.rs` and `tests/job_applications_flow.rs` prove the
-> constraints and the behaviour. There is no `src/ml/` and no
-> `migrations/0006`; `ml` is `Accepted`, not built.
+> constraints and the behaviour. `migrations/0006_embeddings.sql` creates
+> `embeddings`; `src/ml/` serves the three published operations, and `tests/ml_api.rs`
+> proves them. `ml` is `Implemented`, not `Verified`: `ML-R02` is unmet because no
+> Burn encoder produces an embedding.
 
 **What "every module" means from here.** §1–§7 describe every module that
-**exists**. From this section on, the phrase means "every module that exists
-plus the one still planned, `ml`, listed here"; a module that appears in neither
-place is not covered by this document.
+**exists**. From this section on, the phrase means "every Phase 2 module",
+including `ml`; a module that appears in neither place is not covered by this
+document.
 
 The heading is unnumbered on purpose: `§7` and `§8` are cited by number from
 [`../decisions/ADR-0006-configuration-source-of-truth.md`](../decisions/ADR-0006-configuration-source-of-truth.md)
@@ -193,7 +195,7 @@ users ──┬──► reimbursements ──(optional, SET NULL)──► proj
 | ------ | ------ | ------ | -------------------- | ------------- |
 | `reimbursements` | `Implemented` | `src/reimbursements/` (six modules) | `expense_claims`, `expense_items` | `error` |
 | `job-applications` | `Implemented` | `src/job_applications/` (six modules) | `companies`, `job_applications`, `application_events` | `error`, `pagination`, `helpers`, `money`, `config`, `api`, `tasks` (read-only, through `projects`) |
-| `ml` | `Accepted`, planned | `src/ml/` | `embeddings` | `error`, `pagination`, `helpers`, `config`, `notes` (repository), `job_applications` (repository), `burn` |
+| `ml` | `Implemented` | `src/ml/` (ten modules) | `embeddings` | `error`, `pagination`, `helpers`, `config`, `notes` (repository), `job_applications` (repository), `burn` |
 
 **The arrow into `ml` is one-way.** No module may depend on `ml`: no module
 calls `MlService`, holds an `Arc<dyn Embedder>`, imports the embedder files or

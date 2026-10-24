@@ -1,7 +1,7 @@
 # ATOM documentation
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-25
 > **Owner:** maintained by the `docs` agent
 
 This directory is ATOM's knowledge base. It is written so that a contributor
@@ -84,7 +84,7 @@ A feature is never `Verified` because its code exists or compiles.
 | -------- | -------- |
 | [`architecture/README.md`](architecture/README.md) | Index and the rules for architecture documentation. |
 | [`architecture/system-overview.md`](architecture/system-overview.md) | The system in one page: components, runtime shape, deployment topology. |
-| [`architecture/module-boundaries.md`](architecture/module-boundaries.md) | Every module that exists, including the two built Phase 2 modules, plus the one still planned (`ml`): responsibility, public interface, dependencies, data ownership. |
+| [`architecture/module-boundaries.md`](architecture/module-boundaries.md) | Every module that exists, including the three built Phase 2 modules (`reimbursements`, `job_applications` and `ml`): responsibility, public interface, dependencies, data ownership. |
 | [`architecture/request-lifecycle.md`](architecture/request-lifecycle.md) | From socket to SQL and back, including middleware order and error mapping. |
 | [`architecture/data-architecture.md`](architecture/data-architecture.md) | The schema, the ownership model, search and indexing. |
 | [`architecture/security-architecture.md`](architecture/security-architecture.md) | Trust boundaries, the authentication boundary, the authorization model. |
@@ -116,8 +116,8 @@ A feature is never `Verified` because its code exists or compiles.
 | [`features/projects/`](features/projects/) | Projects, their lifecycle, and what happens to their tasks. |
 | [`features/tasks/`](features/tasks/) | Tasks, status, priority, ordering, filtering. |
 | [`features/reimbursements/`](features/reimbursements/) | Expense claims, line items, money and the claim lifecycle. `Implemented`: all twelve published operations, the schema and the tests exist; `Verified` waits on the chain reviews. |
-| [`features/job-applications/`](features/job-applications/) | Companies, applications, stages and events. `Implemented`: migration `0005`, the six-module `src/job_applications/` and the fourteen operations exist; `Verified` waits on a re-review and a gate run after the review's fixes. |
-| [`features/ml/`](features/ml/) | Local embeddings, hybrid search and match ranking. `Implemented`: the three operations, the schema and the suite exist; `ML-R02` is not met and no run is recorded. |
+| [`features/job-applications/`](features/job-applications/) | Companies, applications, stages and events. `Implemented`: migration `0005`, the six-module `src/job_applications/` and the fourteen operations exist; `Verified` waits on a re-review and a clean re-gate after the review's fixes. |
+| [`features/ml/`](features/ml/) | Local embeddings, hybrid search and match ranking. `Implemented`: the three operations, the schema and the suite exist; the suite is recorded green in `ATOM-CHANGE-20261024-011`, and `ML-R02` is not met, so nothing is `Verified`. |
 
 Each feature directory contains the same five documents:
 

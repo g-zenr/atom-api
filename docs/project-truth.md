@@ -1,7 +1,7 @@
 # ATOM — project truth
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-25
 > **Owner:** product owner, maintained by the `docs` agent
 > **Authority:** this file defines ATOM's *agreed product requirements*. Source
 > code does not change it. See [`README.md`](README.md) for the full authority
@@ -76,7 +76,7 @@ later phase depends on:
 **Phase 2 — the personal-workspace layer.** It is defined in
 [`roadmap.md`](roadmap.md) §2 and its requirements are in §18 of this file.
 Phase 2 is **partly delivered**: the reimbursement and job application
-endpoints exist (§17), the machine-learning endpoints do not. Its delivery
+endpoints exist (§17), and the machine-learning endpoints exist too. Its delivery
 builds on the Phase 1 API, so it started after the Phase 1 close-out, but its
 requirements are agreed independently of it.
 
@@ -466,7 +466,7 @@ blocks Phase 1 work that does not depend on the answer.
 | Rust/Axum modular monolith | Implemented | `src/`, `Cargo.toml` |
 | Typed configuration with start-up validation | Implemented | `src/config/` |
 | Central error contract | Implemented | `src/error.rs`, `src/api/extract.rs` |
-| SQLx migrations | Implemented | `migrations/0001..0005` |
+| SQLx migrations | Implemented | `migrations/0001..0006` |
 | User registration, normalization, uniqueness | Verified | `tests/auth_api.rs` |
 | Argon2id hashing and password policy | Verified | `src/auth/password.rs`, `src/users/service.rs` |
 | Access tokens, issuer/audience validation | Verified | `src/auth/token.rs`, `tests/auth_api.rs` |
@@ -482,10 +482,10 @@ blocks Phase 1 work that does not depend on the answer.
 | Request timeout and body limit | Verified | `src/api/mod.rs`, `src/api/extract.rs`, `tests/auth_api.rs` |
 | Documentation tree | Verified | `docs/` - `cargo run --bin atom-docs` reports no error and no warning |
 | CI pipeline | Implemented | `.github/workflows/ci.yml` - the three quality gates, a release build, the documentation check and the OpenCode configuration check |
-| Container image | Not started | `docker-compose.yml` is provided for local PostgreSQL only |
+| Container image | Implemented | `Dockerfile` and `.github/workflows/container.yml`; probed in run `40011694239` - see [`engineering/implementation-status.md`](engineering/implementation-status.md). |
 | Reimbursement tracking | Implemented | accepted in §18.1; migration `0004_expense_claims.sql`, `src/reimbursements/` and all twelve published operations exist. `tests/claims_schema.rs` asserts the constraints, `tests/claims_api.rs` the twelve operations and `tests/openapi_contract.rs` the published surface. No reviewer has read the chain that completed it, so the feature is **not** `Verified`; a passing suite is not a review. |
-| Job application tracking | Implemented | accepted in §18.2; migration `0005_job_applications.sql`, `src/job_applications/` and all fourteen published operations exist. `tests/jobs_schema.rs` asserts the constraints and `tests/job_applications_api.rs` the fourteen operations, including the stage machine. `ATOM-REVIEW-20261024-010` read the chain, found no code defect and returned FAIL on documentation only; the findings are fixed, but no gate run after those fixes is recorded, so the feature is not `Verified`. |
-| Local machine learning | Not started | accepted in §18.3; no code, no migration, no test exists |
+| Job application tracking | Implemented | accepted in §18.2; migration `0005_job_applications.sql`, `src/job_applications/` and all fourteen published operations exist. `tests/jobs_schema.rs` asserts the constraints and `tests/job_applications_api.rs` the fourteen operations, including the stage machine. `ATOM-REVIEW-20261024-010` read the chain, found no code defect and returned FAIL on documentation only; the first executable gate run (`ATOM-REVIEW-20261024-011`) also returned FAIL on documentation and no re-gate is recorded, so the feature is not `Verified`. |
+| Local machine learning | Implemented | accepted in §18.3; migration `0006_embeddings.sql`, `src/ml/` and the three published operations exist, and the suite is recorded green in `ATOM-CHANGE-20261024-011` (40 `ml_api` cases). **`ML-R02` is not met**: no Burn encoder produces an embedding, so the scored modes degrade. Not `Verified` for that reason, not for a missing run; see [`features/ml/status.md`](features/ml/status.md) §1.3-§1.4. |
 | Everything else in the roadmap | Not started | by design |
 
 **Known discrepancies and limitations** are recorded in
@@ -512,9 +512,11 @@ They are not `Verified`, because no reviewer has read the chain that completed
 them; a passing suite is not a review. The job-application requirements are now
 **`Implemented`**: the code exists for all fourteen published operations, and
 `ATOM-REVIEW-20261024-010` read the chain, found no code defect and returned
-FAIL on documentation only. They are not `Verified`, because no gate run after
-the review's fixes is recorded and the review's findings have not been
-re-reviewed. The machine-learning requirements are still `Accepted`. §17 says
+FAIL on documentation only. They are not `Verified`, because the first
+executable gate run (`ATOM-REVIEW-20261024-011`) also returned FAIL on
+documentation and no re-gate is recorded. The machine-learning requirements are
+now **`Implemented`**: the code exists for all three published operations, but
+`ML-R02` is unmet, so they are not `Verified`. §17 says
 the same in its status table. The
 feature specifications are:
 

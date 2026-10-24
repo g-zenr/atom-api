@@ -1,7 +1,7 @@
 # ATOM features
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-25
 > **Owner:** maintained by the `docs` agent
 
 This directory holds the per-feature documentation. A *feature* is a coherent
@@ -39,7 +39,8 @@ job-application review (`ATOM-REVIEW-20261024-010`) found no code defect but
 returned FAIL on documentation only; a passing suite
 is not a review. Local machine learning is `Implemented`: the three operations,
 migration `0006`, the seven `ml.*` settings and 40 cases in `tests/ml_api.rs`
-exist; `ML-R02` is not met, no run is recorded, and the seeder flag is missing.
+exist, and the suite is recorded green in `ATOM-CHANGE-20261024-011`; `ML-R02` is
+not met, so nothing is `Verified`.
 
 The status column summarises the feature as a whole. The per-requirement
 evidence behind it is in each feature's `status.md`; a feature can contain both

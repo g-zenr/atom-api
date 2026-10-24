@@ -1,7 +1,7 @@
 # ATOM review log
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-25
 > **Owner:** maintained by the `docs` agent
 
 The record of independent reviews of changes to the ATOM backend: what was
@@ -22,14 +22,19 @@ recorded.
 
 ## The entries so far
 
-Ten reviews have been performed:
+Eleven reviews have been performed:
 
+- `ATOM-REVIEW-20261024-011`, the first **executable** quality-gate verdict,
+  over `D0`–`D5`. It measured all six gates at `0` and 483 tests and returned
+  **FAIL on documentation**, with five blocking findings (`B1`–`B5`), all
+  repaired; it also confirmed that `ML-R02` is honestly recorded as unmet.
 - `ATOM-REVIEW-20261024-010`, the code review of job application chains
   `D3.J1`–`J5`. It found no code defect and returned **FAIL on documentation
   only**, with eight blocking findings, all now repaired.
 - `ATOM-REVIEW-20261024-006`, the quality-gate audit of the four committed
   chains. It measured the gates itself (225 tests, all green) and returned
-  **FAIL** overall on documentation, with `D0` and `D1` passing. It also raised
+  **FAIL** overall on documentation, with `D0` passing and `D1`'s rows 10-11
+  `Fail` as the ledger's scorecard records them. It also raised
   three process findings against the run, all now resolved.
 - `ATOM-REVIEW-20261024-005`, the code review of the same four chains. It found
   no correctness, security or SQL defect and no weakened test, and returned
@@ -163,6 +168,90 @@ happened.** The first real entry is below.
   answer.
 - [`../testing/verification-policy.md`](../testing/verification-policy.md) —
   the rules this log implements.
+
+---
+
+### ATOM-REVIEW-20261024-011 — The first executable quality-gate verdict: `D0`–`D5`
+
+**Date:** 2026-10-24 (UTC)
+**Reviewer:** the `quality-gate` agent, read-only and executable through
+[`scripts/gate.ps1`](../../scripts/gate.ps1), allow-listed in `58f9532`
+**Change reviewed:** the whole Phase 2 run through `D5.H1`/`H2`/`H4` — `D0`–`D5`
+**Verdict:** **FAIL on documentation.** No code defect was found.
+**Outcome:** the five blocking findings (`B1`–`B5`) — four documentation
+contradictions and one lint suppression — and the required corrections
+(`R1`–`R4`) are repaired in the change that carries this record; `B5` is removed
+in `src/ml/burn_embedder.rs`. No re-gate is recorded, so nothing is promoted to
+`Verified`.
+
+#### What the gate measured
+
+This was the first `quality-gate` run that could execute a gate. Until `58f9532`
+the role's shell allow-list matched whole command strings, so every earlier
+attempt reported the six gates as not run (`KI-023`). The run used the single
+read-only entry point, `pwsh ./scripts/gate.ps1`:
+
+| # | Gate | Exit |
+| - | ---- | ---- |
+| 1 | `cargo fmt --all -- --check` | `0` |
+| 2 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | `0` |
+| 3 | `cargo test --all-targets --locked` | `0` — **483 tests**, 0 failed on Windows (**485** on CI, where the two unix-only `shutdown` tests run) |
+| 4 | `cargo check --no-default-features --all-targets --locked` | `0` |
+| 5 | `cargo run --quiet --bin atom-docs` | `0` |
+| 6 | `cargo run --quiet --bin atom-docs -- --strict` | `0` |
+
+#### The blocking findings, and their disposition
+
+| # | Finding | Disposition |
+| - | ------- | ----------- |
+| 1 | `docs/features/ml/testing.md` asserted the opposite of the tree: `a4d33a3` as "the committed state", no `#[test]` in `src/ml/`, no `--with-embeddings` flag, and "no case has been run". The tree has 40 passing `ml_api` cases, 39 module cases, the flag and 20 passing seeder cases. | The introduction and §3/§4/§6 were rewritten to the measured state; the real gaps (no real-model run, no quality evaluation, concurrency) were kept. |
+| 2 | `docs/database/schema.md` said the `embeddings` Rust side did not exist and that no statement used the table. `src/ml/{repository,service,handlers}.rs` and the purge in `src/notes/repository.rs` exist, and the 40 cases exercise the three routes. | The three places were corrected; the six-migration and `0006` claims were already true and left alone. |
+| 3 | `docs/engineering/implementation-status.md` was stale: five migrations, a `D3.J5` run of 387 tests, and a six-test seeder binary. | Six migrations `0001`-`0006`; the last full run is `D5`, 483 on Windows (485 CI), 191 unit, 20 seeder integration and 12 in the binary. |
+| 4 | `docs/engineering/runs/chain/ledger.md` had no `D4`/`D5` scorecards, its queue rows still said `pending`, and `Resume` said 302 tests. | `D4.M1`-`M6` and `D5.H1`/`H2`/`H4` scorecards added (rows 10-11 `Fail`), the queue rows set, and `Resume` rewritten to 483 tests and `58f9532`. |
+| 5 | Two `#[allow(clippy::cast_possible_truncation)]` in `src/ml/burn_embedder.rs` suppressed a lint instead of fixing the cast. | Removed; the casts are now unconditional and the lint stays at `-D warnings`. |
+
+#### What the gate confirmed as honest
+
+- **`ML-R02` is recorded as unmet, and the reason is true.** No code path
+  produces a Burn embedding; `embedder::select` returns `Disabled` with
+  `model_missing` for `ml.backend = flex`, whether or not the artifacts exist.
+  The feature stays `Implemented`, and the gate did not find a document claiming
+  otherwise.
+- The 483-test count and the six exit codes matched the tree; no gate was
+  recorded as passing without having run.
+
+#### The required corrections
+
+`R1`: `features/ml/status.md`'s introduction contradicted its own §1.3/§1.5 and
+HEAD. `R2`: `docs/api/README.md` said no ML run was recorded. `R3`: this log had
+no `D4`/ML entry. `R4`: `project-truth.md` cited `0001..0005` and had no ML row
+in its §17 overview. All four are repaired in the same change as this record.
+
+#### A contradiction this entry resolves
+
+`ATOM-REVIEW-20261024-006` recorded `D0` and `D1` as `PASS`. The ledger's `D1`
+scorecard rows 10 and 11 are `Fail`, and the ledger is the scorecard. The `-006`
+summary and this log's index are corrected to say `D0` `PASS`, `D1` rows 10-11
+`Fail`.
+
+#### Re-review evidence
+
+None recorded. The repairs are uncommitted at the time of this entry, so the
+re-gate command has not been run against them:
+
+```powershell
+pwsh ./scripts/gate.ps1
+```
+
+Until it is green and recorded, no feature moves to `Verified` and `ML-R02`
+stays unmet.
+
+#### Limitations
+
+The gate is read-only and ran the six commands only; it did not perform the
+`code-reviewer`'s role, so the per-chain row 10 in `## Checkpoints` remains
+`Fail`. It did not re-measure the ML quality evaluation, which cannot run
+without an encoder.
 
 ---
 
@@ -374,8 +463,9 @@ files.
 **Date:** 2026-10-24 (UTC)
 **Reviewer:** the `quality-gate` agent, read-only
 **Change reviewed:** `775dc57..908166b`
-**Verdict:** **FAIL** overall - `D0` and `D1` `PASS`; `D2.S1` and `D2.R1` `FAIL`
-on documentation, not on code.
+**Verdict:** **FAIL** overall - `D0` `PASS`; `D1` rows 10-11 `Fail` (the ledger
+is the scorecard; this entry first said `D0` and `D1` passed, corrected
+2026-10-25); `D2.S1` and `D2.R1` `FAIL` on documentation, not on code.
 **Outcome:** the documentation repairs above were committed and the gates re-run.
 
 #### What the gate measured, and what it could not

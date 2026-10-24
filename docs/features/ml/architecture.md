@@ -1,7 +1,7 @@
 # Local machine learning — architecture
 
-> **Status:** Accepted
-> **Last updated:** 2026-10-24
+> **Status:** Implemented
+> **Last updated:** 2026-10-25
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-ML-001`](specification.md)
 
@@ -10,20 +10,20 @@ is in [api.md](api.md); the agreed requirements are in
 [specification.md](specification.md); the decision is
 [`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md).
 
-**Almost nothing in this document exists yet.** There is no `embeddings`
-migration, no model file, no endpoint and no ML test. Two corrections below say
-exactly what does exist — the spike surface in `src/ml/` and its measurement —
-because the rest of the document is the plan, recorded so that the implementing
-change has a shape to follow. The feature is **accepted but not built**, and the
-text is corrected whenever the implementation and this plan disagree.
+This document is the design the feature was built against. It is written in the
+present tense of the plan, and the corrections below record what existed at each
+chain; read them together with [status.md](status.md) §1.1 and §1.4. The
+`embeddings` migration, the module, the three routes and the seven `ml.*`
+settings now exist. What does **not** exist is the Burn encoder and the WordPiece
+tokenizer, so `ML-R02` is unmet; the text that describes them as `M3`'s work is
+the plan, not a claim about the tree.
 
-**Correction (2026-10-24, chain `D4.M1`).** `src/ml/` now exists, but only as
-the spike surface: `embedder.rs` (the trait and the error type), `disabled.rs`,
-`deterministic.rs` and `burn_embedder.rs` (the `flex` experiment). There is
-still **no** `service.rs`, `repository.rs`, `dto.rs`, no `embeddings`
-migration, no route and no `ml.*` setting; every reference to them below is
-still the plan. The whole module is gated behind the `ml` Cargo feature. The
-measurements that let `M3` proceed are in
+**Correction (2026-10-24, chain `D4.M1`).** `src/ml/` was created as the spike
+surface: `embedder.rs` (the trait and the error type), `disabled.rs`,
+`deterministic.rs` and `burn_embedder.rs` (the `flex` experiment). At that commit
+there was still **no** `service.rs`, `repository.rs`, `dto.rs`, no `embeddings`
+migration, no route and no `ml.*` setting. `D4.M3`-`M6` added them; the current
+state is the table in §1. The measurements that let `M3` proceed are in
 [`../../engineering/change-log.md`](../../engineering/change-log.md) under
 `ATOM-CHANGE-20261024-010`.
 
@@ -43,25 +43,25 @@ on `M3`:
   a vocabulary that the SafeTensors file does not contain
   ([`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) §10).
 
-§12 is new and is the **build contract for chains `M3`–`M6`**: the exact trait,
-the three implementations, the table, the endpoints with their status codes,
-the degradation rule, the test names and the files each agent owns. Nothing in
-§12 is built yet either.
+§12 is the **build contract for chains `M3`–`M6`**: the exact trait, the three
+implementations, the table, the endpoints with their status codes, the
+degradation rule, the test names and the files each agent owned. Everything in it
+is built except the Burn encoder and the WordPiece tokenizer.
 
 ## 1. Responsibilities
 
 | Module | Responsibility | Exists |
 | ------ | -------------- | ------ |
-| `src/ml/mod.rs` | The module surface: `MlService`, `Embedder`, the error type. | Spike surface. |
-| `src/ml/embedder.rs` | The `Embedder` trait, `EmbedderStatus`, `MlError`, `l2_norm`, and the selection at start-up. | Spike surface; selection and the normalisation invariant are `M3`. |
-| `src/ml/burn_embedder.rs` | The Burn v0.22 implementation on the `flex` backend, loading SafeTensors weights with `burn_store`. | Spike stand-in; the encoder and `burn_store` are `M3` (§12.3). |
+| `src/ml/mod.rs` | The module surface: `MlService`, `Embedder`, the error type. | Exists. |
+| `src/ml/embedder.rs` | The `Embedder` trait, `EmbedderStatus`, `MlError`, `l2_norm`, and the selection at start-up. | Exists. |
+| `src/ml/burn_embedder.rs` | The Burn v0.22 implementation on the `flex` backend, loading SafeTensors weights with `burn_store`. | Weight lookup, mean-pool and projection; **no encoder** (§12.3). |
 | `src/ml/tokenizer.rs` | The WordPiece tokenizer: vocabulary load, greedy longest-match, `[CLS]`/`[SEP]`, `[UNK]`, truncation. | **No** |
 | `src/ml/deterministic.rs` | The hash-based embedder used by every test and by the seeder. | Exists. |
 | `src/ml/disabled.rs` | The embedder that reports unavailability and never panics. | Exists. |
-| `src/ml/service.rs` | The use cases: search in three modes, match, reindex, and the degradation rule. | **No** |
-| `src/ml/repository.rs` | SQL for the embeddings table, every statement scoped by `user_id`. | **No** |
-| `src/ml/dto.rs` | `SearchRequest`, `SearchResponse`, `SearchHit`, `MatchResponse`, `MatchHit`, `ReindexResponse`, the modes and the degradation reasons. | **No** |
-| `src/ml/handlers.rs` | The three HTTP handlers: extraction, status codes, serialization. No business rule. | **No** |
+| `src/ml/service.rs` | The use cases: search in three modes, match, reindex, and the degradation rule. | Exists. |
+| `src/ml/repository.rs` | SQL for the embeddings table, every statement scoped by `user_id`. | Exists. |
+| `src/ml/dto.rs` | `SearchRequest`, `SearchResponse`, `SearchHit`, `MatchResponse`, `MatchHit`, `ReindexResponse`, the modes and the degradation reasons. | Exists. |
+| `src/ml/handlers.rs` | The three HTTP handlers: extraction, status codes, serialization. No business rule. | Exists. |
 
 The feature depends on:
 
@@ -548,8 +548,8 @@ The reason is in the same ADR amendment.
 
 ## 12. The build contract for chains `M3`–`M6`
 
-**Status: not built.** This section is what `M3`, `M4`, `M5` and `M6` are built
-against. The requirements are
+**Status: built, except the Burn encoder and the tokenizer.** This section is the
+contract `M3`, `M4`, `M5` and `M6` were held to. The requirements are
 [`specification.md`](specification.md) §5, the public shapes are
 [`api.md`](api.md), the test list is [`testing.md`](testing.md), the table is
 [`schema.md`](../../database/schema.md) §11.6. Where this section and an
