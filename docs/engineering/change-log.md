@@ -42,6 +42,64 @@ define the target state. The requirements live in
 
 ## Entries
 
+### ATOM-CHANGE-20261024-004 - The atom-seed development seeder
+
+**Date:** 2026-10-24 (UTC)
+**Type:** Feature (development tooling)
+**Author:** The ATOM engineering team - the orchestrator with the ust-backend, 	est-engineer, database, uth-security and devops subagents.
+**Status:** Complete - **chain D2.S1, review rows outstanding**
+
+#### Summary
+
+`cargo run --bin atom-seed -- --profile dev --reset` now gives a complete,
+deterministic dataset for the Phase 1 entities. It is a development tool: it
+writes known credentials into a database it refuses to touch unless the name
+says development and `APP_ENV` says development.
+
+No endpoint, path, method, status code, request body or response schema
+changed. No migration was added.
+
+#### What changed
+
+| Area | Change |
+| ---- | ------ |
+| Binary | `src/bin/atom-seed.rs` - argument parser, guards, deterministic ids and timestamps, three profiles, `--reset`, inserts, five post-insert checks, redacted error classification |
+| Contract | `C-S1` plus amendments `A-C-S1-1`...`A-C-S1-10`; `A-C-S1-5`...`10` come from the security review and supersede the original guard text |
+| Tests | `tests/seeder.rs` - 16 tests, including the ten locked by `C-S1` and the two the security review required |
+| Specification | `docs/database/seeding.md` - profiles, guards, determinism, the reset blast radius, the invariants and the test list |
+| Documentation | `schema.md` (the `PATCH` on events is a correction in place), the planned Phase 2 sections in `docs/architecture/`, `README`/`CONTRIBUTING`/`Makefile`/`.env.example`/CI, `KI-020` and `KI-021`, `SD-5` |
+
+#### The guards, and why they are shaped that way
+
+`G1` is an allow-list, not a substring test: the original rule refused
+"production" but admitted `APP_ENV=prod`, which `Environment::parse` maps to
+production. `G2` reads the database name through the driver's own URL parser
+and accepts whole names (`atom_dev`, `atom_test`, `atom_local`,
+`atom_demo`, or a `_dev`/`_test`/`_local` suffix), because the substring
+rule admitted `latest` and `production_test` while refusing the tool's own
+`atom_demo` profile. `G3` runs before the migration step as well as inside
+the transaction, so a refused run really does write nothing. `--reset` deletes
+every row owned by the two seeded accounts and says so before it runs.
+
+#### Checks and results
+
+Six gates on the integrated tree: `fmt` 0, `clippy -D warnings` 0,
+`test --all-targets` 0 (**213 tests**, up from 191), `check
+--no-default-features` 0, `atom-docs` 0, `atom-docs --strict` 0.
+
+A real run in the documented setup (`createdb atom_dev`, then the command
+above): 2 users, 200 notes, 8 projects, 60 tasks; `verification passed (5
+checks); 270 rows inserted`. Two `--reset` runs produced an identical
+`md5` over `(id, created_at, updated_at)`. `APP_ENV=prod` and
+`DATABASE_URL=.../atom` are both refused, with no part of the URL in the
+output.
+
+#### What is not verified
+
+No independent review has read the seeder diff: code-reviewer and
+quality-gate did not run on this chain. The container image was not started,
+because this machine has no usable daemon (KI-006); docker compose config
+validates the file and KI-021 records the limitation.
 ### ATOM-CHANGE-20261024-003 - The Phase 2 product intake
 
 **Date:** 2026-10-24 (UTC)

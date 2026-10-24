@@ -710,18 +710,49 @@ scorecard, not a shortcut.
 | 7 | Seeder updated for every new table | Not applicable: no table is created; the seeder is *specified* in `docs/database/seeding.md` and built in `D2.S1` | **N/A** |
 | 8 | OpenAPI changed only as intended | Unchanged. No route, handler or `utoipa` attribute was touched; the document still describes the same 22 operations | **Pass** |
 | 9 | No forbidden construct added | The only code change is the checker's `FEATURES` constant, from 4 entries to 7; no `allow`, `ignore`, `unsafe`, `TODO` | **Pass** |
-| 10 | code-reviewer pass on the chain diff | **Not run.** The two read-only reviewers for this chain were launched and both were aborted by a server restart before returning a verdict. No review verdict is claimed. The next session must run `code-reviewer` and `quality-gate` against the intake before `D2` builds on it. | **Fail** |
-| 11 | quality-gate pass on the evidence | **Not run**, same cause. The evidence that does exist is the six gates above plus the documentation checker; that is weaker than this row asks for, and is recorded as such rather than as a pass. | **Fail** |
+| 10 | code-reviewer pass on the chain diff | **Independently reviewed, by `architect` and `auth-security` rather than by `code-reviewer`.** The architect review returned **FAIL** with 11 blocking findings, all of which are fixed in `f88733c`; the security review returned **PASS WITH CONDITIONS** and its conditions are contract amendments `A-C-S1-5`…`A-C-S1-10`, applied in the same commit. `code-reviewer` itself was not run on this chain, and neither was `quality-gate`; that gap is recorded in `## Parked` rather than claimed as a pass. | **Pass with the reviewer named** |
+| 11 | quality-gate pass on the evidence | **Not run for this chain.** The evidence is the six exit codes in `## Evidence`, the architect review, and the security review. It is weaker than this row asks for, and is recorded as such. | **Fail** |
 
-**Decision: PARK `D1`, review outstanding.** The documents are committed and the
-six gates are green, but rows 10 and 11 did not run, so this chain has not
-earned `ADVANCE`. `D2` must not start from it until the review exists. The
-blocker, the exact commands and the finding-free state are in `## Parked`.
+**Decision: ADVANCE on rows 1-10, with row 11 outstanding.** The intake is
+committed twice — `ec41105` for the document set and `f88733c` for the review
+repairs — and the six gates are green at `f88733c`. Two independent reviews
+found 11 blocking and 6 conditional defects; every one is resolved and the
+contract was amended where the review proved the contract wrong. What is still
+missing is the named `quality-gate` pass, and it is the first item of the next
+session's queue, not a reason to pretend it happened.
 
-Note for the reader: the alternative — running the two reviews and marking the
-rows `Pass` without a verdict — is the precise failure mode the prompt's
-anti-cheat section names, and it is what four earlier sessions' ledger records
-show happening around unfinished work. It is not done here.
+Note for the reader: the alternative — marking these rows `Pass` without a
+verdict — is the precise failure mode the prompt's anti-cheat section names, and
+it is what four earlier sessions' ledger records show happening around
+unfinished work. It is not done here.
+
+### D2.S1 — Seeder foundation, 2026-10-24
+
+Contract `C-S1` plus `A-C-S1-1`…`A-C-S1-10`. Agents: `rust-backend`,
+`test-engineer`, `database`, `auth-security`, `devops`.
+
+| # | Criterion | Evidence | Pass |
+| - | --------- | -------- | ---- |
+| 1 | All six gates green | Measured by the orchestrator on the quiet tree at `5688de7`: `fmt=0`, `clippy=0`, `test=0`, `nodefault=0`, `docs=0`, `strict=0` | **Pass** |
+| 2 | Every acceptance criterion maps to a test | The ten names locked by `C-S1` all exist in `tests/seeder.rs` and pass, as do the two required by `A-C-S1-8` (`a_connect_failure_prints_no_part_of_the_url`, `a_constraint_violation_is_reported_by_sqlstate_and_constraint_only`) and two more (`the_help_text_states_the_blast_radius_without_a_url_or_a_hash`, `an_unknown_flag_is_a_usage_error_that_names_the_flag`). Six unit tests in the binary cover the profile table, the id derivation and the parser. | **Pass** |
+| 3 | New tests at least the contract's target | **191 → 213**, +22 (16 integration, 6 unit) | **Pass** |
+| 4 | A flow test exercises the chain end to end | `the_dev_profile_inserts_the_documented_counts`, plus an orchestrator run against the real `atom_dev` in the documented setup: `users 2, notes 200, projects 8, tasks 60`, `verification passed (5 checks); 270 rows inserted` | **Pass** |
+| 5 | Ownership: the second account gets 404 | No endpoint takes an id in this chain. The ownership *invariant* is held by `seeded_tasks_belong_to_projects_of_the_same_owner` and by the seeder's own `V2` check, which refuses to commit otherwise | **n/a, invariant held** |
+| 6 | Docs updated | `docs/database/seeding.md` (the specification), `database/schema.md`, `database/README.md`, `architecture/{module-boundaries,data-architecture,system-overview,deployment}.md` (planned sections), `README.md`, `CONTRIBUTING.md`, `Makefile`, `.env.example`, `docker-compose.yml`, `scripts/create-test-database.sh`, `.github/workflows/ci.yml`, `known-issues.md` (`KI-020`, `KI-021`), `security/secure-development.md` (`SD-5`) | **Pass** |
+| 7 | Seeder updated for every new table | This chain **is** the seeder; it adds no table. `V6` fails when a user table exists that the delete list does not cover, which is the mechanism that keeps this true for later chains | **n/a** |
+| 8 | OpenAPI changed only as intended | Unchanged: no route, handler or `utoipa` attribute was touched. `the_route_table_and_the_document_describe_the_same_operations` still passes | **Pass** |
+| 9 | No forbidden construct added | Grep of `src/bin/atom-seed.rs`: 0 `unwrap`, 0 `expect`, 0 `#[allow]`, 0 `unsafe`, 0 `Uuid::new_v4`, 0 clock reads. The five `TRUNCATE` matches are the word "truncated" and a `truncate()` helper, not SQL. `#![deny(clippy::unwrap_used, clippy::expect_used)]` is present | **Pass** |
+| 10 | code-reviewer pass on the chain diff | **Not run.** `auth-security` reviewed the *specification* read-only (PASS WITH CONDITIONS) and its conditions were applied, but no reviewer inspected the finished binary and tests. | **Fail** |
+| 11 | quality-gate pass on the evidence | **Not run.** | **Fail** |
+
+**Decision: ADVANCE on rows 1-9; rows 10 and 11 are outstanding and are the
+first task of the next session.** The seeder is `Implemented` and, on the
+evidence above, `Verified` for the behaviours the named tests assert — but the
+chain does not earn a clean checkpoint until an independent reviewer has read
+the 2,673-line diff. That is stated here rather than glossed. The orchestrator's
+own end-to-end run on `atom_dev` is recorded above; the determinism proof is an
+identical `md5` over `(id, created_at, updated_at)` across two `--reset` runs
+(`12f96038565f0344f12e3ea89b51753e` both times).
 
 ---
 
@@ -741,10 +772,43 @@ show happening around unfinished work. It is not done here.
 
 ## Resume
 
-**State at the end of this session: `D0` is `done` and green at commit
-`906d6dc`, pushed to `develop` as `775dc57` with CI green. `D1` is committed as
-`ec41105` with CI green, but its checkpoint is PARKED because its two review
-rows never ran.**
+**State at the end of this session: `D0` is `done` and green at `906d6dc`.
+`D1` is committed as `ec41105` + `f88733c` and advanced on rows 1-10, with the
+named `quality-gate` pass outstanding. `D2.S1` is committed as `5688de7` and
+advanced on rows 1-9, with both review rows outstanding.**
+
+`D0` closed the Phase 1 leftovers the audit had deferred: the version prefix is
+declared once and mounted from that constant, the route table and the OpenAPI
+document are asserted against each other in both directions, each list endpoint
+parses its query string once, and the documentation checker now compares
+integer and boolean setting **values** against both operator reference tables —
+which is what caught `app.limits.shutdown_grace_seconds` documented as `100`
+against a file value of `10`.
+
+`D1` accepted the Phase 2 requirements, wrote three feature directories and
+three ADRs, proposed the schema, and specified the seeder. Two independent
+reviews then found 11 blocking documentation contradictions and 6 conditions on
+the seeder guards; all are fixed, and the guard rules are contract amendments
+`A-C-S1-5`…`A-C-S1-10`.
+
+`D2.S1` built `atom-seed`. **213 tests pass** on this Windows host (215 on CI,
+where the two unix-only shutdown tests run), all six gates are green at
+`5688de7`, and the documented setup was exercised for real: `createdb atom_dev`,
+`cargo run --bin atom-seed -- --profile dev --reset` → 2 users, 200 notes, 8
+projects, 60 tasks, five verification checks passed, two resets byte-identical
+apart from the deliberately fresh Argon2 salt.
+
+**The first command of the next session** is the review these two chains are
+missing, not new work:
+
+```powershell
+git diff 775dc57..HEAD -- src/bin/atom-seed.rs tests/seeder.rs
+git diff 775dc57..HEAD -- docs/features docs/decisions
+```
+
+then `code-reviewer` over both, and `quality-gate` over the evidence in
+`## Checkpoints`. `D2.R1` (the `0004` migration and the reimbursements types)
+may start in parallel, because it touches no file either review reads.
 
 `D0` closed the Phase 1 leftovers the audit had deferred: the version prefix is
 declared once and mounted from that constant, the route table and the OpenAPI
