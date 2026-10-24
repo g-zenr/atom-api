@@ -42,6 +42,59 @@ define the target state. The requirements live in
 
 ## Entries
 
+### ATOM-CHANGE-20261024-005 - The reimbursements schema and its row types
+
+**Date:** 2026-10-24 (UTC)
+**Type:** Feature (schema)
+**Author:** The ATOM engineering team - the orchestrator with the `database`, `rust-backend`, `test-engineer` and `docs` subagents.
+**Status:** Complete - **chain `D2.R1`, review rows outstanding**
+
+#### Summary
+
+`migrations/0004_expense_claims.sql` creates `expense_claim_status`,
+`expense_claims` and `expense_items`, and `src/reimbursements/` holds the row
+types. **No endpoint exists**: no handler, service, repository, DTO or route, and
+`/api/v1/openapi.json` is unchanged.
+
+#### What changed
+
+| Area | Change |
+| ---- | ------ |
+| Schema | `0004_expense_claims.sql`: the five-state enum, two tables, every named CHECK, the composite foreign key, and five indexes |
+| Types | `src/reimbursements/{mod,models}.rs`: `ClaimStatus`, `ExpenseClaim`, `ExpenseItem`; money is a `String` read from `::text` |
+| Seeder | Claims 1/25/50 and items 0/48/98 over the profiles, `V1` total-equals-SUM, `V2` extended to claim and item ownership, `V6` covers both new tables |
+| Tests | `tests/claims_schema.rs` (10) and two new `tests/seeder.rs` cases; 213 -> 225 |
+| Docs | `schema.md` §11, `seeding.md`, the reimbursements `status`/`architecture`/`testing`, `testing/strategy.md`, `project-truth.md` §17, `architecture/*` |
+
+#### The two constraints that do the real work
+
+`expense_items_claim_fk` references `expense_claims (id, user_id)`, so an item
+whose owner disagrees with its claim's owner **cannot be inserted by any code
+path**, not even one that forgets to check. `expense_claims_lifecycle_timestamps_chk`
+makes "a submitted claim without a submission date" and "a paid claim without a
+decision" unrepresentable. `tests/claims_schema.rs` asserts the SQLSTATE and the
+constraint name for both, not merely that an insert failed.
+
+#### Checks and results
+
+Six gates: `fmt` 0, `clippy -D warnings` 0, `test --all-targets` 0 (**225**),
+`check --no-default-features` 0, `atom-docs` 0, `atom-docs --strict` 0. A `dev`
+seed run reports `claims 25, items 48, verification passed (6 checks)`.
+
+#### Two things measured, not assumed
+
+- `CHAR(3)` rejects a four-character currency with SQLSTATE `22001` **before**
+  the `CHECK` is evaluated, so the contract named the wrong mechanism while the
+  value is still unrepresentable.
+- PostgreSQL **rounds** a fifth decimal into `NUMERIC(19,4)` (`149.876549` ->
+  `149.8765`) rather than refusing it; the four-decimal wire form follows from
+  the column type, not from validation.
+
+#### What is not verified
+
+No endpoint exists, so no endpoint test exists and the feature is `Accepted`,
+not `Implemented` or `Verified`. `code-reviewer` and `quality-gate` did not run
+on this chain; that is recorded as rows 10-11 of its checkpoint.
 ### ATOM-CHANGE-20261024-004 - The atom-seed development seeder
 
 **Date:** 2026-10-24 (UTC)

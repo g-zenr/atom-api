@@ -76,6 +76,12 @@ the unix figure — 181 when the unit tests are counted. Counted on 2026-10-24.
 | [`../../tests/docs_route.rs`](../../tests/docs_route.rs) | 2 | The API explorer and one of its assets are served when the `docs` feature is on, and the OpenAPI document carries the configured title. The whole file is gated on the feature, so it compiles to nothing in a `--no-default-features` build. |
 | [`../../tests/shutdown.rs`](../../tests/shutdown.rs) | 2 (unix only) | A real `SIGTERM` stops the process without waiting the grace away first, and the drain is bounded when an in-flight request cannot finish. See §1.4. |
 
+The figures and the table above are the Phase 1 files, measured on 2026-10-24.
+The files the Phase 2 run adds — `tests/openapi_contract.rs`,
+`tests/list_query.rs`, `tests/seeder.rs`, `tests/claims_schema.rs` — are not in
+the table, and the totals have **not** been re-measured since. See §7 for the
+Phase 2 layer map.
+
 ### 1.4 Process layer
 
 One file drives the real binary as a child process, because some behaviour only
@@ -386,9 +392,10 @@ machine learning — plus a database seeder and the hardening of the existing
 API. This section says which layer proves which property, so that a gap is
 visible before the code is written.
 
-**This is a target, not a record.** Nothing in this section has been run. The
-evidence for a Phase 2 feature is the recorded run in its `status.md`, and
-until that exists the feature is `Accepted`, not `Verified`.
+**This is a target, not a record.** The layer map below is the target; §7.2.1
+says what exists in the tree today. No Phase 2 test has a recorded passing run,
+so no Phase 2 feature is `Verified`: the evidence for one is the recorded run in
+its `status.md`.
 
 ### 7.1 Which layer proves what
 
@@ -401,6 +408,10 @@ until that exists the feature is `Accepted`, not `Verified`.
 | **Contract** — every path and method in the document, the parameter sets, the schema types | Contract, against `/api/v1/openapi.json` | The document is generated from the handlers; only a comparison catches drift. |
 | **Degradation** — ML off and model missing return lexical results with `200` | Integration, with two configurations | A unit test can prove the selection function; only the request path proves the response shape and the status. |
 | **Seeder** — the guards, determinism, the money and ownership invariants | Integration, driving the binary | The seeder is not reachable through the router. |
+
+One Phase 2 schema exists to prove today: `tests/claims_schema.rs` applies
+migration `0004` and asserts the reimbursement constraints, the cascades and
+the money scale. See §7.2.1 for the feature-by-feature state.
 
 ### 7.2 The layers in the Phase 2 suite
 
@@ -415,6 +426,21 @@ until that exists the feature is `Accepted`, not `Verified`.
 The Phase 1 layers and the isolation rules in §2 are unchanged. A Phase 2
 test uses the same harness, the same production-safety guard and the same
 unique-data-per-test rule.
+
+#### 7.2.1 The state of each Phase 2 feature
+
+The layer map above is a target. This table says what is actually covered in
+the tree, so an empty layer is visible instead of assumed.
+
+| Feature | Covered today | Not covered |
+| ------- | ------------- | ----------- |
+| Reimbursements | The **schema layer**: `tests/claims_schema.rs` applies `0004` and asserts the constraints, the composite ownership key, the cascades, the `SET NULL` and the four-decimal money scale. The **seeded claims**: two cases in `tests/seeder.rs` assert the profile counts and the total invariant. | The **endpoint layer**: no handler, service, repository or route exists, so `tests/claims_api.rs` has nothing to call, and `/api/v1/openapi.json` is unchanged. |
+| Job applications | Nothing. | Everything: no migration, no module, no endpoint and no test. |
+| Local machine learning | Nothing. | Everything: no migration, no module, no endpoint and no test. |
+
+A schema test is not an endpoint test. The reimbursement feature stays
+`Accepted`, and no requirement is counted as covered until a request can
+exercise it.
 
 ### 7.3 The size target
 

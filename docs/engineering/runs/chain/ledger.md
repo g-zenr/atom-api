@@ -111,7 +111,7 @@ step deliberately, and the rows are renamed only between runs.
 | D0 | Close Phase 1 | **done** | `906d6dc` | Contract `C-D0` (+ A-C-D0-1..10). **Closed 2026-10-24**: route tables and `API_PREFIX` from the earlier sessions; this session completed `TasksListQuery` + the single-extractor handlers, `nest(routes::API_PREFIX, …)`, the settings **value** comparison in `atom-docs` with three unit tests, the `config/README.md` `100`→`10` fix, `tests/openapi_contract.rs` (5 tests) and `tests/list_query.rs` (4 tests), then six green gates, a review pass and a gate pass. 191 tests. |
 | D1 | Product intake | **done (checkpoint PARKED: review outstanding)** | `ec41105` | Documents only. **Committed 2026-10-24**: `project-truth.md` §18 (18.1 reimbursements `REIMB-R01`…`R10`, 18.2 job applications, 18.3 local ML, 18.4 the provisional-status note), three feature directories with five documents each, `ADR-0007`/`0008`/`0009`, the proposed schema, `docs/database/seeding.md`, the money convention, the test matrix, `Q-11` answered and `Q-13` opened for `A1`–`A6`. The only code change is the checker's `FEATURES` list, 4 → 7. Nothing in it is `Implemented` or `Verified`. Rows 10 and 11 of its checkpoint did not run — see `## Checkpoints` and `## Parked`. |
 | D2.S1 | Seeder foundation | **done (checkpoint rows 10-11 outstanding)** | `5688de7` (+ `b635cc7`, `77a9b79`) | `atom-seed` for users, notes, projects and tasks: guards, determinism, `--reset`, 16 integration and 6 unit tests, docs. No new dependency. **Not pushed.** The two follow-ups were written after the checkpoint record and are not yet in it: `b635cc7` serialises the seeder suite with a PostgreSQL advisory lock and adds two assertions, `77a9b79` pins the 22-operation surface and asserts the canonical error code. |
-| D2.R1 | Reimbursements — schema and types | pending | — | |
+| D2.R1 | Reimbursements — schema and types | **in progress** | — | Contract `C-R1` locked. Wave: `database` (migration `0004`), `rust-backend` (`src/reimbursements/{mod,models}.rs`, `src/lib.rs`, seeder S2), `test-engineer` (`tests/claims_schema.rs`, `tests/seeder.rs`), `docs` (reimbursements docs). No endpoint: `openapi.json` must be unchanged. |
 | D2.R2 | Claim CRUD | pending | — | |
 | D2.R3 | Items and the total invariant | pending | — | |
 | D2.R4 | Lifecycle actions | pending | — | |
@@ -400,6 +400,96 @@ body of `C-S1` are **superseded** by A-C-S1-5 and A-C-S1-6.
 | A-C-S1-9 | `--reset` is documented as deleting **every row owned by the two seeded accounts**, including rows a developer created through the API while logged in as them. The `--help` text and the pre-reset output say so. The `--reset` predicates are unchanged. | The review showed the specification promised both "only the seeded rows" and that a developer's own account survives. Both cannot be true: the predicate is `user_id`, so anything the developer wrote as `owner@atom.local` is deleted. The predicate is right; the promise was wrong. |
 | A-C-S1-10 | `V4` asserts **exact** derived counts (`1 + (i % 3)` items per claim, `1 + (i % 4)` events per application), not lower bounds, and the chain must prove its delete list covers every user table that exists. | With deterministic ids, a child table omitted from the delete list keeps its rows, and the re-inserted parent gets the *same* id, so the stale children silently re-attach. A lower-bound check would pass. This is the one failure mode `--reset` exists to prevent, so it must fail closed. |
 
+### C-R1 — Reimbursements schema and types (locked 2026-10-24, PHASE=2)
+
+Authority: `docs/database/schema.md` §11.1 and §11.2 are the column, constraint
+and index definition, verbatim; this block names the decisions that document
+leaves to the implementation. No endpoint is added: `/api/v1/openapi.json` is
+byte-identical before and after this chain (R2 adds the routes).
+
+**ENDPOINTS** — none. `ROUTE_TABLE`, the router and the document are unchanged.
+
+**SQL** — one new migration, `migrations/0004_expense_claims.sql`, append-only,
+never editing `0001`-`0003`:
+
+- `CREATE TYPE expense_claim_status AS ENUM ('draft','submitted','approved','rejected','paid')`
+- `expense_claims` and `expense_items` exactly as `schema.md` §11.1/§11.2,
+  with these names: `expense_claims_title_length_chk`,
+  `expense_claims_description_length_chk`, `expense_claims_currency_chk`,
+  `expense_claims_total_amount_chk`,
+  `expense_claims_lifecycle_timestamps_chk`,
+  `expense_claims_timestamp_order_chk`, `expense_items_claim_fk`
+  (composite `(claim_id, user_id) -> expense_claims (id, user_id)`),
+  `expense_items_user_fk`, `expense_items_description_length_chk`,
+  `expense_items_amount_chk`, `expense_items_category_chk`,
+  `expense_items_receipt_url_chk`; and the indexes
+  `expense_claims_user_id_status_created_at_idx`,
+  `expense_claims_user_id_created_at_idx`, `expense_claims_project_id_idx`,
+  `expense_claims_id_user_id_unique_idx`, `expense_items_claim_id_idx`.
+- `project_id` is `ON DELETE SET NULL`; `user_id` cascades from `users`.
+- Ownership is a column on both tables; the composite key makes a cross-owner
+  item unrepresentable.
+
+**TYPES** — `src/reimbursements/` with the Phase 1 layering. R1 creates only
+`mod.rs` and `models.rs`; `handlers`, `service`, `repository` and
+`dto` land in R2 with the routes.
+
+- `ClaimStatus`: serde `snake_case`, `sqlx(type_name = "expense_claim_status", rename_all = "snake_case")`.
+- `ExpenseClaim` and `ExpenseItem`: ordinary row structs.
+- **Money**: SQLx cannot decode `NUMERIC` with the enabled features and
+  `ADR-0007` forbids a decimal crate, so money is selected as
+  `total_amount::text` / `amount::text` and carried in Rust as `String`.
+  `NUMERIC(19,4)::text` renders four decimal places, which is the wire form.
+  No `f32`/`f64` anywhere in a money path, and no arithmetic in Rust: the
+  total is computed by `SUM` in SQL in the same transaction.
+
+**INVARIANTS** — I1 every row has `user_id`; I2 a foreign resource is `404`,
+never `403`, from R2 onwards; I3 `total_amount` equals `SUM(amount)` of the
+claim's items, maintained in one transaction; I4 money is four decimals at rest
+and on the wire; I5 the lifecycle constraint makes an inconsistent
+status/timestamp row unrepresentable; I6 `currency` is immutable (service rule
+with `422`, from R2).
+
+**TESTS** (names fixed) — `tests/claims_schema.rs`:
+
+`the_expense_claim_tables_apply_from_an_empty_database`,
+`a_claim_rejects_a_currency_that_is_not_three_upper_case_letters`,
+`a_claim_rejects_a_negative_total`,
+`the_lifecycle_constraint_rejects_a_submitted_claim_without_a_submission_timestamp`,
+`the_lifecycle_constraint_accepts_every_consistent_status`,
+`an_item_cannot_belong_to_another_owners_claim`,
+`deleting_a_claim_deletes_its_items`,
+`deleting_a_project_clears_the_claim_link_and_keeps_the_claim`,
+`deleting_an_account_deletes_its_claims_and_items`,
+`money_is_stored_with_four_decimal_places`.
+
+Plus in `tests/seeder.rs`: `the_seeder_dev_profile_inserts_the_documented_claim_counts`
+and `a_seeded_claim_total_equals_the_sum_of_its_items`.
+
+**SEEDER (S2, mandatory in this chain)** — the seeder's `V6` compares its
+delete list against `information_schema`, so adding two user tables without
+extending the seeder would make every run fail its own verification:
+
+- claims 1 / 25 / 50 and items **0 / 48 / 98** for minimal / dev / demo. The rule
+  is `1 + (i % 3)` items per claim **except the first draft claim**, which has
+  none (`seeding.md` §7.4).
+- status cycles `i % 5` over the five states, `currency` cycles a fixed
+  three, and `submitted_at`/`decided_at`/`paid_at` are set so that
+  `expense_claims_lifecycle_timestamps_chk` holds; `total_amount` is the
+  `SUM` of the items, computed in SQL.
+- `--reset` deletes `expense_items` before `expense_claims`, both by
+  `user_id`, before `projects`.
+- `V4` asserts those exact counts; `V6`'s table list gains both tables.
+
+**FILES** (exclusive)
+
+| Owner | Files |
+| ----- | ----- |
+| `database` | `migrations/0004_expense_claims.sql`, `docs/database/schema.md` |
+| `rust-backend` | `src/reimbursements/mod.rs`, `src/reimbursements/models.rs`, `src/lib.rs`, `src/bin/atom-seed.rs` |
+| `test-engineer` | `tests/claims_schema.rs`, `tests/seeder.rs` |
+| `docs` | `docs/features/reimbursements/{status,architecture,testing}.md`, `docs/testing/strategy.md` |
+| orchestrator | `docs/engineering/**`, `docs/README.md` |
 ---
 
 ## Evidence
@@ -808,6 +898,28 @@ identical `md5` over `(id, created_at, updated_at)` across two `--reset` runs
 (`12f96038565f0344f12e3ea89b51753e` both times).
 
 ---
+
+### D2.R1 - Reimbursements schema and types, 2026-10-24
+
+Contract `C-R1`. Agents: `database`, `rust-backend`, `test-engineer`, `docs`.
+
+| # | Criterion | Evidence | Pass |
+| - | --------- | -------- | ---- |
+| 1 | All six gates green | Measured by the orchestrator on the integrated tree: `fmt=0`, `clippy=0`, `test=0`, `nodefault=0`, `docs=0`, `strict=0` | **Pass** |
+| 2 | Every acceptance criterion maps to a test | The ten names fixed by `C-R1` all exist in `tests/claims_schema.rs` and pass; the two seeder names exist in `tests/seeder.rs` and pass. Each asserts the SQLSTATE or the constraint name, not merely that an error happened | **Pass** |
+| 3 | New tests at least the contract's target | **213 -> 225**, +12 (10 schema, 2 seeder) | **Pass** |
+| 4 | A flow test exercises the chain end to end | No endpoint exists, so no flow test is possible. `the_expense_claim_tables_apply_from_an_empty_database` creates a scratch database, applies `0001`-`0004` through `sqlx::migrate!`, proves `_sqlx_migrations = [1,2,3,4]` and both tables, then drops it and proves it is gone | **Pass, at the schema layer** |
+| 5 | Ownership: the second account gets 404 | No endpoint, so no 404. The invariant is held by `expense_items_claim_fk` over `(id, user_id)`: `an_item_cannot_belong_to_another_owners_claim` proves a cross-owner item is rejected with `23503`, so it is unrepresentable rather than merely refused | **Pass, invariant held** |
+| 6 | Docs updated | `schema.md` §11 (the migration exists; five now-false statements corrected), `seeding.md` (the claim/project rule), reimbursements `status`/`architecture`/`testing`, `testing/strategy.md`, `project-truth.md` §17, `features/README.md`, `architecture/{data-architecture,module-boundaries}.md` | **Pass** |
+| 7 | Seeder updated for every new table | In this chain: claims 1/25/50 and items 0/48/98 over the profiles, `SEEDED_TABLES` 5 -> 7, `V1` total-equals-SUM, `V2` extended to claim and item ownership, `V4` exact counts, `V6` covers both tables. Real `dev` run: `claims 25, items 48, verification passed (6 checks); 343 rows inserted` | **Pass** |
+| 8 | OpenAPI changed only as intended | Unchanged: no route, handler or `utoipa` attribute touched, and the row types are not registered components | **Pass** |
+| 9 | No forbidden construct added | Every `expect` in the six changed files is in `tests/`, which `AGENTS.md` §4.1 permits. Zero in `src/reimbursements/` or `src/bin/atom-seed.rs`, which carries `#![deny(clippy::unwrap_used, clippy::expect_used)]`. No `allow`, `ignore`, `unsafe`, `TODO` | **Pass** |
+| 10 | code-reviewer pass on the chain diff | **Not run.** | **Fail** |
+| 11 | quality-gate pass on the evidence | **Not run.** | **Fail** |
+
+**Decision: ADVANCE on rows 1-9; rows 10-11 outstanding**, the same gap D1 and D2.S1 carry. Two facts learned from the code and now carried in the documents: `CHAR(3)` rejects a four-character currency with `22001` before `expense_claims_currency_chk` is evaluated, so `C-R1` named the wrong mechanism while the intent (unrepresentable) holds; and PostgreSQL **rounds** a fifth decimal into `NUMERIC(19,4)` rather than refusing it, so the wire form is four decimals by construction of the column, not by validation.
+
+One finding for the failure memory, not a defect in this chain: `tests/seeder.rs` failed 17/18 once because a manual `atom-seed` run in the shared `atom_test` raced the fixture; the advisory lock only serialises processes that take it. Two later runs passed 18/18 and 225/225.
 
 ## Parked
 

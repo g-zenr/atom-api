@@ -1,9 +1,11 @@
 //! `atom-seed` - deterministic development data for the ATOM database.
 //!
 //! The binary fills a disposable PostgreSQL database with the Phase 1
-//! entities: `users`, `notes`, `projects` and `tasks`. It is specified in
-//! `docs/database/seeding.md` and locked by the `C-S1` contract (with the
-//! security amendments `A-C-S1-5` ... `A-C-S1-10`) in
+//! entities - `users`, `notes`, `projects` and `tasks` - and with the Phase 2
+//! `expense_claims` and `expense_items` rows that the reimbursements feature
+//! reads. It is specified in `docs/database/seeding.md`, locked by the `C-S1`
+//! contract (with the security amendments `A-C-S1-5` ... `A-C-S1-10`) and
+//! extended by `C-R1` §SEEDER, both in
 //! `docs/engineering/runs/chain/ledger.md`.
 //!
 //! ```text
@@ -70,13 +72,21 @@ const ARGON2_PARALLELISM: u32 = 1;
 /// hang the process for the operating system's connect timeout.
 const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Every table the seeder handles: the four it inserts into and
+/// Every table the seeder handles: the six it inserts into and
 /// `refresh_sessions`, which `--reset` deletes but the seeder never inserts.
 ///
 /// `V6` compares this list with the schema and fails the run when a table
 /// exists that the list does not name. That is what makes "add a table, extend
 /// the seeder" enforceable.
-const SEEDED_TABLES: [&str; 5] = ["notes", "projects", "refresh_sessions", "tasks", "users"];
+const SEEDED_TABLES: [&str; 7] = [
+    "expense_claims",
+    "expense_items",
+    "notes",
+    "projects",
+    "refresh_sessions",
+    "tasks",
+    "users",
+];
 
 /// The one-line reset warning, printed before the first delete (A-C-S1-9).
 const RESET_WARNING: &str = "atom-seed: reset: deleting every row owned by the two seeded accounts (owner@atom.local and other@atom.local), including rows created through the API while logged in as them";
@@ -145,6 +155,38 @@ impl Profile {
         }
     }
 
+    /// The number of expense claims the profile seeds.
+    const fn claims(self) -> usize {
+        match self {
+            Self::Minimal => 1,
+            Self::Dev => 25,
+            Self::Demo => 50,
+        }
+    }
+
+    /// The number of expense items the profile seeds.
+    ///
+    /// It is derived, not a table entry: the sum of [`items_per_claim`] over
+    /// the profile's claims. Hard-coding it would let the insert loop and the
+    /// count check drift apart, which is the failure `V4` exists to catch.
+    ///
+    /// `1`, `25` and `50` claims give `0`, `48` and `98` items:
+    ///
+    /// * `minimal`: claim 0 is the draft with no items, so `0`.
+    /// * `dev`: `1 + (i % 3)` over `i = 0..25` is `25 + 24 = 49`, minus the
+    ///   first claim's single item, so `48`.
+    /// * `demo`: `1 + (i % 3)` over `i = 0..50` is `50 + 49 = 99`, minus the
+    ///   first claim's single item, so `98`.
+    const fn items(self) -> usize {
+        let mut total = 0;
+        let mut index = 0;
+        while index < self.claims() {
+            total += items_per_claim(index);
+            index += 1;
+        }
+        total
+    }
+
     /// The name accepted by `--profile` and printed in the report.
     const fn as_str(self) -> &'static str {
         match self {
@@ -153,6 +195,24 @@ impl Profile {
             Self::Demo => "demo",
         }
     }
+}
+
+/// The number of items claim `index` carries.
+///
+/// `1 + (index % 3)` for every claim, except the profile's first claim, which
+/// is a `draft` (`index % 5 == 0`) and carries none (`seeding.md` §2.1 and
+/// `C-R1` §SEEDER). The insert loop and [`Profile::items`] use this one
+/// function, so the seeded rows and the asserted count cannot disagree.
+const fn items_per_claim(index: usize) -> usize {
+    if index == 0 { 0 } else { 1 + (index % 3) }
+}
+
+/// The claim's `created_at`: base + 21 days + `index × 6` hours.
+///
+/// The item inserts reuse it, because an item's `created_at` and
+/// `incurred_on` are derived from its claim's.
+fn claim_created_at(index: usize) -> DateTime<Utc> {
+    base_timestamp() + Duration::days(21) + Duration::hours(6 * index as i64)
 }
 
 /// The parsed command line. It never holds the connection string, so a derived
@@ -286,15 +346,27 @@ struct SeedOutcome {
     notes: EntityOutcome,
     projects: EntityOutcome,
     tasks: EntityOutcome,
+    claims: EntityOutcome,
+    items: EntityOutcome,
 }
 
 impl SeedOutcome {
     fn total_inserted(&self) -> u64 {
-        self.users.inserted + self.notes.inserted + self.projects.inserted + self.tasks.inserted
+        self.users.inserted
+            + self.notes.inserted
+            + self.projects.inserted
+            + self.tasks.inserted
+            + self.claims.inserted
+            + self.items.inserted
     }
 
     fn total_skipped(&self) -> u64 {
-        self.users.skipped + self.notes.skipped + self.projects.skipped + self.tasks.skipped
+        self.users.skipped
+            + self.notes.skipped
+            + self.projects.skipped
+            + self.tasks.skipped
+            + self.claims.skipped
+            + self.items.skipped
     }
 }
 
@@ -392,12 +464,24 @@ async fn run(args: SeedArgs) -> Result<(), Failure> {
     // computed once and reused for both accounts.
     let password_hash = hash_seeded_password()?;
 
-    let outcome = SeedOutcome {
+    let mut outcome = SeedOutcome {
         users: seed_users(&mut transaction, &password_hash).await?,
         projects: seed_projects(&mut transaction, args.profile).await?,
         tasks: seed_tasks(&mut transaction, args.profile).await?,
         notes: seed_notes(&mut transaction, args.profile).await?,
+        ..SeedOutcome::default()
     };
+
+    // Claims come after the projects they may link to; items come after the
+    // claims, because the composite key requires the claim to exist.
+    let (claims, inserted_claims) = seed_claims(&mut transaction, args.profile).await?;
+    outcome.claims = claims;
+    outcome.items = seed_items(&mut transaction, args.profile).await?;
+
+    // Every total is set from the items by one statement. No money is added in
+    // Rust (ADR-0007); a claim whose insert was skipped keeps its stored total,
+    // and `V1` fails if that total no longer matches its items.
+    refresh_claim_totals(&mut transaction, &inserted_claims).await?;
 
     if let Err(failure) = verify(&mut transaction, args.profile, &seed_ids).await {
         transaction.rollback().await.ok();
@@ -622,6 +706,14 @@ async fn reset_seeded_rows(
     seed_ids: &[Uuid],
 ) -> Result<(), Failure> {
     let statements = [
+        (
+            "expense_items",
+            "DELETE FROM expense_items WHERE user_id = ANY($1)",
+        ),
+        (
+            "expense_claims",
+            "DELETE FROM expense_claims WHERE user_id = ANY($1)",
+        ),
         (
             "refresh_sessions",
             "DELETE FROM refresh_sessions WHERE user_id = ANY($1)",
@@ -911,17 +1003,264 @@ async fn seed_notes(
     Ok(outcome)
 }
 
-/// Runs the five post-insert checks before the transaction commits.
+/// Inserts the profile's expense claims, returning the ids this run wrote.
+///
+/// The returned ids are the ones the total refresh touches: a claim whose
+/// insert was skipped keeps its stored total, which `V1` then verifies.
+///
+/// The lifecycle timestamps are set from `index % 5` so that
+/// `expense_claims_lifecycle_timestamps_chk` holds for every status: `draft`
+/// has none, `submitted` has `submitted_at`, `approved` and `rejected` add
+/// `decided_at`, and `paid` adds `paid_at`. The order is the one
+/// `expense_claims_timestamp_order_chk` requires.
+///
+/// `total_amount` is written as `0` and replaced from `SUM(amount)` after the
+/// items exist. No money is computed in Rust.
+async fn seed_claims(
+    connection: &mut PgConnection,
+    profile: Profile,
+) -> Result<(EntityOutcome, Vec<Uuid>), Failure> {
+    let mut outcome = EntityOutcome::default();
+    let mut inserted_ids: Vec<Uuid> = Vec::new();
+    let project_count = profile.projects();
+
+    for index in 0..profile.claims() {
+        let id = seeded_id("expense_claims", index);
+        let user_id = seeded_id("users", index % SEEDED_USERS.len());
+        let title = CLAIM_TITLES[index % CLAIM_TITLES.len()];
+        let description = format!(
+            "{} Seeded claim {} for the {} profile.",
+            CLAIM_DESCRIPTIONS[index % CLAIM_DESCRIPTIONS.len()],
+            index + 1,
+            profile.as_str()
+        );
+        let currency = CLAIM_CURRENCIES[index % CLAIM_CURRENCIES.len()];
+        let created_at = claim_created_at(index);
+        let submitted_at_candidate = created_at + Duration::days(1);
+        let decided_at_candidate = created_at + Duration::days(2);
+        let paid_at_candidate = created_at + Duration::days(3);
+
+        let (status, submitted_at, decided_at, paid_at) = match index % 5 {
+            0 => ("draft", None, None, None),
+            1 => ("submitted", Some(submitted_at_candidate), None, None),
+            2 => (
+                "approved",
+                Some(submitted_at_candidate),
+                Some(decided_at_candidate),
+                None,
+            ),
+            3 => (
+                "rejected",
+                Some(submitted_at_candidate),
+                Some(decided_at_candidate),
+                None,
+            ),
+            _ => (
+                "paid",
+                Some(submitted_at_candidate),
+                Some(decided_at_candidate),
+                Some(paid_at_candidate),
+            ),
+        };
+
+        // `updated_at` is the latest state change plus one hour; for a draft,
+        // whose state has not changed, it is its creation plus one hour.
+        let last_state = paid_at
+            .or(decided_at)
+            .or(submitted_at)
+            .unwrap_or(created_at);
+        let updated_at = last_state + Duration::hours(1);
+
+        // Claim `i` links to project `i % project_count`. Every profile has at
+        // least one project; the `None` arm keeps the rule total.
+        let project_id = if project_count == 0 {
+            None
+        } else {
+            Some(seeded_id("projects", index % project_count))
+        };
+
+        let inserted = sqlx::query(
+            "INSERT INTO expense_claims \
+                 (id, user_id, title, description, currency, total_amount, status, \
+                  project_id, submitted_at, decided_at, paid_at, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5::char(3), 0, $6::text::expense_claim_status, $7, \
+                     $8, $9, $10, $11, $12) \
+             ON CONFLICT (id) DO NOTHING \
+             RETURNING id",
+        )
+        .bind(id)
+        .bind(user_id)
+        .bind(title)
+        .bind(description)
+        .bind(currency)
+        .bind(status)
+        .bind(project_id)
+        .bind(submitted_at)
+        .bind(decided_at)
+        .bind(paid_at)
+        .bind(created_at)
+        .bind(updated_at)
+        .fetch_optional(&mut *connection)
+        .await
+        .map_err(|error| insert_failure("expense_claims", &error))?;
+
+        match inserted {
+            Some(_) => {
+                outcome.record(1);
+                inserted_ids.push(id);
+            }
+            None => outcome.record(0),
+        }
+    }
+
+    Ok((outcome, inserted_ids))
+}
+
+/// Inserts the profile's expense items.
+///
+/// Item ids are `SHA-256("atom-seed/v1/expense_items/<n>")` with `n` counting
+/// across the whole profile, so the derivation does not depend on how the
+/// claims are grouped. The owner is the claim's owner, which the composite key
+/// would reject otherwise. `amount` is a fixed decimal string bound and cast
+/// to `numeric`, and `incurred_on` derives from the claim's `created_at`.
+async fn seed_items(
+    connection: &mut PgConnection,
+    profile: Profile,
+) -> Result<EntityOutcome, Failure> {
+    let mut outcome = EntityOutcome::default();
+    let mut item_index = 0_usize;
+
+    for claim_index in 0..profile.claims() {
+        let claim_id = seeded_id("expense_claims", claim_index);
+        let user_id = seeded_id("users", claim_index % SEEDED_USERS.len());
+        let claim_created = claim_created_at(claim_index);
+        let incurred_on = (claim_created - Duration::days(3)).date_naive();
+
+        for line in 0..items_per_claim(claim_index) {
+            let id = seeded_id("expense_items", item_index);
+            let base = ITEM_DESCRIPTIONS[item_index % ITEM_DESCRIPTIONS.len()];
+            let description = format!("{} (line {})", base, line + 1);
+            let amount = ITEM_AMOUNTS[item_index % ITEM_AMOUNTS.len()];
+            let category = ITEM_CATEGORIES[item_index % ITEM_CATEGORIES.len()];
+            let created_at = claim_created + Duration::hours((line + 1) as i64);
+            let updated_at = created_at + Duration::hours(1);
+
+            // Some rows carry a receipt and some do not, so both branches of
+            // `expense_items_receipt_url_chk` have data behind them.
+            let receipt_url = if item_index % 3 == 0 {
+                Some(format!(
+                    "https://receipts.atom.local/atom-seed/expense-items/{item_index}.pdf"
+                ))
+            } else {
+                None
+            };
+
+            let inserted = sqlx::query(
+                "INSERT INTO expense_items \
+                     (id, user_id, claim_id, description, amount, incurred_on, category, \
+                      receipt_url, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $4, $5::numeric, $6, $7, $8, $9, $10) \
+                 ON CONFLICT (id) DO NOTHING",
+            )
+            .bind(id)
+            .bind(user_id)
+            .bind(claim_id)
+            .bind(description)
+            .bind(amount)
+            .bind(incurred_on)
+            .bind(category)
+            .bind(receipt_url)
+            .bind(created_at)
+            .bind(updated_at)
+            .execute(&mut *connection)
+            .await
+            .map_err(|error| insert_failure("expense_items", &error))?
+            .rows_affected();
+
+            outcome.record(inserted);
+            item_index += 1;
+        }
+    }
+
+    Ok(outcome)
+}
+
+/// Sets every newly inserted claim's `total_amount` from its items.
+///
+/// One static statement, so the sum is computed by PostgreSQL over the exact
+/// stored decimals and the result is stored at the column's own scale. A claim
+/// with no items gets `COALESCE(..., 0)`, which the column renders `0.0000`.
+async fn refresh_claim_totals(
+    connection: &mut PgConnection,
+    claim_ids: &[Uuid],
+) -> Result<(), Failure> {
+    if claim_ids.is_empty() {
+        return Ok(());
+    }
+
+    sqlx::query(
+        "UPDATE expense_claims AS c \
+         SET total_amount = COALESCE( \
+                 (SELECT SUM(i.amount) FROM expense_items i \
+                  WHERE i.claim_id = c.id AND i.user_id = c.user_id), \
+                 0) \
+         WHERE c.id = ANY($1)",
+    )
+    .bind(claim_ids)
+    .execute(&mut *connection)
+    .await
+    .map_err(|error| {
+        Failure::failed(format!(
+            "could not set the claim totals from their items: {}",
+            describe_database_error(&error)
+        ))
+    })?;
+
+    Ok(())
+}
+
+/// Runs the six post-insert checks before the transaction commits.
 async fn verify(
     connection: &mut PgConnection,
     profile: Profile,
     seed_ids: &[Uuid],
 ) -> Result<(), Failure> {
+    verify_claim_totals(connection, profile).await?;
     verify_ownership(connection, profile, seed_ids).await?;
     verify_completion_timestamps(connection, profile).await?;
     verify_counts(connection, profile, seed_ids).await?;
     verify_documented_credentials(connection, &seed_ids[0]).await?;
     verify_table_list(connection).await
+}
+
+/// `V1`: every seeded claim's total is the sum of its own items.
+///
+/// The comparison is made by PostgreSQL, over the stored `NUMERIC(19,4)`
+/// values; nothing in Rust sees a number. A claim with no items must carry
+/// `0.0000`, which `COALESCE(..., 0)` produces.
+async fn verify_claim_totals(
+    connection: &mut PgConnection,
+    profile: Profile,
+) -> Result<(), Failure> {
+    let claim_ids = seeded_ids("expense_claims", profile.claims());
+
+    let mismatched = query_count_single(
+        connection,
+        "SELECT COUNT(*) FROM expense_claims c \
+         WHERE c.id = ANY($1) \
+           AND c.total_amount <> COALESCE( \
+                   (SELECT SUM(i.amount) FROM expense_items i \
+                    WHERE i.claim_id = c.id AND i.user_id = c.user_id), \
+                   0)",
+        &claim_ids,
+    )
+    .await?;
+
+    expect_zero(
+        "V1 claim totals",
+        mismatched,
+        "a seeded claim's total_amount differs from the sum of its items",
+    )
 }
 
 /// `V2`: every seeded row belongs to one of the two seeded accounts.
@@ -975,6 +1314,60 @@ async fn verify_ownership(
         "V2 ownership (tasks)",
         tasks,
         "seeded tasks belong to projects owned outside the seeded set",
+    )?;
+
+    let claim_ids = seeded_ids("expense_claims", profile.claims());
+    let claims = query_count(
+        connection,
+        "SELECT COUNT(*) FROM expense_claims WHERE id = ANY($1) AND user_id <> ALL($2)",
+        &claim_ids,
+        seed_ids,
+    )
+    .await?;
+    expect_zero(
+        "V2 ownership (claims)",
+        claims,
+        "seeded claims belong to a user outside the seeded set",
+    )?;
+
+    let claim_projects = query_count_single(
+        connection,
+        "SELECT COUNT(*) FROM expense_claims c JOIN projects p ON p.id = c.project_id \
+         WHERE c.id = ANY($1) AND p.user_id <> c.user_id",
+        &claim_ids,
+    )
+    .await?;
+    expect_zero(
+        "V2 ownership (claim projects)",
+        claim_projects,
+        "a seeded claim is linked to a project owned by another account",
+    )?;
+
+    let item_ids = seeded_ids("expense_items", profile.items());
+    let items = query_count(
+        connection,
+        "SELECT COUNT(*) FROM expense_items WHERE id = ANY($1) AND user_id <> ALL($2)",
+        &item_ids,
+        seed_ids,
+    )
+    .await?;
+    expect_zero(
+        "V2 ownership (items)",
+        items,
+        "seeded items belong to a user outside the seeded set",
+    )?;
+
+    let item_owners = query_count_single(
+        connection,
+        "SELECT COUNT(*) FROM expense_items i JOIN expense_claims c ON c.id = i.claim_id \
+         WHERE i.id = ANY($1) AND i.user_id <> c.user_id",
+        &item_ids,
+    )
+    .await?;
+    expect_zero(
+        "V2 ownership (item claims)",
+        item_owners,
+        "a seeded item disagrees with its claim about the owner",
     )?;
 
     Ok(())
@@ -1049,6 +1442,22 @@ async fn verify_counts(
     )
     .await?;
     expect_count("V4 counts (tasks)", profile.tasks(), tasks)?;
+
+    let claims = query_count_single(
+        connection,
+        "SELECT COUNT(*) FROM expense_claims WHERE user_id = ANY($1)",
+        seed_ids,
+    )
+    .await?;
+    expect_count("V4 counts (claims)", profile.claims(), claims)?;
+
+    let items = query_count_single(
+        connection,
+        "SELECT COUNT(*) FROM expense_items WHERE user_id = ANY($1)",
+        seed_ids,
+    )
+    .await?;
+    expect_count("V4 counts (items)", profile.items(), items)?;
 
     Ok(())
 }
@@ -1212,8 +1621,10 @@ fn print_report(profile: Profile, outcome: &SeedOutcome) {
     print_entity("notes", outcome.notes);
     print_entity("projects", outcome.projects);
     print_entity("tasks", outcome.tasks);
+    print_entity("claims", outcome.claims);
+    print_entity("items", outcome.items);
     println!(
-        "atom-seed: verification passed (5 checks); {} rows inserted, {} skipped",
+        "atom-seed: verification passed (6 checks); {} rows inserted, {} skipped",
         outcome.total_inserted(),
         outcome.total_skipped()
     );
@@ -1425,6 +1836,63 @@ const TASK_DETAILS: [&str; 10] = [
     "The ledger wins over the prose summary where they disagree.",
 ];
 
+/// Claim titles. Each one is short enough for the 200-character column check.
+const CLAIM_TITLES: [&str; 10] = [
+    "Conference travel",
+    "Client dinner",
+    "Team offsite",
+    "Hardware purchase",
+    "Software subscription",
+    "Rail tickets",
+    "Hotel stay",
+    "Training course",
+    "Home office chair",
+    "Courier charges",
+];
+
+/// One sentence appended to each claim's title to form its description.
+const CLAIM_DESCRIPTIONS: [&str; 5] = [
+    "Reimbursement for travel booked for the working group.",
+    "Expenses recorded against an approved project budget.",
+    "Receipts attached where the vendor supplied one.",
+    "Advance paid personally and claimed after the trip.",
+    "Recurring cost renewed for the current quarter.",
+];
+
+/// The currencies the claim rows cycle through. Each is three upper-case
+/// letters, as `expense_claims_currency_chk` requires.
+const CLAIM_CURRENCIES: [&str; 3] = ["USD", "EUR", "GBP"];
+
+/// Line-item descriptions. The seeder appends the line number, so every item
+/// row has a distinct description within its claim.
+const ITEM_DESCRIPTIONS: [&str; 8] = [
+    "Return rail fare",
+    "Airport transfer",
+    "Overnight accommodation",
+    "Working lunch",
+    "Conference registration",
+    "Taxi to the office",
+    "Printed materials",
+    "Parking",
+];
+
+/// Fixed decimal strings bound to the `NUMERIC(19,4)` amount column and cast
+/// by PostgreSQL. They are strings rather than numbers so that no money value
+/// ever passes through a Rust float or through Rust arithmetic (ADR-0007).
+const ITEM_AMOUNTS: [&str; 6] = [
+    "12.5000", "48.0000", "7.2500", "125.9999", "3.1000", "62.4000",
+];
+
+/// The line-item categories, cycling. `None` exercises the optional column:
+/// `REIMB-R01` makes the category optional and the check allows `NULL`.
+const ITEM_CATEGORIES: [Option<&str>; 5] = [
+    Some("travel"),
+    Some("meals"),
+    None,
+    Some("lodging"),
+    Some("supplies"),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1464,6 +1932,43 @@ mod tests {
                     profile.tasks()
                 ));
             }
+        }
+
+        // C-R1 §SEEDER fixes the claims and the derived items. The item counts
+        // are the sum of `1 + (i % 3)` over the claims, less the first claim's
+        // single item: minimal 0, dev 49 - 1 = 48, demo 99 - 1 = 98.
+        let claims = [
+            (Profile::Minimal, 1_usize, 0_usize),
+            (Profile::Dev, 25, 48),
+            (Profile::Demo, 50, 98),
+        ];
+
+        for (profile, claim_count, item_count) in claims {
+            if profile.claims() != claim_count {
+                return Err(format!(
+                    "profile {}: claims {} != {claim_count}",
+                    profile.as_str(),
+                    profile.claims()
+                ));
+            }
+            if profile.items() != item_count {
+                return Err(format!(
+                    "profile {}: items {} != {item_count}",
+                    profile.as_str(),
+                    profile.items()
+                ));
+            }
+        }
+
+        // The arithmetic the insert loop performs, restated row by row: the
+        // first claim is the draft with no items and every other claim carries
+        // between one and three.
+        if items_per_claim(0) != 0
+            || items_per_claim(1) != 2
+            || items_per_claim(2) != 3
+            || items_per_claim(3) != 1
+        {
+            return Err("the per-claim item rule does not match seeding.md §2.1".to_string());
         }
 
         if Profile::default() != Profile::Dev {

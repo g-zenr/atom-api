@@ -5,8 +5,9 @@
 > **Owner:** maintained by the `database` agent
 
 The complete Phase 1 schema of the ATOM database, table by table, as it is
-defined in `migrations/`. Section 11 is the **proposed** Phase 2 schema: none
-of it exists yet.
+defined in `migrations/`. Section 11 is the **proposed** Phase 2 schema: its
+first two tables are created by `migrations/0004_expense_claims.sql` and have
+no API, and the rest of it does not exist yet.
 
 The conventions the schema follows are in
 [`../project-truth.md`](../project-truth.md) §12. The rules for changing it
@@ -19,6 +20,9 @@ users ──1:N──► refresh_sessions
   │
   ├──1:N──► notes
   │
+  ├──1:N──► expense_claims ──1:N──► expense_items
+  │              └─(project_id, SET NULL)──► projects
+  │
   └──1:N──► projects ──1:N──► tasks
 ```
 
@@ -29,12 +33,16 @@ users ──1:N──► refresh_sessions
 | `notes` | `migrations/0002_notes.sql` | One row per note. |
 | `projects` | `migrations/0003_projects_and_tasks.sql` | One row per project. |
 | `tasks` | `migrations/0003_projects_and_tasks.sql` | One row per task. |
+| `expense_claims` | `migrations/0004_expense_claims.sql` | One row per reimbursement claim. No endpoint yet (§11.1). |
+| `expense_items` | `migrations/0004_expense_claims.sql` | One row per claim line item. No endpoint yet (§11.2). |
 
 Two enum types are created by `migrations/0003_projects_and_tasks.sql`:
-`task_status` and `task_priority`.
+`task_status` and `task_priority`. `migrations/0004_expense_claims.sql` adds a
+third, `expense_claim_status`.
 
-Six tables are proposed for Phase 2 in §11. They are **not** in the table
-above, because they do not exist: `migrations/` ends at `0003`.
+Four tables are still proposed for Phase 2 in §11 and do not exist:
+`companies`, `job_applications`, `application_events` and `embeddings`
+(§11.3–§11.6). `migrations/` ends at `0004`.
 
 ### 1.1 A stale comment in an applied migration
 
@@ -360,12 +368,17 @@ written with that in mind, and the policy in
 
 ## 11. Phase 2 (Proposed)
 
-> **Status:** **Proposed.** Phase 1 of the run — the product intake — writes the
-> accepted requirements in [`../project-truth.md`](../project-truth.md) §18.
-> This section records the schema those requirements imply. **None of the
-> tables below exists.** `migrations/` ends at `0003`, no Rust model in `src/`
-> names them, no endpoint reads or writes them, and nothing here is
-> `Implemented` or `Verified`.
+> **Status:** **Proposed** for the API. Phase 1 of the run — the product
+> intake — writes the accepted requirements in
+> [`../project-truth.md`](../project-truth.md) §18. This section records the
+> schema those requirements imply. **No endpoint reads or writes any of it**,
+> no request path can reach it, and nothing here is `Implemented` or
+> `Verified`.
+>
+> `migrations/0004_expense_claims.sql` now creates `expense_claim_status`,
+> `expense_claims` and `expense_items` with every constraint and index named in
+> §11.1 and §11.2, so those two tables exist while there is still no endpoint
+> and no service for them, and §11.3–§11.6 remain unbuilt.
 
 Six provisional assumptions underlie this section: **A1** (a claim has one
 currency and there is no FX), **A2** (a receipt is a reference), **A3**
@@ -373,9 +386,9 @@ currency and there is no FX), **A2** (a receipt is a reference), **A3**
 **A5** (single owner, no sharing) and **A6** (money is `NUMERIC(19,4)`, a JSON
 string with four decimals). All six are **provisional defaults, owner decision
 O1**; they were never confirmed by the owner. A1, A5 and A6 shape the columns
-most directly. A revision of any of them changes this section before `0004` is
-written, and the requirements in
-[`../project-truth.md`](../project-truth.md) §18.4 say how.
+most directly. A revision of any of them changes this section, and for §11.1
+and §11.2 it needs a new migration as well because `0004` is applied; the
+requirements in [`../project-truth.md`](../project-truth.md) §18.4 say how.
 
 The design follows the conventions of §10 and the rules of
 [`migration-policy.md`](migration-policy.md). Where a rule cannot be expressed
@@ -529,9 +542,8 @@ than a `23503`; the test asserts the response, the key asserts the data.
 
 `REIMB-R08` requires a receipt reference but does not say which table carries
 it. This proposal puts it on the line item, because one claim can hold several
-receipts. The feature specification owns that placement; if it chooses the
-claim instead, the column moves before `0004` is written, which is a change to
-this document and not a migration.
+receipts, and that is where `0004` put it; moving it to the claim is a new
+migration, not an edit to this document alone.
 
 #### Indexes
 
@@ -893,7 +905,7 @@ if every table-level constraint still passes.
 
    | Migration | Creates | Requirements |
    | --------- | ------- | ------------ |
-   | `0004_reimbursements.sql` | `expense_claim_status`, `expense_claims`, `expense_items` and their indexes | `REIMB-R01`…`R10` |
+   | `0004_expense_claims.sql` | `expense_claim_status`, `expense_claims`, `expense_items` and their indexes | `REIMB-R01`…`R10` |
    | `0005_job_applications.sql` | `job_application_status`, `application_event_kind`, `companies`, `job_applications`, `application_events` and their indexes | `JOB-R01`…`R09` |
    | `0006_embeddings.sql` | `embeddings` and its indexes, with `source_type` a `CHECK`ed `TEXT` | `ML-R01`…`R09` |
 

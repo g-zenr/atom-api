@@ -8,6 +8,7 @@
 //! * `notes`   — personal notes.
 //! * `projects`— projects.
 //! * `tasks`   — tasks belonging to a project.
+//! * `reimbursements` — expense claims and their line items.
 //! * `config`  — configuration loading, validation and the message catalogue.
 //! * `helpers` — cohesive operations that support a behaviour.
 //! * `utils`   — generic, domain-independent utilities.
@@ -29,6 +30,7 @@ pub mod notes;
 pub mod pagination;
 pub mod projects;
 pub mod ratelimit;
+pub mod reimbursements;
 pub mod state;
 pub mod tasks;
 pub mod telemetry;

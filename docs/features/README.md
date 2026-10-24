@@ -27,7 +27,7 @@ each of them is in [§2](#2-the-per-feature-document-contract).
 
 The three Phase 2 features are `Accepted`: their requirements are recorded in
 [`project-truth.md`](../project-truth.md) §18 with acceptance criteria, and
-nothing is built yet. They are not `Implemented` and not `Verified`.
+Reimbursements now has its schema: `migrations/0004_expense_claims.sql` and `src/reimbursements/{mod,models}.rs` exist, with `tests/claims_schema.rs` proving the constraints. Its endpoints, service and repository do not exist. None of the three is `Implemented` or `Verified`.
 
 The status column summarises the feature as a whole. The per-requirement
 evidence behind it is in each feature's `status.md`; a feature can contain both

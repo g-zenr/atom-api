@@ -5,12 +5,15 @@
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-REIMB-001`](specification.md)
 
-What the test suite must contain for this feature. **None of these tests
-exists yet**: the feature has no code, so every name below is a test to be
-written with the implementation chain.
+What the test suite contains for this feature, and what it deliberately does
+not. The **schema layer exists and is covered** by `tests/claims_schema.rs`
+(§1) and by two cases in `tests/seeder.rs` (§1.1). The **endpoint layer does
+not exist**: there is no handler, service, repository, DTO or route, so the
+HTTP-level tests in §2 are a plan with nothing to call yet, and
+`/api/v1/openapi.json` is unchanged.
 
-This document describes the planned suite. It does not claim that any run
-happened; what must pass before a change is complete is stated in
+This document describes the suite. It does not claim that any run happened;
+what must pass before a change is complete is stated in
 [`verification-policy.md`](../../testing/verification-policy.md), and the
 record of a run belongs in that record and in [status.md](status.md), never
 here.
@@ -21,12 +24,53 @@ and the implementing change must show that removing the rule makes the test
 fail — by deleting the predicate, inverting the transition or changing the
 assertion, then restoring it.
 
-## 1. Integration tests — `tests/claims_api.rs`
+## 1. The schema layer — `tests/claims_schema.rs`
 
-The tests use the shared harness in `tests/common/mod.rs`: a real router, a
-real PostgreSQL database, a unique user per test, no mocks.
+The chain `C-R1` creates the tables and the row types and no endpoint, so its
+test file works at the database layer: it applies migration `0004` to a real
+PostgreSQL database and asserts each constraint by attempting the write the
+constraint exists to refuse. There is no router call in this file.
 
-### 1.1 Happy paths
+| Test | What it proves |
+| ---- | -------------- |
+| `the_expense_claim_tables_apply_from_an_empty_database` | Migration `0004` applies after `0001`–`0003` from an empty database and creates `expense_claims`, `expense_items` and the `expense_claim_status` enum. |
+| `a_claim_rejects_a_currency_that_is_not_three_upper_case_letters` | `expense_claims_currency_chk` refuses `usd` and `US` (`23514`). A four-character code is refused one step earlier, by the `CHAR(3)` type (`22001`), so the value is unrepresentable either way. `USD` is accepted and round-trips unchanged. This is the data half of `REIMB-R02`; the upper-casing and the immutability are the service's, and they do not exist yet. |
+| `a_claim_rejects_a_negative_total` | `expense_claims_total_amount_chk`. Nothing writes the total yet: the `SUM` that maintains it arrives with the item writes in R3. |
+| `the_lifecycle_constraint_rejects_a_submitted_claim_without_a_submission_timestamp` | `expense_claims_lifecycle_timestamps_chk` refuses a `submitted` row with `submitted_at` null. |
+| `the_lifecycle_constraint_accepts_every_consistent_status` | One consistent row per status is accepted, so the constraint is not merely restrictive by accident. |
+| `an_item_cannot_belong_to_another_owners_claim` | The composite key `expense_items_claim_fk (claim_id, user_id)` refuses an item whose `user_id` is not its claim's owner. The `404` a client will see is R2's job; this proves the row cannot exist at all. |
+| `deleting_a_claim_deletes_its_items` | `ON DELETE CASCADE` on the composite key. |
+| `deleting_a_project_clears_the_claim_link_and_keeps_the_claim` | `ON DELETE SET NULL` on `project_id` — the data half of `REIMB-R09` and of invariant 12. The endpoint-level counterpart, which asserts the response, is `deleting_the_project_clears_the_link_and_keeps_the_claim` in §2.4. |
+| `deleting_an_account_deletes_its_claims_and_items` | The two `users` cascades. |
+| `money_is_stored_with_four_decimal_places` | `NUMERIC(19,4)` read as `::text` renders exactly four decimal places (`"149.8000"`), which is the value the API will publish once it exists. The test also records that PostgreSQL **rounds** a value with more decimals to the column's scale rather than rejecting it, so the four-decimal rule is the service's job, not the column's. |
+
+The file does **not** prove a requirement end to end. It proves that the
+tables, the constraints, the cascades and the money scale are what
+[`schema.md`](../../database/schema.md) §11 says; a requirement stays
+`Not built` until a request can exercise it.
+
+### 1.1 The seeder's claims — `tests/seeder.rs`
+
+The same chain extends the seeder, so its count check keeps passing, and adds
+two cases to the existing seeder suite:
+
+| Test | What it proves |
+| ---- | -------------- |
+| `the_seeder_dev_profile_inserts_the_documented_claim_counts` | The `dev` profile inserts exactly 25 claims and 48 items, counted both from the binary's report and in the database, restricted to the two seeded accounts. The profile counts are 1 / 25 / 50 claims and 0 / 48 / 98 items. |
+| `a_seeded_claim_total_equals_the_sum_of_its_items` | Every seeded claim's `total_amount` equals `SUM(amount)` of its items, read back in SQL. This is the one place the total invariant is asserted before the feature owns it. |
+
+The seeded rows are data, not feature behaviour: a claim that exists in the
+database does not make any endpoint exist.
+
+## 2. Integration tests — `tests/claims_api.rs`
+
+None of the tests in this section exists yet. They describe the suite that
+arrives with R2–R5, together with the routes; a test written before the
+endpoint would have to assert the absence of the route, which is not what any
+row below proves. The tests use the shared harness in `tests/common/mod.rs`: a
+real router, a real PostgreSQL database, a unique user per test, no mocks.
+
+### 2.1 Happy paths
 
 | Test | What it proves |
 | ---- | -------------- |
@@ -38,7 +82,7 @@ real PostgreSQL database, a unique user per test, no mocks.
 | `a_claim_can_be_deleted_in_any_status` | A claim in each of `draft`, `submitted`, `approved`, `rejected` and `paid` is deleted with `204`, and a following `GET` is `404`; its items are gone too (`REIMB-R11`). |
 | `the_claim_search_matches_title_and_description` | `?search=` finds a claim by a word in the title and one by a word in the description, and not the third claim. |
 
-### 1.2 Money
+### 2.2 Money
 
 | Test | What it proves |
 | ---- | -------------- |
@@ -50,7 +94,7 @@ real PostgreSQL database, a unique user per test, no mocks.
 | `an_amount_above_the_maximum_is_refused` | `"1000000000000000.0000"` is `422`. |
 | `the_total_is_not_accepted_from_the_client` | A create body carrying `total_amount` does not set it: the stored value is `"0.0000"`. |
 
-### 1.3 The lifecycle
+### 2.3 The lifecycle
 
 | Test | What it proves |
 | ---- | -------------- |
@@ -61,7 +105,7 @@ real PostgreSQL database, a unique user per test, no mocks.
 | `an_item_cannot_be_added_to_a_submitted_claim` | `409 conflict`; the total is unchanged. |
 | `an_item_cannot_be_changed_or_deleted_after_submission` | `PATCH` and `DELETE` on the item are both `409`; the item and the total are unchanged. |
 
-### 1.4 Ownership
+### 2.4 Ownership
 
 | Test | What it proves |
 | ---- | -------------- |
@@ -72,7 +116,7 @@ real PostgreSQL database, a unique user per test, no mocks.
 | `a_claim_cannot_reference_another_users_project` | A create or `PATCH` with a foreign `project_id` is `404`, and no claim is created or changed. |
 | `deleting_the_project_clears_the_link_and_keeps_the_claim` | After the project is deleted, `GET` returns the claim with `project_id` `null` and its items intact. |
 
-### 1.5 Validation and malformed requests
+### 2.5 Validation and malformed requests
 
 | Test | What it proves |
 | ---- | -------------- |
@@ -90,7 +134,7 @@ real PostgreSQL database, a unique user per test, no mocks.
 | `a_malformed_body_is_refused` | Truncated JSON is `400`; an empty body is `400`. There is no enum in a claim request body, so there is no body value that produces a `422` from the deserialiser. |
 | `an_unknown_status_filter_is_refused` | `?status=archived` is `400`, because the query string cannot be parsed. |
 
-### 1.6 Listing and pagination
+### 2.6 Listing and pagination
 
 | Test | What it proves |
 | ---- | -------------- |
@@ -101,7 +145,7 @@ real PostgreSQL database, a unique user per test, no mocks.
 | `the_claims_listing_is_newest_first` | The items arrive in `created_at DESC, id DESC` order. |
 | `the_detail_items_are_in_chronological_order` | Items arrive in `incurred_on`, `created_at`, `id` order regardless of insertion order. |
 
-### 1.7 The error codes
+### 2.7 The error codes
 
 | Code | Status | Proving test |
 | ---- | ------ | ------------ |
@@ -110,7 +154,7 @@ real PostgreSQL database, a unique user per test, no mocks.
 | `not_found` | `404` | `a_claim_of_another_user_is_invisible`, `an_item_of_another_users_claim_is_invisible` |
 | `conflict` | `409` | `every_forbidden_transition_is_refused`, `an_item_cannot_be_added_to_a_submitted_claim` |
 | `payload_too_large` | `413` | `a_claims_body_over_the_limit_is_refused` (the mechanism is already proven by `a_body_over_the_limit_is_refused` in `tests/auth_api.rs`; this one proves it on a claims route) |
-| `validation_failed` | `422` | the §1.5 table |
+| `validation_failed` | `422` | the §2.5 table |
 | `database_error` | `500` | not provable through the HTTP API without fault injection; the mapping is unit-tested in `src/error.rs` and the feature adds no second mapping |
 | `timeout` | `408` | proven globally by the timeout test in `tests/projects_tasks_api.rs`; a claims route uses the same middleware |
 
@@ -119,7 +163,7 @@ real PostgreSQL database, a unique user per test, no mocks.
 | `the_claim_routes_require_a_credential` | All twelve operations, called without a token and with an invalid token, return `401 unauthorized` with the standard envelope. |
 | `a_claims_body_over_the_limit_is_refused` | A claims body above `max_body_bytes` returns `413 payload_too_large`. |
 
-### 1.8 The contract
+### 2.8 The contract
 
 | Test | What it proves |
 | ---- | -------------- |
@@ -127,7 +171,7 @@ real PostgreSQL database, a unique user per test, no mocks.
 | `the_money_fields_are_strings_in_the_document` | The `total_amount`, `amount`, `salary_min` and `salary_max` schemas are `type: string`, never `type: number`. |
 | `the_claims_listing_publishes_its_parameters_once` | The list operation publishes `limit`, `offset`, `status`, `currency`, `search`, `submitted_from` and `submitted_to` exactly once each. |
 
-## 2. Unit tests — in the module
+## 3. Unit tests — in the module
 
 | File | Test | What it proves |
 | ---- | ---- | -------------- |
@@ -139,7 +183,7 @@ real PostgreSQL database, a unique user per test, no mocks.
 | `src/reimbursements/service.rs` | `a_receipt_must_be_an_absolute_http_url` | `https://…` and `http://…` are accepted; `javascript:`, `file:`, `data:` and a relative path are refused. |
 | `src/reimbursements/service.rs` | `a_currency_is_three_letters_and_is_upper_cased` | `"eur"` becomes `"EUR"`; `"EU"` and `"EURO"` are refused. |
 
-## 3. Deliberately not covered
+## 4. Deliberately not covered
 
 | Gap | Why |
 | --- | --- |
@@ -149,9 +193,13 @@ real PostgreSQL database, a unique user per test, no mocks.
 | **A receipt URL that does not resolve.** | The API never fetches it; asserting that would test the network, not the API. |
 | **The exact wording of a validation message.** | The message comes from `config/messages.toml`; tests assert the code and the field name, not the prose. |
 | **The seeded claims' exact contents.** | `tests/seeder.rs` owns that, and a change to the profile would break a claim-specific test for no product reason. |
+| **The endpoint behaviour in §2.** | Not a deliberate exclusion: the endpoints do not exist until R2–R5, so there is nothing to call. The rows stay in the map so that the gap is visible, and none of them is counted as coverage. |
 
-## 4. Conventions for a new test
+## 5. Conventions for a new test
 
+- A schema-level assertion belongs in `tests/claims_schema.rs`: it writes the
+  row the constraint exists to refuse and asserts the database refuses it. It
+  proves the data rule, never the response.
 - A new endpoint needs a success case, a `401` case, a `404` cross-account
   case, a `400` malformed-path case and a `422` validation case.
 - A money assertion compares the **string**, never a parsed number.

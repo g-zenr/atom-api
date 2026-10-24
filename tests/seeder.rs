@@ -55,6 +55,12 @@ const DEV_USERS: i64 = 2;
 const DEV_NOTES: i64 = 200;
 const DEV_PROJECTS: i64 = 8;
 const DEV_TASKS: i64 = 60;
+/// The `dev` profile's expense claims and line items (`C-R1` §SEEDER).
+///
+/// The item count is derived from the claim count: `1 + (i % 3)` items for
+/// every claim except the first, which is a draft and carries none.
+const DEV_CLAIMS: i64 = 25;
+const DEV_CLAIM_ITEMS: i64 = 48;
 
 /// The `minimal` profile counts (seeding.md §2).
 const MINIMAL_USERS: i64 = 2;
@@ -264,6 +270,23 @@ fn seeded_user_ids() -> Vec<Uuid> {
 fn seeded_task_ids(count: i64) -> Vec<Uuid> {
     (0..count)
         .map(|index| seeded_id("tasks", index as usize))
+        .collect()
+}
+
+/// The ids of the seeded expense-claim rows.
+fn seeded_claim_ids(count: i64) -> Vec<Uuid> {
+    (0..count)
+        .map(|index| seeded_id("expense_claims", index as usize))
+        .collect()
+}
+
+/// The ids of the seeded expense-item rows.
+///
+/// The item index runs across the whole profile, not per claim (`C-R1`
+/// §SEEDER), so one range covers every item.
+fn seeded_item_ids(count: i64) -> Vec<Uuid> {
+    (0..count)
+        .map(|index| seeded_id("expense_items", index as usize))
         .collect()
 }
 
@@ -1133,5 +1156,190 @@ async fn a_reset_deletes_rows_owned_by_the_seeded_accounts() {
             MINIMAL_TASKS
         ),
         "the documented dataset must be intact after the reset"
+    );
+}
+
+#[tokio::test]
+async fn the_seeder_dev_profile_inserts_the_documented_claim_counts() {
+    let _serialised = seeder_lock().await;
+    let pool = migrated_pool().await;
+
+    run_in_test_database(&["--profile", "dev", "--reset", "--allow-non-empty"])
+        .require_success("the dev profile");
+
+    // `atom_test` is shared, so every count is restricted to the two seeded
+    // accounts. A table-wide COUNT(*) would count another test's rows.
+    let accounts = seeded_user_ids();
+
+    let claims: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM expense_claims WHERE user_id = ANY($1)")
+            .bind(accounts.clone())
+            .fetch_one(&pool)
+            .await
+            .expect("the seeded claims must be countable");
+    assert_eq!(
+        claims, DEV_CLAIMS,
+        "the dev profile must insert the documented claim count"
+    );
+
+    let items: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM expense_items WHERE user_id = ANY($1)")
+            .bind(accounts.clone())
+            .fetch_one(&pool)
+            .await
+            .expect("the seeded items must be countable");
+    assert_eq!(
+        items, DEV_CLAIM_ITEMS,
+        "the dev profile must insert the documented item count"
+    );
+
+    // The counts alone would also pass if the rows sat on different
+    // deterministic slots, so the ids the seeder derives are checked too. This
+    // is the derivation `--reset` and the total refresh both rely on.
+    let claim_ids = seeded_claim_ids(DEV_CLAIMS);
+    let claims_with_ids: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM expense_claims WHERE id = ANY($1)")
+            .bind(&claim_ids)
+            .fetch_one(&pool)
+            .await
+            .expect("the derived claim ids must be countable");
+    assert_eq!(
+        claims_with_ids, DEV_CLAIMS,
+        "every claim id must be SHA-256(\"atom-seed/v1/expense_claims/<index>\")"
+    );
+
+    let item_ids = seeded_item_ids(DEV_CLAIM_ITEMS);
+    let items_with_ids: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM expense_items WHERE id = ANY($1)")
+            .bind(&item_ids)
+            .fetch_one(&pool)
+            .await
+            .expect("the derived item ids must be countable");
+    assert_eq!(
+        items_with_ids, DEV_CLAIM_ITEMS,
+        "every item id must be SHA-256(\"atom-seed/v1/expense_items/<index>\")"
+    );
+
+    // The first claim is the documented draft with no items (seeding.md §7.4).
+    let first = seeded_id("expense_claims", 0);
+    let (status, owner): (String, Uuid) =
+        sqlx::query_as("SELECT status::text, user_id FROM expense_claims WHERE id = $1")
+            .bind(first)
+            .fetch_one(&pool)
+            .await
+            .expect("the first seeded claim must be readable");
+    assert_eq!(status, "draft", "claim 0 must be the profile's draft claim");
+    assert!(
+        accounts.contains(&owner),
+        "the first seeded claim must belong to a seeded account"
+    );
+
+    let first_items: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM expense_items WHERE claim_id = $1")
+            .bind(first)
+            .fetch_one(&pool)
+            .await
+            .expect("the items of the first claim must be countable");
+    assert_eq!(
+        first_items, 0,
+        "the first draft claim must carry no items (seeding.md §7.4)"
+    );
+
+    // And it is the only claim without items, so the assertion above is a
+    // property of that claim rather than of the whole profile.
+    let itemless: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT c.id FROM expense_claims c
+         WHERE c.id = ANY($1)
+           AND NOT EXISTS (SELECT 1 FROM expense_items i WHERE i.claim_id = c.id)
+         ORDER BY c.id",
+    )
+    .bind(&claim_ids)
+    .fetch_all(&pool)
+    .await
+    .expect("the itemless claims must be listable");
+    assert_eq!(
+        itemless,
+        vec![first],
+        "only the first draft claim may have no items"
+    );
+}
+
+#[tokio::test]
+async fn a_seeded_claim_total_equals_the_sum_of_its_items() {
+    let _serialised = seeder_lock().await;
+    let pool = migrated_pool().await;
+
+    run_in_test_database(&["--profile", "dev", "--reset", "--allow-non-empty"])
+        .require_success("the dev profile");
+
+    let claim_ids = seeded_claim_ids(DEV_CLAIMS);
+
+    // The comparison is done by PostgreSQL in `numeric`, never in Rust: the
+    // crate has no decimal type (ADR-0007), and a text comparison would fail on
+    // a trailing zero rather than on a wrong amount.
+    let mismatched: Vec<(Uuid, String, String)> = sqlx::query_as(
+        "SELECT c.id, c.total_amount::text, COALESCE(SUM(i.amount), 0)::text
+         FROM expense_claims c
+         LEFT JOIN expense_items i ON i.claim_id = c.id
+         WHERE c.id = ANY($1)
+         GROUP BY c.id, c.total_amount
+         HAVING c.total_amount <> COALESCE(SUM(i.amount), 0)
+         ORDER BY c.id",
+    )
+    .bind(&claim_ids)
+    .fetch_all(&pool)
+    .await
+    .expect("the seeded claims must be readable");
+
+    assert!(
+        mismatched.is_empty(),
+        "every seeded claim's total_amount must equal SUM(amount) of its items; \
+         mismatches (claim, stored total, sum of items): {mismatched:?}"
+    );
+
+    // The equality above is only meaningful if the claims are there: a missing
+    // dataset would produce no mismatches.
+    let present: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM expense_claims WHERE id = ANY($1)")
+        .bind(&claim_ids)
+        .fetch_one(&pool)
+        .await
+        .expect("the seeded claims must be countable");
+    assert_eq!(
+        present, DEV_CLAIMS,
+        "every seeded claim must be present for the sum check to mean anything"
+    );
+
+    // Every seeded claim is in the table, so the lifecycle constraint accepted
+    // it. This asserts that the constraint relied on is the one this schema
+    // carries, so the coverage cannot be vacuous.
+    let enforced: bool = sqlx::query_scalar(
+        "SELECT EXISTS (
+             SELECT 1 FROM pg_constraint
+             WHERE conname = 'expense_claims_lifecycle_timestamps_chk'
+               AND conrelid = 'expense_claims'::regclass
+               AND contype = 'c'
+         )",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("the constraint catalogue must be readable");
+    assert!(
+        enforced,
+        "the lifecycle constraint must be the one this table carries"
+    );
+
+    // All five statuses are represented, so every arm of that constraint has
+    // data behind it rather than being satisfied by an absence.
+    let statuses: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT status::text FROM expense_claims WHERE id = ANY($1) ORDER BY 1",
+    )
+    .bind(&claim_ids)
+    .fetch_all(&pool)
+    .await
+    .expect("the seeded claim statuses must be readable");
+    assert_eq!(
+        statuses,
+        vec!["approved", "draft", "paid", "rejected", "submitted"],
+        "the dev profile must exercise every status the lifecycle constraint constrains"
     );
 }

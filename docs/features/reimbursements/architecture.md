@@ -9,12 +9,15 @@ How the reimbursement feature is intended to be built. The public contract is
 in [api.md](api.md); the agreed requirements are in
 [specification.md](specification.md).
 
-**Nothing in this document exists yet.** No file under
-`src/reimbursements/`, no migration and no test is in the repository. The
-module names, table names and SQL below are the **plan**, recorded so that the
-implementing change has a shape to follow. The design is **accepted but not
-built**, and the text is corrected whenever the implementation and this plan
-disagree.
+**The schema and the row types exist; nothing else does.** Migration
+`0004_expense_claims.sql` creates `expense_claims`, `expense_items` and the
+`expense_claim_status` enum, and `src/reimbursements/` holds `mod.rs` and
+`models.rs` only. There is no handler, service, repository, DTO or route: no
+endpoint exists and `/api/v1/openapi.json` is unchanged. Everything below that
+names a module, a statement or a route is the **plan** for R2–R5, recorded so
+that the implementing change has a shape to follow. A planned design is
+recorded as planned; the text is corrected whenever the implementation and this
+plan disagree.
 
 ## 1. Responsibilities
 
@@ -25,6 +28,13 @@ disagree.
 | `src/reimbursements/repository.rs` | SQL: claim and item statements, every one scoped by `user_id`, and the total recomputation. |
 | `src/reimbursements/models.rs` | Persistence shapes: `ExpenseClaim`, `ExpenseItem`. |
 | `src/reimbursements/dto.rs` | Public contracts: `ClaimResponse`, `ClaimDetailResponse`, `ClaimPage`, `ItemResponse`, the create and update requests, the query type, the money type and the length limits. |
+
+**Of the five modules, only `models.rs` exists**, declared by `mod.rs`. The
+module is registered in `src/lib.rs`, and `models.rs` holds `ClaimStatus`
+(`snake_case` on the wire, `sqlx(type_name = "expense_claim_status")`),
+`ExpenseClaim` and `ExpenseItem` as ordinary row structs. `handlers`, `service`,
+`repository` and `dto` arrive in R2 with the routes; until then the table above
+describes the intended layering, not present files.
 
 The feature depends on:
 
@@ -90,9 +100,18 @@ Three rules that every statement follows:
 
 ### 2.3 The money type
 
-`dto.rs` declares a newtype, `Money(String)`, with a validating constructor.
-It exists so that a money field cannot be deserialised from a JSON number by
-accident:
+**The storage decision is made and implemented; the DTO type is not.** SQLx
+cannot decode `NUMERIC` with the features this crate enables, and
+[`ADR-0007`](../../decisions/ADR-0007-money-representation.md) forbids a
+decimal crate, so money crosses the repository boundary as `total_amount::text`
+and `amount::text` and is carried in Rust as a `String`. `NUMERIC(19,4)::text`
+renders exactly four decimal places, which is the wire form. The total is
+computed by `SUM` in SQL — never in Rust — in the same transaction as the item
+write, so no `f32`, no `f64` and no in-process decimal ever touches a money
+path. `models.rs` already declares the money fields as `String`.
+
+The newtype below is the **R2 plan** for `dto.rs`. It will exist so that a
+money field cannot be deserialised from a JSON number by accident:
 
 - `Deserialize` accepts only a JSON string; a number is a deserialisation
   failure, which the extractor reports as a `422` naming the field.
@@ -122,15 +141,34 @@ purpose: it lets the item statements carry the ownership predicate directly,
 without a join that a future query could forget. The **composite foreign
 key** makes a row whose owner differs from its claim's owner unrepresentable,
 which is stronger than a service check. The parent therefore needs a unique
-index on `(id, user_id)`; [`schema.md`](../../database/schema.md) records it.
+index on `(id, user_id)`; the migration creates it as
+`expense_claims_id_user_id_unique_idx`, and
+[`schema.md`](../../database/schema.md) records it.
 
 The optional link is `expense_claims.project_id → projects (id) ON DELETE SET
 NULL`. Deleting a project clears the reference and leaves the claim.
 
 The physical definition — column types, the `CHECK` constraints, the indexes —
-belongs in [`schema.md`](../../database/schema.md) and is written with the
-migration. The plan's working sketch is in
+belongs in [`schema.md`](../../database/schema.md) §11, which is the
+authority the migration implements. The plan's working sketch is in
 [`plan.md`](../../engineering/runs/chain/plan.md) §5.1.
+
+### 3.1 The seeded claims
+
+`atom-seed` seeds claims and items in the same chain that adds the tables,
+because its count check compares its own table list against
+`information_schema` and every run would otherwise fail. The profiles are
+**1 / 25 / 50 claims** and **0 / 48 / 98 items** for `minimal` / `dev` /
+`demo`. Claim `i` gets `1 + (i % 3)` items **except claim `0`**, the
+profile's first claim, which is a `draft` (`status` cycles the five states by
+`i % 5`) and gets none — that single exception is why `minimal` seeds no items
+at all.
+`currency` cycles a fixed three, and `submitted_at`, `decided_at` and `paid_at`
+are set so that `expense_claims_lifecycle_timestamps_chk` holds for every row.
+`total_amount` is the `SUM` of the claim's items, computed in SQL. The seeder
+asserts the counts exactly and re-reads every seeded claim's total against its
+items; `tests/claims_schema.rs` owns the constraint proof, the seeder owns the
+data.
 
 ## 4. Invariants
 
@@ -148,6 +186,12 @@ migration. The plan's working sketch is in
 | 10 | The item order is chronological and total. | `ORDER BY incurred_on, created_at, id`. |
 | 11 | A receipt is a reference, never bytes. | The column is `text`; no route accepts a file ([`ADR-0009`](../../decisions/ADR-0009-receipt-references.md)). |
 | 12 | Deleting a project keeps the claim. | `ON DELETE SET NULL`. |
+
+Today the migration enforces the **data** half of invariants 1, 5, 11 and 12:
+the two `user_id` keys and the composite item key, `expense_items_amount_chk`,
+the `receipt_url` column type, and `ON DELETE SET NULL`. The rest are service
+rules that arrive with R2–R3. A constraint holds data; it does not answer a
+request.
 
 ## 5. Error handling
 
@@ -239,8 +283,8 @@ POST /api/v1/claims/{claim_id}/approve
 | `src/api/middleware.rs` | `AuthUser`, the source of the ownership predicate. | Yes. |
 | `src/pagination.rs` | The list envelope and the clamp. | Yes. |
 | `src/helpers/validation.rs` | The shared text validators. | Yes. |
-| `src/reimbursements/**` | The feature itself. | **No** |
-| `migrations/00NN_expense_claims.sql` | The two tables, their constraints and their indexes. | **No** |
+| `src/reimbursements/**` | The feature itself. | `mod.rs` and `models.rs` only |
+| `migrations/0004_expense_claims.sql` | The two tables, their constraints and their indexes. | Yes |
 
 ## 9. Related decisions
 

@@ -142,15 +142,19 @@ Source: `src/tasks/handlers.rs`, `src/tasks/service.rs`,
 
 ---
 
-## Phase 2 modules (planned — no code exists)
+## Phase 2 modules (planned — only the reimbursements schema exists)
 
-> **Planned. No code exists for anything in this section.** There is no
-> `src/reimbursements/`, no `src/job_applications/`, no `src/ml/`, no
-> `migrations/0004`…`0006` and no test that names them. The three modules are
-> **accepted product scope** — `REIMB-R01`…`R10`, `JOB-R01`…`R09` and
-> `ML-R01`…`R09` in [`../project-truth.md`](../project-truth.md) §18 — and their
-> feature status is `Accepted`, which means *not built*. Nothing here is
-> `Implemented` or `Verified`.
+> **Mostly planned.** `src/reimbursements/` exists and holds `mod.rs` and
+> `models.rs` only, and `migrations/0004_expense_claims.sql` creates
+> `expense_claim_status`, `expense_claims` and `expense_items`. There is no
+> handler, service, repository or route for it, so no endpoint exists. There is
+> no `src/job_applications/` and no `src/ml/`, and no `migrations/0005` or
+> `0006`. The three modules are **accepted product scope** —
+> `REIMB-R01`…`R11`, `JOB-R01`…`R09` and `ML-R01`…`R09` in
+> [`../project-truth.md`](../project-truth.md) §18 — and their feature status is
+> `Accepted`, which means *not built*. Nothing here is `Implemented` or
+> `Verified`. The constraints that do exist are proved by
+> [`../../tests/claims_schema.rs`](../../tests/claims_schema.rs).
 
 **What "every module" means from here.** §1–§7 describe every module that
 **exists**. From this section on, the phrase means "every module that exists
@@ -183,7 +187,7 @@ users ──┬──► reimbursements ──(optional, SET NULL)──► proj
 
 | Module | Status | Planned source | Owns in the database | May depend on |
 | ------ | ------ | -------------- | -------------------- | ------------- |
-| `reimbursements` | `Accepted`, planned | `src/reimbursements/` | `expense_claims`, `expense_items` | `error`, `pagination`, `helpers`, `money`, `config`, `api`, `projects` (read-only) |
+| `reimbursements` | `Accepted`, schema only | `src/reimbursements/` (`mod.rs`, `models.rs`) | `expense_claims`, `expense_items` | `error` |
 | `job-applications` | `Accepted`, planned | `src/job_applications/` | `companies`, `job_applications`, `application_events` | `error`, `pagination`, `helpers`, `money`, `config`, `api`, `tasks` (read-only, through `projects`) |
 | `ml` | `Accepted`, planned | `src/ml/` | `embeddings` | `error`, `pagination`, `helpers`, `config`, `notes` (repository), `job_applications` (repository), `burn` |
 
