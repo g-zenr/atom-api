@@ -726,9 +726,9 @@ behaviour is `Verified`.
 
 ---
 
-### KI-020 - The seeder's database-name guard refuses the repository's own default database
+### KI-020 — The seeder's database-name guard refuses the repository's own default database
 
-**Status:** Open - **planned mitigation in the `S1` chain** - **Severity:** Medium - **Recorded:** 2026-10-24
+**Status:** Closed · **Severity:** Medium · **Recorded:** 2026-10-24 · **Closed:** 2026-10-24
 
 **Description.** The locked seeder contract `C-S1` guard `G2` refuses to run
 unless the database name is a development database. The rule as originally
@@ -752,25 +752,53 @@ renames a database to contain `test` to get past the guard weakens the only
 client-side protection the tool has. Neither outcome is acceptable, and the
 second teaches the wrong habit.
 
-**Workaround until `S1` lands.** Create a database whose name the guard accepts
+**Workaround before `S1` landed.** Create a database whose name the guard accepts
 (`createdb atom_dev`) and point `DATABASE_URL` at it. The specification in
 [`../database/seeding.md`](../database/seeding.md) documents this.
 
-**Planned mitigation.** Contract amendments `A-C-S1-5` and `A-C-S1-6` in
-[`runs/chain/ledger.md`](runs/chain/ledger.md) replace both substring tests with
-allow-lists that match the code: `G1` allows only the values
-`Environment::parse` calls development, and `G2` becomes a whole-name allow-list
-(`atom_dev`, `atom_test`, `atom_local`, `atom_demo`, plus a `_dev`/`_test`/
-`_local` suffix rule) read through the driver's own URL parser, with a
-`current_database()` cross-check after connecting.
+**Resolution.** Contract amendments `A-C-S1-5` and `A-C-S1-6` in
+[`runs/chain/ledger.md`](runs/chain/ledger.md) replaced both substring tests with
+allow-lists that match the code: `G1` allows only the values `Environment::parse`
+calls development, and `G2` is a whole-name allow-list (`atom_dev`, `atom_test`,
+`atom_local`, `atom_demo`, plus a `_dev`/`_test`/`_local` suffix rule) read
+through the driver's own URL parser, with a `current_database()` cross-check
+after connecting. Both are implemented in `src/bin/atom-seed.rs` and covered by
+`tests/seeder.rs`.
+
+The documented setup was changed to match rather than the guard weakened:
+`scripts/create-test-database.sh` creates `atom_dev`, `.env.example`, `README.md`,
+`CONTRIBUTING.md`, `Makefile` and CI point at it, and `docs/architecture/`
+names it as the development database.
+
+The resolution was observed end to end on 2026-10-24, not just read:
+
+```text
+$ createdb -h 127.0.0.1 -U atom atom_dev
+$ DATABASE_URL=postgres://atom:atom@127.0.0.1:5432/atom_dev APP_ENV=development \
+    cargo run --quiet --bin atom-seed -- --profile dev --reset
+atom-seed: profile dev
+  users      inserted 2     skipped 0
+  notes      inserted 200   skipped 0
+  projects   inserted 8     skipped 0
+  tasks      inserted 60    skipped 0
+atom-seed: verification passed (5 checks); 270 rows inserted, 0 skipped
+```
+
+and the guard still refuses the old default:
+
+```text
+atom-seed: refused: the database name "atom" is not allowed. Allowed names are
+"atom_dev", "atom_test", "atom_local" and "atom_demo", or a name ending in
+"_dev", "_test" or "_local". Nothing was written.
+```
 
 **Residual risk that no guard closes.** No client-side check can tell a
 development database from a production database that someone named `atom_dev`.
 The guards are typo-catchers. The real boundary is that a database holding the
-seeded accounts - which are working credentials with a published password - must
+seeded accounts — which are working credentials with a published password — must
 never be reachable by an untrusted client. That is recorded in
-[`../../security/threat-model.md`](../security/threat-model.md) as part of the
-`T-05` residual.
+[`../security/threat-model.md`](../security/threat-model.md) as part of the
+`T-05` residual, and in [`../database/seeding.md`](../database/seeding.md) §8.3.
 
 **Related.** [`../database/seeding.md`](../database/seeding.md),
 [`runs/chain/ledger.md`](runs/chain/ledger.md) `C-S1`,
