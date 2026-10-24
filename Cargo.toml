@@ -21,6 +21,12 @@ path = "src/main.rs"
 name = "atom-docs"
 path = "src/bin/atom-docs.rs"
 
+# Development tool: seeds a disposable database with deterministic fixture
+# data for the Phase 1 entities. Specification: docs/database/seeding.md.
+[[bin]]
+name = "atom-seed"
+path = "src/bin/atom-seed.rs"
+
 [features]
 # The API explorer and the OpenAPI document served over HTTP.
 #
