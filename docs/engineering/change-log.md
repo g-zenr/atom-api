@@ -42,6 +42,63 @@ define the target state. The requirements live in
 
 ## Entries
 
+### ATOM-CHANGE-20261024-009 - Job application tracking: schema, endpoints, stage machine and flow
+
+**Date:** 2026-10-24 (UTC)
+**Type:** Feature
+**Author:** The ATOM engineering team - the orchestrator with the `database`, `rust-backend`, `test-engineer` and `docs` subagents.
+**Status:** Complete - **chains `D3.J1`-`J5`, review rows outstanding**
+
+#### Summary
+
+Job application tracking is built: migration `0005`, a six-module Rust module,
+fourteen endpoints, and a stage machine whose arithmetic closes. The published
+surface moves from 34 operations to **48**. The feature is `Implemented`; it is
+not `Verified`.
+
+#### What changed
+
+| Area | Change |
+| ---- | ------ |
+| Schema | `0005_job_applications.sql`: two enums, `companies`, `job_applications`, `application_events`, two composite foreign keys, the functional unique company index |
+| Endpoints | Fourteen: five company, five application, four event |
+| Stage machine | 12 allowed edges, 7 accepted no-ops, 30 refusals over 49 ordered pairs |
+| Seeder | Companies, applications and events: 5/12/18 companies, 1/20/40 applications, 1/50/100 events |
+| Tests | 11 schema, 51 endpoint, 2 flow, 1 seeder, 18 unit; **314 -> 387** |
+| Docs | the five feature documents, `schema.md`, `seeding.md`, `api/README.md`, `testing/strategy.md`, `project-truth.md` §17 |
+
+#### The three decisions that carry the design
+
+1. **A stage self-pair is an accepted no-op, not a `409`.** "Twelve edges allowed,
+   everything else refused" is the natural implementation and it is wrong:
+   `applied -> applied` is re-sending the current stage. The service stamps no
+   column when only the stage repeats, so "changes nothing" is byte equality.
+2. **`create` accepts only `wishlist`.** Without it the machine is bypassed at
+   birth - `POST` with `status: "interview"` skips all twelve edges.
+3. **A company with applications is never deleted by deleting the
+   applications.** One `DELETE ... AND NOT EXISTS` and a zero-row result is the
+   `409`. A cascade here would destroy records the client did not ask to delete.
+
+#### The one ownership link the database cannot enforce
+
+`next_action_task_id` references `tasks`, which has no `user_id` - ownership runs
+through `projects`. A composite key has nothing to reference, so the service
+checks `tasks -> projects -> user_id` and answers `404`. It is the only such
+predicate in Phase 2, which makes its test the whole evidence.
+
+#### Checks and results
+
+Six gates: `fmt` 0, `clippy -D warnings` 0, `test --all-targets` 0 (**387**),
+`check --no-default-features` 0, `atom-docs` 0, `atom-docs --strict` 0.
+
+#### What is not verified
+
+No reviewer has read `J1`-`J5`. `408`/`500` on these routes are unexercised,
+concurrency is untested, and the seeded dataset has not been read through these
+endpoints. The flow test's sweep covers 13 attempts over 11 distinct operations,
+not literally "all fourteen"; the whole-surface enumeration is
+`tests/openapi_contract.rs`, pinned at 48 and compared in both directions.
+
 ### ATOM-CHANGE-20261024-008 - The reimbursement journey and the ownership sweep
 
 **Date:** 2026-10-24 (UTC)

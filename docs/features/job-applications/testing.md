@@ -7,13 +7,14 @@
 
 What is covered today, in which file, and by which case.
 
-**Both layers are written; no run is recorded.** `tests/job_applications_api.rs`
+**Every layer is written; no run is recorded.** `tests/job_applications_api.rs`
 holds 51 endpoint cases, `tests/jobs_schema.rs` eleven schema cases,
-`tests/openapi_contract.rs` carries four cases for this feature, and
-`tests/seeder.rs` one. The module holds eighteen unit tests, thirteen in
-`service.rs` and five in `dto.rs`. Every name below is a test **on disk**; none
-of them is a claim that a run passed. `cargo` was not run while this document was
-written, because two agents were writing the tree.
+`tests/job_applications_flow.rs` two flow cases, `tests/openapi_contract.rs`
+carries four cases for this feature, and `tests/seeder.rs` one. The module holds
+eighteen unit tests, thirteen in `service.rs` and five in `dto.rs`. Every name
+below is a test **on disk**; none of them is a claim that a run passed. `cargo`
+was not run while this document was written, because other agents were still
+writing the tree.
 
 The rule that makes a test evidence is in [`strategy.md`](../../testing/strategy.md)
 §7.4: a test that cannot fail for the reason it names is not evidence. Each case
@@ -243,6 +244,10 @@ without a database.
 | `JOB-R08` | §3 `the_route_table_and_the_document_describe_the_same_operations` (the surface is pinned at 48) and `the_job_application_operations_publish_their_success_status` (the fourteen operations are named). | **The absence of generation is asserted by nothing.** No case checks it; the evidence today is a reading of the route table and the module's imports. |
 | `JOB-R09` | §1 cases 4, 7; §2.1 `two_accounts_may_use_the_same_company_name`; §2.7 (all four); §2.8 `every_job_application_operation_is_not_found_for_another_account`, `every_job_application_operation_requires_a_credential`; §3 the route table. | — |
 
+Both flow cases (§8) also carry `JOB-R01`…`JOB-R07` and `JOB-R09`, each inside a
+composition rather than in isolation. They are named once here rather than
+repeated in every row above.
+
 ## 6. Deliberately not covered, and not yet covered
 
 The first three are decisions; the rest are gaps with a name and no case, listed
@@ -259,8 +264,8 @@ so that nobody reads the map in §5 as completeness.
 | **The application `description` bound.** | No case sends 10 001 characters. The validator is `bounded_text`, but no test names the field. |
 | **A blank `source` through the API.** | Refused by `required_text`, asserted only by the unit case. |
 | **`JOB-R08`'s absence of generation.** | Nothing asserts it. The strongest evidence is the pinned operation count and the fourteen named operations. |
-| **A flow file.** | `tests/jobs_flow.rs` does not exist. `tests/claims_flow.rs` is the shape a flow layer would take here: a journey from registration to a terminal stage, an ownership sweep over every addressed operation, and a seeded read. The `application_in_stage` helper in §2.3 is a fixture, not a flow test. |
-| **A recorded run of anything above.** | The four job files and the schema file exist without a quoted result. `Verified` requires that run. |
+| **The flow layer's own gaps.** | `tests/job_applications_flow.rs` exists (§8) and closes composition, the delete chain and the ownership sweep. It does not close the gaps above: no `408`/`500` path, no concurrency, no pagination bound beyond one default page, and no seeded read through the API — the seeded rows are asserted by `tests/seeder.rs` instead. Its sweep is a hand-written list of thirteen attempts, so a new route fails the 48-operation pin in `tests/openapi_contract.rs` rather than this file. |
+| **A recorded run of anything above.** | The five job files — endpoint, schema, flow, contract and seeder — exist without a quoted result. `Verified` requires that run. |
 
 ## 7. Conventions for a new test
 
@@ -281,3 +286,47 @@ so that nobody reads the map in §5 as completeness.
   fixture may be SQL, but the assertion stays on the API response.
 - A new route is added to `ROUTE_TABLE` and to `CONTRACT_OPERATIONS` in the same
   change; the contract test compares the two directions.
+
+## 8. The flow layer — `tests/job_applications_flow.rs`
+
+Two cases, added by chain `J5`. Both drive the real router against a real,
+disposable database through the shared harness in `tests/common/mod.rs`; neither
+waits on a timer and neither asserts a log line. The file contains **one** SQL
+statement, and it is a read: a `SELECT COUNT(*)` on `application_events` after
+the application delete, because what a cascade did to *rows* is not observable
+through the `404` the parent route then answers.
+
+| # | Test | What it does |
+| - | ---- | ------------ |
+| 1 | `the_whole_job_application_journey_from_lead_to_offer` | Fourteen steps in one run: register and log in; a project and an open task; a fully populated company; a `wishlist` application with every optional field set (padded `role_title` and `source`, money as four-decimal strings); the four forward edges to `offer`, each with the field set asserted exactly and every field but `status` and `updated_at` unchanged; the next-action task attached **while the application is terminal**; three events posted out of chronological order, two of them tied at one instant and one scheduled in 2099; the timeline read back in `occurred_at DESC, id DESC` with the tie-break derived from the assigned identifiers; the whole application read back; the six refused moves out of `offer`, each leaving the row byte-identical, and the accepted `offer`-to-`offer` no-op that writes nothing; the `409` on deleting its company; the application delete, whose events are counted at zero; the company delete that becomes possible afterwards; and both listings empty with `total` 0 while the task survives. |
+| 2 | `the_second_account_sees_not_found_on_every_job_application_operation` | One application, already moved to `applied`, under a second account's attempts: thirteen addressed attempts over eleven distinct operations — the application `PATCH` is sent three times, a rename and two company moves, one naming the owner's company and one naming the second account's **own** — each `404 not_found` in the standard envelope, never `403`, and explicitly never `409`. The owner's company, application and timeline are byte-identical afterwards, the application still belongs to the owner's company and keeps its next-action link, the `?company_id=` filter over a foreign company is an empty page with `total` 0 rather than an oracle, and the second account can still delete its own company. |
+
+What case 1 adds is **state coherence across calls**. Every one of the 51
+endpoint cases starts from a fixture it built itself and asserts one operation;
+none of them can see whether the money, the `created_at`, the next-action link or
+the timeline survived the *next* successful call. The journey compares the whole
+body after each refused write and reads the whole object at the end, so a field
+silently re-defaulted between two `200`s fails even though both calls answered
+correctly. It also sends a `PATCH` on a terminal stage, which proves the stage
+machine governs `status` only — a distinction no single-operation case makes.
+The delete chain (refused company delete, application delete, cascade, company
+delete, empty listings) is the one place where the whole cross-feature
+composition runs in a single state.
+
+What case 2 adds is **the sweep on one row in one state**. The attempts are
+asserted to number thirteen, so a sweep that quietly lost an attempt fails. The
+list is **not** derived from `ROUTE_TABLE`: a fifteenth job route would not fail
+this file. What fails then is
+`tests/openapi_contract.rs::the_route_table_and_the_document_describe_the_same_operations`,
+which pins the published surface at 48 and compares the route table with the
+document in both directions (§3). The sweep's own job is the `404`-not-`409`
+property — the company delete is a `409` for its owner and must stay a `404` for
+everyone else — and the untouched-owner-row property. The two collection reads it
+does not attempt, `GET /companies` and `GET /job-applications`, cannot answer
+`404`; they are asserted by the property they do publish, an empty page with
+`total` 0. `POST /companies` is exercised, but only successfully: a create has no
+existing row to own.
+
+What the layer does **not** cover is in §6: the `408` and `500` paths, any
+concurrency, the pagination bounds beyond one default page, and a seeded read
+through the API. No run of either case is recorded here.

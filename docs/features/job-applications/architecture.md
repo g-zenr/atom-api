@@ -620,7 +620,10 @@ DELETE /api/v1/companies/{company_id}
 - **The application listing is one statement for filtered and unfiltered.** With
   four filters, no single listing index could serve the filtered shape anyway,
   so a second copy of the statement would buy nothing.
-- **No flow test.** `tests/job_applications_api.rs` covers every operation and
-  the stage machine pair by pair, but there is no `tests/jobs_flow.rs`
-  equivalent to `tests/claims_flow.rs`. The feature is `Implemented`, not
-  `Verified`; [testing.md](testing.md) §5 lists the rest of the gaps.
+- **The flow layer is written but is not a substitute for a review.**
+  `tests/job_applications_flow.rs` runs one journey from lead to offer and one
+  ownership sweep, complementing the 51 per-operation cases in
+  `tests/job_applications_api.rs`. It is a composition check: it proves the
+  fourteen operations agree about state, not that each is individually correct.
+  The feature is `Implemented`, not `Verified`; [testing.md](testing.md) §6 lists
+  the rest of the gaps.

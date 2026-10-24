@@ -70,17 +70,18 @@ A feature is never `Verified` because the code exists or compiles.
 | Compile-time SQLx verification | `Proposed` | Queries are checked at run time. The workflow is documented, not enabled. | — |
 | Edge rate limiting | `Proposed` | The requirement in [`../project-truth.md`](../project-truth.md) §9.10 applies to a production deployment. | — |
 | The rest of the roadmap | `Proposed` | By design, apart from the seeder and the reimbursements schema above. See [`../roadmap.md`](../roadmap.md). | — |
-
 The last full run of the test suite on a Windows host was on 2026-10-24, at
-the `D3.J1` commit: **314 tests pass** — 126 unit, 3 `atom-docs`,
-6 `atom-seed`, 29 authentication, 56 claims, 3 claims flow, 10 `claims_schema`, 11 jobs
-schema, 2 explorer, 4 `list_query`, 12 notes, 8 `openapi_contract`, 25 projects and
-tasks, 19 `seeder`, 0 shutdown — 0 failed. The split is the one the six
-gates printed.
-On CI's `ubuntu` runner the same tree is **316**, because the two unix-only
+the `D3.J5` commit: **387 tests pass** - 144 unit, 3 `atom-docs`,
+6 `atom-seed`, 29 authentication, 56 claims, 3 claims flow, 10 `claims_schema`,
+2 explorer, 51 `job_applications_api`, 2 job application flow, 11 `jobs_schema`,
+4 `list_query`, 12 notes, 10 `openapi_contract`, 25 projects and tasks,
+19 `seeder`, 0 shutdown - 0 failed. The split is the one the six gates
+printed.
+On CI's `ubuntu` runner the same tree is **389**, because the two unix-only
 shutdown tests run there. The run covers the current tree, including the claim
 CRUD under `ATOM-CHANGE-20261024-006`, items and the lifecycle under `-007`, and
-the flow and sweep under the `D2.R5` commit. The configuration module
+the flow and sweep under the `D2.R5` commit, and the job-application schema,
+endpoints and flow under `D3.J1`-`J5`. The configuration module
 contributes 50 unit tests in
 [`../../src/config/tests.rs`](../../src/config/tests.rs), the shared validators
 seven in [`../../src/helpers/validation.rs`](../../src/helpers/validation.rs),

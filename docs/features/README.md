@@ -22,19 +22,20 @@ each of them is in [§2](#2-the-per-feature-document-contract).
 | Projects | `ATOM-FEAT-PROJ-001` | Verified | [specification](projects/specification.md) · [architecture](projects/architecture.md) · [api](projects/api.md) · [testing](projects/testing.md) · [status](projects/status.md) |
 | Tasks | `ATOM-FEAT-TASK-001` | Verified | [specification](tasks/specification.md) · [architecture](tasks/architecture.md) · [api](tasks/api.md) · [testing](tasks/testing.md) · [status](tasks/status.md) |
 | Reimbursements | `ATOM-FEAT-REIMB-001` | Implemented | [specification](reimbursements/specification.md) · [architecture](reimbursements/architecture.md) · [api](reimbursements/api.md) · [testing](reimbursements/testing.md) · [status](reimbursements/status.md) |
-| Job application tracking | `ATOM-FEAT-JOB-001` | Accepted | [specification](job-applications/specification.md) · [architecture](job-applications/architecture.md) · [api](job-applications/api.md) · [testing](job-applications/testing.md) · [status](job-applications/status.md) |
+| Job application tracking | `ATOM-FEAT-JOB-001` | Implemented | [specification](job-applications/specification.md) · [architecture](job-applications/architecture.md) · [api](job-applications/api.md) · [testing](job-applications/testing.md) · [status](job-applications/status.md) |
 | Local machine learning | `ATOM-FEAT-ML-001` | Accepted | [specification](ml/specification.md) · [architecture](ml/architecture.md) · [api](ml/api.md) · [testing](ml/testing.md) · [status](ml/status.md) |
 
 The three Phase 2 features were accepted in
 [`project-truth.md`](../project-truth.md) §18 with acceptance criteria.
 Reimbursements is `Implemented`: `migrations/0004_expense_claims.sql`,
-`src/reimbursements/` and all twelve published endpoints exist, and
+`src/reimbursements/` and all twelve published endpoints, with
 `tests/claims_schema.rs`, `tests/claims_api.rs`, `tests/claims_flow.rs` and
-`tests/openapi_contract.rs` are written against them. Job applications has its
-**schema only**: `migrations/0005_job_applications.sql` and
-`src/job_applications/{mod,models}.rs`, with `tests/jobs_schema.rs` and `tests/job_applications_api.rs` proving the
-constraints and all fourteen published operations. Local machine learning has nothing
-yet. Neither is `Implemented` or `Verified`; a passing suite is not a review.
+`tests/openapi_contract.rs` written against them. Job applications is also
+`Implemented`: `migrations/0005_job_applications.sql`, `src/job_applications/`
+and all fourteen published operations, with `tests/jobs_schema.rs`,
+`tests/job_applications_api.rs` and `tests/job_applications_flow.rs`. Neither is
+`Verified`: no reviewer has read the chains that built them, and a passing suite
+is not a review. Local machine learning has no code yet, so it stays `Accepted`.
 
 The status column summarises the feature as a whole. The per-requirement
 evidence behind it is in each feature's `status.md`; a feature can contain both
