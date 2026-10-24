@@ -38,8 +38,8 @@ process, no new service, no worker, no message broker and no second language
 runtime. The one addition that could have introduced a service, machine
 learning, runs **in this process**, on the CPU, from a local model file, and
 makes no outbound call to a hosted service at build time or at run time.
-Of Phase 2, `reimbursements` is `Implemented`; `job-applications` and `ml`
-remain `Accepted` and not built. The module map is in
+Of Phase 2, `reimbursements` and `job-applications` are `Implemented`; `ml`
+remains `Accepted` and not built. The module map is in
 [`module-boundaries.md`](module-boundaries.md), and the data it adds is in
 [`data-architecture.md`](data-architecture.md).
 

@@ -142,15 +142,14 @@ not per account.
   an event inherits the owner of its application.
 - **Which chain seeds what.** The `S1` chain seeds the four Phase 1 entities:
   `users`, `notes`, `projects`, `tasks`; `R1` extends the seeder with
-  `expense_claims` and `expense_items`. The applications counts are the
-  contract that the later chains must meet when they add those tables: `S3`
-  (companies and applications), `S4` (embeddings, behind `--with-embeddings`),
-  `S5` (the CI smoke run).
+  `expense_claims` and `expense_items`; `J1`-`J5` extend it with `companies`,
+  `job_applications` and `application_events`. `S4` (embeddings, behind
+  `--with-embeddings`) and `S5` (the CI smoke run) remain.
 - **The seeder must not name a table that does not exist.** `migrations/` ends
-  at `0004_expense_claims.sql`; `companies`, `job_applications`,
-  `application_events` and `embeddings` are not there yet, so an `INSERT` into
-  one of them would fail to prepare. The seeder grows by one entity per chain,
-  in the same change that adds the table.
+  at `0005_job_applications.sql`, so `companies`, `job_applications` and
+  `application_events` exist and are seeded; `embeddings` is not there yet, so
+  an `INSERT` into it would fail to prepare. The seeder grows by one entity per
+  chain, in the same change that adds the table.
 - **Coverage.** `dev` and `demo` contain enough claims to cover all five claim
   statuses and enough applications to cover all seven stages. `minimal` seeds
   one of each, so full coverage there is arithmetically impossible; its single
@@ -158,8 +157,9 @@ not per account.
   the plumbing rather than the breadth.
 - **Derived entities are not profile counts.** `expense_items`,
   `application_events` and `companies` are derived from their parents, and
-  `embeddings` is bounded by the ML settings. The chain that adds each one
-  extends this document in the same change, with the rule it uses.
+  `embeddings` is bounded by the ML settings. The chain that added each of the
+  first three extended this document in the same change, with the rule it uses;
+  the chain that adds `embeddings` must do the same.
 
 The claim and application parts of this specification inherit the plan's
 assumptions **A1** (one currency per claim), **A3** (applications and events,
@@ -415,8 +415,8 @@ id     = Uuid::from_bytes(bytes)
 ```
 
 - `<entity>` is the table name in lower-case snake case: `users`, `notes`,
-  `projects`, `tasks`, and later `expense_claims`, `expense_items`,
-  `companies`, `job_applications`, `application_events`, `embeddings`.
+  `projects`, `tasks`, `expense_claims`, `expense_items`, `companies`,
+  `job_applications` and `application_events`; `embeddings` is planned.
 - `<index>` is the row's zero-based position within the entity, in decimal
   without padding: `users/0`, `notes/17`, `tasks/103`.
 - The version and variant bits are set so the value is a well-formed UUIDv4
@@ -554,17 +554,17 @@ API while logged in as them
 
 The delete order is the foreign-key order. The run executes a table's
 statement only when the table exists: today every row below is executed except
-the ones for `companies`, `job_applications`, `application_events` and
-`embeddings`, which are the contract for the chain that adds the table.
+the one for `embeddings`, which is the contract for the chain that adds the
+table.
 
 | # | Table | Predicate | Exists today |
 | - | ----- | --------- | ------------ |
 | 1 | `embeddings` | `user_id = ANY($1)` | no — `0006` |
-| 2 | `application_events` | `user_id = ANY($1)` | no — `0005` |
+| 2 | `application_events` | `user_id = ANY($1)` | yes — `0005` |
 | 3 | `expense_items` | `user_id = ANY($1)` | yes — `0004` |
 | 4 | `expense_claims` | `user_id = ANY($1)` | yes — `0004` |
-| 5 | `job_applications` | `user_id = ANY($1)` | no — `0005` |
-| 6 | `companies` | `user_id = ANY($1)` | no — `0005` |
+| 5 | `job_applications` | `user_id = ANY($1)` | yes — `0005` |
+| 6 | `companies` | `user_id = ANY($1)` | yes — `0005` |
 | 7 | `refresh_sessions` | `user_id = ANY($1)` | yes |
 | 8 | `notes` | `user_id = ANY($1)` | yes |
 | 9 | `tasks` | `project_id IN (SELECT id FROM projects WHERE user_id = ANY($1))` | yes |

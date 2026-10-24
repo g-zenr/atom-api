@@ -18,7 +18,7 @@ the accepted decisions in [`../decisions/`](../decisions/README.md).
 | Document | Contents |
 | -------- | -------- |
 | [`system-overview.md`](system-overview.md) | What the system is, the runtime shape, the components, the deployment topology, the stack and the known limitations. |
-| [`module-boundaries.md`](module-boundaries.md) | Every module that exists, plus the three planned Phase 2 modules: responsibility, public interface, dependencies, data ownership, invariants, security boundary, tests and limitations. |
+| [`module-boundaries.md`](module-boundaries.md) | Every module that exists, including the two built Phase 2 modules, plus the one still planned (`ml`): responsibility, public interface, dependencies, data ownership, invariants, security boundary, tests and limitations. |
 | [`request-lifecycle.md`](request-lifecycle.md) | From socket to SQL and back: middleware order, extractor order, the handler → service → repository path, error mapping and the correlation id. |
 | [`data-architecture.md`](data-architecture.md) | The persistence model, the ownership model, the search design, the index strategy, the migration/model relationship and the transaction boundaries. |
 | [`security-architecture.md`](security-architecture.md) | Trust boundaries, the authentication boundary, the authorization model, secret handling, rate limiting and error disclosure. |

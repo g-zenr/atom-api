@@ -122,11 +122,11 @@ The claim as the **listing** returns it: no items.
 | `id` | UUID string | The item identifier. It is only addressable inside its claim. |
 | `claim_id` | UUID string | The claim it belongs to. |
 | `description` | string | 1–500 characters. |
-| `amount` | money string | `>= 0`, four decimals, in the claim's currency. |
 | `amount` | money string | `>= 0`, four decimals, in the claim's currency. An item that would push the claim's **total** above `999999999999999.9999` is refused, and the item write is rolled back with it. |
-| `category` | string or `null` | Trimmed and lower-cased; 1–64 characters; `null` when absent. |
+| `incurred_on` | date string | `YYYY-MM-DD`. A calendar day, not an instant. |
 | `category` | string or `null` | Trimmed and ASCII-lower-cased; 1-64 characters; `null` when absent. A non-ASCII value is `422` because the column's `LOWER()` and Rust's Unicode case folding disagree outside ASCII. |
 | `receipt_url` | string or `null` | Absolute `http`/`https` with a non-empty authority, at most 2048 characters. `https:///` is `422`. Never fetched. |
+| `created_at`, `updated_at` | timestamp | RFC 3339 UTC. |
 
 `ItemResponse` carries no `currency`: the currency is the claim's.
 

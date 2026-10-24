@@ -99,6 +99,20 @@ endpoints. The flow test's sweep covers 13 attempts over 11 distinct operations,
 not literally "all fourteen"; the whole-surface enumeration is
 `tests/openapi_contract.rs`, pinned at 48 and compared in both directions.
 
+#### Correction (2026-10-24) — the reimbursements table and the schema migration pin
+
+Commit `85af8e5` corrupted the `ItemResponse` table in
+[`../features/reimbursements/api.md`](../features/reimbursements/api.md): it
+duplicated the `amount` and `category` rows and lost `incurred_on`,
+`created_at` and `updated_at`. The table has been restored to its nine fields.
+In the same `D3` range, `tests/claims_schema.rs`'s migration pin was tightened
+from `[1,2,3,4]` to `[1,2,3,4,5]`; this entry did not mention that change, and
+records it here. `ATOM-REVIEW-20261024-010` has since read `J1`-`J5` and
+returned FAIL on documentation only; the sentence above that no reviewer had
+read them is superseded. The feature remains `Implemented`, not `Verified`: the
+review found no code defect but no gate run after the review's fixes and no
+re-review are recorded.
+
 ### ATOM-CHANGE-20261024-008 - The reimbursement journey and the ownership sweep
 
 **Date:** 2026-10-24 (UTC)

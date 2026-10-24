@@ -1,6 +1,6 @@
 # Job applications — specification
 
-> **Status:** Accepted
+> **Status:** Implemented
 > **Last updated:** 2026-10-24
 > **Owner:** maintained by the `docs` agent
 > **Feature identifier:** `ATOM-FEAT-JOB-001`
@@ -29,9 +29,10 @@ thing to do lives in the same task list as everything else.
 [`project-truth.md`](../../project-truth.md) §18.2 as `JOB-R01`…`R09` and
 agreed on 2026-10-24. Migration `0005_job_applications.sql`, the
 `src/job_applications/` module and all fourteen published operations exist, with
-`tests/jobs_schema.rs` and `tests/job_applications_api.rs` to match. No reviewer
-has read the chain that completed them, so nothing is `Verified`. See
-[status.md](status.md).
+`tests/jobs_schema.rs` and `tests/job_applications_api.rs` to match.
+`ATOM-REVIEW-20261024-010` read the chain, found no code defect and returned
+FAIL on documentation only; no gate run after the review's fixes is recorded,
+so nothing is `Verified`. See [status.md](status.md).
 
 The model rests on assumptions **A3** and **A6** in
 [`../../engineering/runs/chain/plan.md`](../../engineering/runs/chain/plan.md) §3,
@@ -224,8 +225,8 @@ A change to this feature is complete when all of the following hold.
       `atom-docs` reports no error.
 - [ ] Every requirement in §5 has a named test in [testing.md](testing.md),
       and the test fails if the rule is removed.
-- [ ] Every allowed stage edge returns `200` and every other pair returns
-      `409 conflict`, asserted one case per pair.
+- [ ] Every allowed stage edge **and every self-pair** returns `200`; the
+      remaining thirty pairs return `409 conflict`; each pair is asserted.
 - [ ] A company name collision within one owner is `409`; the same name for
       two owners is accepted.
 - [ ] Deleting an application removes its events; deleting a company with

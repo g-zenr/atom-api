@@ -75,9 +75,9 @@ later phase depends on:
 
 **Phase 2 — the personal-workspace layer.** It is defined in
 [`roadmap.md`](roadmap.md) §2 and its requirements are in §18 of this file.
-Phase 2 is **partly delivered**: the reimbursement endpoints exist (§17), the
-job application and machine-learning endpoints do not. Its delivery builds on
-the Phase 1 API, so it started after the Phase 1 close-out, but its
+Phase 2 is **partly delivered**: the reimbursement and job application
+endpoints exist (§17), the machine-learning endpoints do not. Its delivery
+builds on the Phase 1 API, so it started after the Phase 1 close-out, but its
 requirements are agreed independently of it.
 
 ## 4. Agreed features (Phase 1 scope)
@@ -466,7 +466,7 @@ blocks Phase 1 work that does not depend on the answer.
 | Rust/Axum modular monolith | Implemented | `src/`, `Cargo.toml` |
 | Typed configuration with start-up validation | Implemented | `src/config/` |
 | Central error contract | Implemented | `src/error.rs`, `src/api/extract.rs` |
-| SQLx migrations | Implemented | `migrations/0001..0004` |
+| SQLx migrations | Implemented | `migrations/0001..0005` |
 | User registration, normalization, uniqueness | Verified | `tests/auth_api.rs` |
 | Argon2id hashing and password policy | Verified | `src/auth/password.rs`, `src/users/service.rs` |
 | Access tokens, issuer/audience validation | Verified | `src/auth/token.rs`, `tests/auth_api.rs` |
@@ -484,7 +484,7 @@ blocks Phase 1 work that does not depend on the answer.
 | CI pipeline | Implemented | `.github/workflows/ci.yml` - the three quality gates, a release build, the documentation check and the OpenCode configuration check |
 | Container image | Not started | `docker-compose.yml` is provided for local PostgreSQL only |
 | Reimbursement tracking | Implemented | accepted in §18.1; migration `0004_expense_claims.sql`, `src/reimbursements/` and all twelve published operations exist. `tests/claims_schema.rs` asserts the constraints, `tests/claims_api.rs` the twelve operations and `tests/openapi_contract.rs` the published surface. No reviewer has read the chain that completed it, so the feature is **not** `Verified`; a passing suite is not a review. |
-| Job application tracking | Implemented | accepted in §18.2; migration `0005_job_applications.sql`, `src/job_applications/` and all fourteen published operations exist. `tests/jobs_schema.rs` asserts the constraints and `tests/job_applications_api.rs` the fourteen operations, including the stage machine. No reviewer has read the chain that completed them, so the feature is not `Verified`. |
+| Job application tracking | Implemented | accepted in §18.2; migration `0005_job_applications.sql`, `src/job_applications/` and all fourteen published operations exist. `tests/jobs_schema.rs` asserts the constraints and `tests/job_applications_api.rs` the fourteen operations, including the stage machine. `ATOM-REVIEW-20261024-010` read the chain, found no code defect and returned FAIL on documentation only; the findings are fixed, but no gate run after those fixes is recorded, so the feature is not `Verified`. |
 | Local machine learning | Not started | accepted in §18.3; no code, no migration, no test exists |
 | Everything else in the roadmap | Not started | by design |
 
@@ -508,9 +508,14 @@ machine learning over the owner's own notes. The phase itself is defined in
 Every requirement in this section was **`Accepted`** on 2026-10-24 — agreed,
 and not built at the time. The reimbursement requirements (`REIMB-R01`…`R11`)
 are now **`Implemented`**: the code exists for all twelve published operations.
-They are not `Verified`, because no passing run is recorded and no reviewer has
-read the chain that completed them. The job-application and machine-learning
-requirements are still `Accepted`. §17 says the same in its status table. The
+They are not `Verified`, because no reviewer has read the chain that completed
+them; a passing suite is not a review. The job-application requirements are now
+**`Implemented`**: the code exists for all fourteen published operations, and
+`ATOM-REVIEW-20261024-010` read the chain, found no code defect and returned
+FAIL on documentation only. They are not `Verified`, because no gate run after
+the review's fixes is recorded and the review's findings have not been
+re-reviewed. The machine-learning requirements are still `Accepted`. §17 says
+the same in its status table. The
 feature specifications are:
 
 | Feature | Identifier | Specification |

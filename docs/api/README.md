@@ -22,11 +22,14 @@ The per-feature endpoint references are:
 | Projects | [`../features/projects/api.md`](../features/projects/api.md) | 5 |
 | Tasks | [`../features/tasks/api.md`](../features/tasks/api.md) | 5 |
 | Reimbursements | [`../features/reimbursements/api.md`](../features/reimbursements/api.md) | all 12 it specifies |
+| Job applications | [`../features/job-applications/api.md`](../features/job-applications/api.md) | 14 |
 
 **The document describes 48 operations**: 46 under `/api/v1` and the two health
 probes outside it. The reimbursement feature contributes twelve of them - five
-claim operations, three item operations and four lifecycle actions. A reader who
-counts the inventory below must agree with those numbers; the contract test
+claim operations, three item operations and four lifecycle actions - and the
+job-application feature fourteen - five company, five application and four event
+operations. A reader who counts the inventory below must agree with those
+numbers; the contract test
 `the_route_table_and_the_document_describe_the_same_operations` fails if they
 disagree in either direction.
 
@@ -105,7 +108,8 @@ curl -s http://127.0.0.1:3000/api/v1/openapi.json
 To change the document, change the `#[utoipa::path(...)]` annotations on the
 handlers in `src/auth/handlers.rs`, `src/notes/handlers.rs`,
 `src/projects/handlers.rs`, `src/tasks/handlers.rs`,
-`src/reimbursements/handlers.rs` and `src/health.rs`, and add any new schema to
+`src/reimbursements/handlers.rs`, `src/job_applications/handlers.rs` and
+`src/health.rs`, and add any new schema to
 the `components(schemas(...))` list in `src/api/routes.rs`.
 
 ## 3. Endpoint inventory
@@ -177,13 +181,14 @@ not require a credential. `POST /api/v1/auth/register`, `POST /api/v1/auth/login
 and `POST /api/v1/auth/refresh` are unauthenticated by design and are rate
 limited by client IP.
 
-The five claim operations are the whole of the reimbursement surface that
-answers today. `GET /api/v1/claims/{claim_id}` returns an `items` array, which is
-always empty for a claim this API created: the three item endpoints and the four
 All twelve reimbursement operations answer. `GET /api/v1/claims/{claim_id}`
 returns the claim with its `items` array, and the three item endpoints and four
 lifecycle actions are served and published, so a claim can move from `draft` to
-`paid`. See [`../features/reimbursements/api.md`](../features/reimbursements/api.md).
+`paid`. The fourteen job-application operations also answer: five company, five
+application and four event operations. See
+[`../features/reimbursements/api.md`](../features/reimbursements/api.md) and
+[`../features/job-applications/api.md`](../features/job-applications/api.md).
+
 ## 4. The request pipeline
 
 Every request passes through the same layers, in this order:

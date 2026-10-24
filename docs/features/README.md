@@ -34,7 +34,9 @@ Reimbursements is `Implemented`: `migrations/0004_expense_claims.sql`,
 `Implemented`: `migrations/0005_job_applications.sql`, `src/job_applications/`
 and all fourteen published operations, with `tests/jobs_schema.rs`,
 `tests/job_applications_api.rs` and `tests/job_applications_flow.rs`. Neither is
-`Verified`: no reviewer has read the chains that built them, and a passing suite
+`Verified`: no reviewer has read the reimbursement chain, and the
+job-application review (`ATOM-REVIEW-20261024-010`) found no code defect but
+returned FAIL on documentation only; a passing suite
 is not a review. Local machine learning has no code yet, so it stays `Accepted`.
 
 The status column summarises the feature as a whole. The per-requirement

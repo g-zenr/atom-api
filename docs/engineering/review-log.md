@@ -22,8 +22,11 @@ recorded.
 
 ## The entries so far
 
-Nine reviews have been performed:
+Ten reviews have been performed:
 
+- `ATOM-REVIEW-20261024-010`, the code review of job application chains
+  `D3.J1`–`J5`. It found no code defect and returned **FAIL on documentation
+  only**, with eight blocking findings, all now repaired.
 - `ATOM-REVIEW-20261024-006`, the quality-gate audit of the four committed
   chains. It measured the gates itself (225 tests, all green) and returned
   **FAIL** overall on documentation, with `D0` and `D1` passing. It also raised
@@ -160,6 +163,73 @@ happened.** The first real entry is below.
   answer.
 - [`../testing/verification-policy.md`](../testing/verification-policy.md) —
   the rules this log implements.
+
+---
+
+### ATOM-REVIEW-20261024-010 — Job application tracking: chains `D3.J1`–`J5`
+
+**Date:** 2026-10-24 (UTC)
+**Reviewer:** the `code-reviewer` agent, read-only
+**Change reviewed:** `ATOM-CHANGE-20261024-009` — chains `D3.J1`–`J5`: the
+job-application schema, endpoints, stage machine and flow
+**Verdict:** **FAIL on documentation only.** No code defect was found.
+**Outcome:** the eight blocking documentation findings below are repaired; the
+code was not changed. No re-review and no gate run after these fixes are
+recorded, so the feature stays `Implemented`.
+
+#### What the reviewer confirmed was correct
+
+- The stage machine was independently enumerated as **49 ordered pairs**:
+  twelve allowed edges, seven self-pairs and thirty refusals. That matches
+  `ALLOWED_MOVES`, and `ensure_transition` treats a self-pair as an accepted
+  no-op rather than a refusal.
+- Every ownership predicate in `src/job_applications/repository.rs` was
+  checked; every statement that touches a company, an application or an event
+  carries the caller's `user_id`.
+- The company delete has **no path that removes applications**.
+  `DELETE_COMPANY_IF_UNUSED` refuses with a zero-row result, and nothing
+  cascades from a company to its applications.
+
+#### The blocking findings, and their disposition
+
+| # | Finding | Disposition |
+| - | ------- | ----------- |
+| 1 | `specification.md` §8 said every pair other than an allowed edge returns `409`, which includes the seven self-pairs and would make a correct implementation look wrong | Rewritten: every allowed edge **and every self-pair** is `200`; the remaining thirty pairs are `409` |
+| 2 | `docs/README.md` listed job applications as `Accepted`, not built | Set to `Implemented`, naming `0005`, the six-module `src/job_applications/` and the fourteen operations |
+| 3 | `project-truth.md` §3 said the job-application and ML endpoints do not exist | Corrected: only the ML endpoints do not |
+| 4 | `module-boundaries.md` said the module was schema only with no handler, service, repository, DTO or route, listed it `Accepted, planned`, kept a `(planned)` heading, and named a non-existent `ApplicationDetailResponse` | All four corrected; the DTO is `ApplicationResponse` |
+| 5 | `system-overview.md` said `job-applications` and `ml` remain `Accepted` | Corrected: only `ml` does |
+| 6 | `data-architecture.md` denied that any Phase 2 table existed and said `migrations/` ends at `0003` | Corrected: `0004` and `0005` exist, all five tables are served, and `embeddings` is the only proposed one |
+| 7 | `database/schema.md` said no statement reads the three tables, contradicting its own status block | Corrected: `src/job_applications/repository.rs` holds every statement |
+| 8 | `database/seeding.md` said `0005` and the three tables do not exist | Corrected: `0005` exists and the seeder inserts into all three; only `embeddings` is absent |
+
+The stage-machine contradiction (#1) was the dangerous one. Every other finding
+made a document stale; that one, if left, would have led an implementer to
+reject behaviour the code correctly accepts.
+
+#### Non-blocking findings, also corrected
+
+The per-feature operation count (the missing fourteen-operation row), the
+migration range in `project-truth.md` (`0001..0004` → `0001..0005`), the claim
+count in `schema.md` §11, the `applied_on` validation detail in `testing.md`,
+the schema count in `status.md`, the scope of the wrong-shape `422` loop, the
+two list endpoints named in `api.md` §17, the `EVENTS_EXISTS_WITH_TOTAL`
+constant, and the "no reviewer has read the chain" sentences in `api.md`,
+`status.md` and `specification.md`.
+
+#### Re-review evidence
+
+None recorded. The fixes are documentation only, the code was not changed, and
+no reviewer has re-read the repaired documents. `cargo` was not run for this
+review or for the repair, because another agent was writing `src/` concurrently.
+
+#### Limitations
+
+The review is read-only and ran no gate. Its verdict rests on reading the tree,
+not on executing it; the `314 → 387` test count and the green gates recorded in
+`ATOM-CHANGE-20261024-009` were not independently reproduced, and no gate run
+after these fixes is recorded. The feature therefore remains `Implemented`, not
+`Verified`.
 
 ---
 

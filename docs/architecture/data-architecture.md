@@ -345,11 +345,15 @@ The defect that broke this property, and its resolution, are recorded as
 
 ---
 
-## Phase 2 data (planned)
+## Phase 2 data (proposed, except what is built)
 
-> **Planned. None of the tables below exists.** `migrations/` ends at `0003`, no
-> Rust model in `src/` names them, and no endpoint reads or writes them. They
-> are the schema implied by the **accepted** Phase 2 requirements
+> **Proposed, except what is built.** `migrations/` ends at `0005`:
+> `0004_expense_claims.sql` and `0005_job_applications.sql` exist, and the five
+> tables they create are owned by Rust models in `src/reimbursements/` and
+> `src/job_applications/` and served by their repositories and endpoints.
+> `embeddings` (§11.6 of [`../database/schema.md`](../database/schema.md)) is the
+> only table here that is still proposed. All of them are the schema implied by
+> the **accepted** Phase 2 requirements
 > ([`../project-truth.md`](../project-truth.md) §18), and they are described
 > column by column in [`../database/schema.md`](../database/schema.md) §11 —
 > which is the authority for the physical definition. This section records only
@@ -454,7 +458,7 @@ places. The decision, and the reasons no floating-point type may appear on the
 path, are in [`../decisions/ADR-0007-money-representation.md`](../decisions/ADR-0007-money-representation.md).
 
 Three consequences for the persistence layer, plus one constraint the
-implementing change has to satisfy before `0004` is written:
+implementing change had to satisfy before `0004` was written:
 
 1. **Money crosses the repository boundary as a `String`**, selected with an
    explicit `::text` cast. No `numeric` reaches Rust as anything else.

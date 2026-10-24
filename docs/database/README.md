@@ -45,12 +45,13 @@ out-of-contract value impossible to persist. The reasoning is recorded in
 
 The full definition of each table is in [`schema.md`](schema.md).
 
-Phase 2 proposes six more tables. Two of them now exist:
+Phase 2 proposes six more tables. Five of them now exist:
 `expense_claims` and `expense_items` have
 `migrations/0004_expense_claims.sql` and a Rust model in
-`src/reimbursements/models.rs`. The other four — `companies`,
-`job_applications`, `application_events` and `embeddings` — have neither a
-migration nor a Rust model, are marked `Proposed` in [`schema.md`](schema.md)
+`src/reimbursements/models.rs`; `companies`, `job_applications` and
+`application_events` have `migrations/0005_job_applications.sql` and Rust models
+in `src/job_applications/models.rs`. The sixth — `embeddings` — has neither a
+migration nor a Rust model, is marked `Proposed` in [`schema.md`](schema.md)
 §11, and must not be treated as scope. The development seeder that fills the
 existing tables is implemented and specified in [`seeding.md`](seeding.md).
 

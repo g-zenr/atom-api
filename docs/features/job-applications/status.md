@@ -18,8 +18,10 @@ asserts it.
 
 It is **not `Verified`**, and this document says so deliberately:
 
-- **No reviewer has read the chain.** Chains `J2`–`J5` were implemented in one
-  wave and no review row exists for them. A green gate is not a review.
+- **The review found no code defect but returned FAIL on documentation.**
+  `ATOM-REVIEW-20261024-010` read chains `D3.J1`–`J5` and returned **FAIL on
+  documentation only**; its eight blocking findings are fixed in this change.
+  A repaired document is not a passing review, and no re-review is recorded.
 - **No run is recorded here.** `tests/job_applications_api.rs` (51 cases),
   `tests/jobs_schema.rs` (11), `tests/job_applications_flow.rs` (2), the job
   cases in `tests/openapi_contract.rs` and the seeder case all exist in the tree.
@@ -42,7 +44,7 @@ It is **not `Verified`**, and this document says so deliberately:
 | `src/job_applications/service.rs` | **Yes** | `ensure_transition`, `permitted_sources`, `ensure_initial_stage`, `JobService` with fourteen use cases, the field validators, and thirteen unit tests. |
 | `src/job_applications/handlers.rs` | **Yes** | Fourteen handlers, each with its `#[utoipa::path]` annotation and its documented status set. |
 | `src/job_applications/mod.rs` | **Yes** | Declares and re-exports all five layers. |
-| `src/api/routes.rs` | **Yes** | Six route declarations (14 method/path pairs), the fourteen `ROUTE_TABLE` entries, the fourteen operations and twelve schemas in `ApiDoc`, and the `companies` / `job-applications` tags. |
+| `src/api/routes.rs` | **Yes** | Six route declarations (14 method/path pairs), the fourteen `ROUTE_TABLE` entries, the fourteen operations and fourteen job schemas (twelve body types and the two enums) in `ApiDoc`, and the `companies` / `job-applications` tags. |
 | `src/state.rs` | **Yes** | `AppState::job_applications: JobService`, built from the pool, the message catalogue and the pagination settings. |
 | `config/messages.toml`, `src/config/messages.rs` | **Yes** | The client-facing strings of the feature: validation, conflicts, and the resource-not-found messages. |
 | `tests/job_applications_api.rs` | **Yes** | 51 HTTP-level cases. The case-by-case map is [testing.md](testing.md) §2. No run is recorded. |
@@ -65,7 +67,7 @@ jointly, inside a composition rather than in isolation; they are named once in
 | `JOB-R02` An application belongs to one company of the same owner, with a role title and one of seven stages | `Implemented` | `INSERT_APPLICATION` inserts through `SELECT … FROM companies c WHERE c.id = $3 AND c.user_id = $2`, so a foreign company inserts **no row** and the service names it `404`. **The create accepts only `wishlist` or an omitted stage** (`ensure_initial_stage`), and the statement writes the literal `'wishlist'`; any other stage is `422` naming `status`. `role_title` is trimmed, 1–200, by `required_text`. A `PATCH` may correct `company_id` to another of the caller's companies, under the same predicate. | `tests/job_applications_api.rs::an_application_can_be_created_read_changed_and_deleted`, `::a_create_with_a_stage_other_than_wishlist_is_refused`, `::an_application_cannot_target_another_users_company`, `::an_application_can_be_moved_to_another_of_the_callers_companies`, `::a_role_title_is_trimmed_and_bounded`, `::an_unknown_stage_in_a_body_is_refused`; `tests/jobs_schema.rs` case 4; `src/job_applications/service.rs::a_create_accepts_only_wishlist_or_an_omitted_stage`. | A recorded run. |
 | `JOB-R03` An optional salary range, one currency, `min <= max`, money as `REIMB-R07` | `Implemented` | `validate_salary_range` on create and `resolve_salary` on `PATCH`: four-decimal string (`^[0-9]{1,15}\.[0-9]{4}$`, no sign, no rounding), a bound requires a currency, a currency without a bound is refused, `min <= max` by exact string comparison (`compare_money`, no `f32`/`f64`, no arithmetic). A `PATCH` that touches any salary field reads the stored triple (`find_salary_owned`), resolves and validates the whole triple, and writes it whole. `salary_currency` is trimmed and upper-cased before the `CHAR(3)` write. | `tests/job_applications_api.rs::salary_money_round_trips_with_four_decimals`, `::a_salary_bound_without_a_currency_is_refused`, `::a_salary_currency_without_a_bound_is_refused`, `::an_inverted_salary_range_is_refused`, `::a_salary_currency_is_three_upper_case_letters`, `::a_json_number_where_a_salary_is_expected_is_refused`; `src/job_applications/service.rs::a_salary_bound_without_a_currency_is_refused`, `::a_salary_minimum_above_the_maximum_is_refused`, `::the_money_comparison_is_exact_and_ignores_leading_zeros`, `::a_patched_bound_is_validated_against_the_stored_triple`; `tests/jobs_schema.rs` cases 8–10. | A recorded run, and an API case for a value above `999999999999999.9999` or a negative string (both currently refused by the same pattern, but unasserted through the API). |
 | `JOB-R04` The seven-stage machine, three terminal stages | `Implemented` | `ALLOWED_MOVES` is the **only** definition of the edge table (12 pairs). `ensure_transition` returns `Some(NoOp)` for a self-pair, `Some(Move)` for an edge, `None` otherwise. `permitted_sources` derives the write predicate's array from the same table. The change is **one guarded `UPDATE`** — `WHERE … AND status = ANY($20)` — with no read and no `FOR UPDATE` before it; zero rows is explained afterwards as `404` (row/company/task) or `409` (the move). `updated_at` is stamped only when a non-status column is written or the stage actually changes. The full shape is [architecture.md](architecture.md) §3.1. | `tests/job_applications_api.rs::every_permitted_stage_change_is_accepted` (12 edges), `::sending_the_current_stage_is_accepted_and_changes_nothing` (7 self-pairs), `::every_forbidden_stage_change_is_refused` (30 pairs), `::offer_rejected_and_withdrawn_are_terminal`, `::a_refused_stage_change_does_not_write_the_other_fields`, `::a_create_with_a_stage_other_than_wishlist_is_refused`; `src/job_applications/service.rs::the_stage_machine_allows_exactly_the_twelve_edges`, `::the_three_terminal_stages_have_no_exit`, `::the_permitted_sources_are_the_edges_into_the_stage_plus_itself`. | A recorded run, and any concurrency case (see [testing.md](testing.md) §6). |
-| `JOB-R05` Events belong to an application, ordered `occurred_at DESC, id DESC` | `Implemented` | Four event operations. The listing orders `occurred_at DESC, id DESC`; the index supplies the leading term only. `list_events_owned` distinguishes "no such application" from "no events" with `APPLICATION_EXISTS`, run only when the page is empty, so the empty page stays an empty page and the missing application stays `404`. Insert, update and delete are each scoped by `application_id`, `id` and `user_id`, so an event of the caller's other application matches no row. `occurred_at` has no past-only rule. | `tests/job_applications_api.rs::events_are_ordered_by_occurred_at`, `::an_event_can_be_added_changed_and_deleted`, `::an_event_id_cannot_be_used_under_another_application`, `::an_event_with_a_future_occurred_at_is_accepted`, `::an_event_kind_is_one_of_six`, `::an_event_summary_is_required_and_bounded`, `::an_event_occurred_at_requires_a_timezone`; `tests/jobs_schema.rs` cases 5 and 6; `src/job_applications/dto.rs::an_event_kind_is_one_of_six`, `::an_event_occurred_at_requires_a_timezone`. | A recorded run, and event pagination beyond `?limit=2` (`offset`, the clamp, an offset past the end). |
+| `JOB-R05` Events belong to an application, ordered `occurred_at DESC, id DESC` | `Implemented` | Four event operations. The listing orders `occurred_at DESC, id DESC`; the index supplies the leading term only. `list_events_owned` distinguishes "no such application" from "no events" with `EVENTS_EXISTS_WITH_TOTAL`, run only when the page is empty, so the empty page stays an empty page and the missing application stays `404`. Insert, update and delete are each scoped by `application_id`, `id` and `user_id`, so an event of the caller's other application matches no row. `occurred_at` has no past-only rule. | `tests/job_applications_api.rs::events_are_ordered_by_occurred_at`, `::an_event_can_be_added_changed_and_deleted`, `::an_event_id_cannot_be_used_under_another_application`, `::an_event_with_a_future_occurred_at_is_accepted`, `::an_event_kind_is_one_of_six`, `::an_event_summary_is_required_and_bounded`, `::an_event_occurred_at_requires_a_timezone`; `tests/jobs_schema.rs` cases 5 and 6; `src/job_applications/dto.rs::an_event_kind_is_one_of_six`, `::an_event_occurred_at_requires_a_timezone`. | A recorded run, and event pagination beyond `?limit=2` (`offset`, the clamp, an offset past the end). |
 | `JOB-R06` Deleting an application deletes its events; a company with applications cannot be deleted | `Implemented` | `DELETE_APPLICATION_OWNED` is one statement; the event cascade is the schema's `ON DELETE CASCADE`. `DELETE_COMPANY_IF_UNUSED` is one statement with `AND NOT EXISTS (SELECT 1 FROM job_applications …)`. **Nothing is deleted to make it succeed**: the applications are records the client did not ask to delete. Zero rows is resolved by one read, `company_is_owned`: owned → `409`, otherwise `404`. | `tests/job_applications_api.rs::deleting_an_application_removes_its_events`, `::a_company_with_applications_cannot_be_deleted`, `::a_company_can_be_deleted_once_its_applications_are_gone`, `::an_application_can_be_moved_to_another_of_the_callers_companies`; `tests/jobs_schema.rs` cases 5 and 6. | A recorded run, and the delete/insert race, which is analysed and not tested. |
 | `JOB-R07` One optional next-action task, cleared when the task is deleted | `Implemented` | `next_action_task_id` with `ON DELETE SET NULL` in the schema. The ownership rule cannot be a constraint (`tasks` has no `user_id`) and is a predicate of **both** the insert and the update: `EXISTS (SELECT 1 FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = $n AND p.user_id = $2)`. A foreign task, another account's task and a task that does not exist are one answer: `404`, named by `explain_insert_refusal` / `explain_update_refusal`. `{"next_action_task_id": null}` clears the link. | `tests/job_applications_api.rs::the_next_action_task_must_belong_to_the_caller`, `::deleting_the_task_clears_the_next_action`. | A recorded run. No schema test asserts the `SET NULL`; the API case is the only evidence, and it is the only evidence for the ownership rule that **can** exist. |
 | `JOB-R08` No text generation, no outbound AI call | `Implemented` | There is no generating operation among the 48, no `prompt` field in any DTO, and `src/job_applications/` imports no HTTP client. The implementation is the absence. | The surface is pinned: `tests/openapi_contract.rs::the_route_table_and_the_document_describe_the_same_operations` with `CONTRACT_OPERATIONS = 48`, and `::the_job_application_operations_publish_their_success_status` names all fourteen job operations. **No test asserts the absence of a generation field**: the contract case that would have asserted it was not written. | A recorded run, and a check of the absence itself, which today is a reading of the tree rather than a test. |
@@ -103,7 +105,7 @@ requirements:
 | `every_job_application_operation_requires_a_credential` | All fourteen operations, with no token and with an invalid one, answer `401 unauthorized` in the standard envelope, with no `details`, and nothing they sent landed. |
 | `every_job_application_operation_is_not_found_for_another_account` | The eleven row-addressed operations answer `404` for another account; the two lists answer `200` with an empty page; a create is the caller's own. |
 | `every_path_id_must_be_a_uuid` | Twelve path shapes, including both id positions of the event route, answer `400 bad_request`. |
-| `every_write_operation_refuses_a_malformed_body` | Six write operations: non-JSON and empty bodies are `400`; a JSON value of the wrong shape is `422` naming `body`. |
+| `every_write_operation_refuses_a_malformed_body` | Six write operations: non-JSON and empty bodies are `400` on all six. A JSON value of the wrong shape is `422` naming `body` on the four writes that take a request object — company `POST` and `PATCH`, application `POST` and `PATCH` — and is not exercised on the two event writes. |
 | `every_operation_with_a_documented_validation_failure_is_a_422` | Eight cases across the three resources, each `422` with a non-empty `details`. |
 | `a_job_applications_body_over_the_limit_is_refused` | A body above `max_body_bytes` is `413 payload_too_large`, on a state configured with a 256-byte limit. |
 
@@ -128,8 +130,9 @@ every row above.
    documentation gates of [strategy.md](../../testing/strategy.md) §7.5, with a
    disposable `TEST_DATABASE_URL`, quoted in the verification record. The
    policy is [`verification-policy.md`](../../testing/verification-policy.md).
-2. **The review.** No reviewer has read `J2`–`J5`. The review log is the
-   evidence, and it does not exist for this chain yet.
+2. **A passing review.** `ATOM-REVIEW-20261024-010` read `J2`–`J5`, found no
+   code defect and returned FAIL on documentation only. Its findings are fixed,
+   but no re-review that closes them is recorded.
 3. **The uncovered halves** listed per requirement in §1.2 and collected in
    [testing.md](testing.md) §6: the application-listing pagination bounds, the
    event and application list clamps, the description and `job_url` length
@@ -140,20 +143,17 @@ The **flow layer is no longer missing**: `tests/job_applications_flow.rs` holds
 the journey from registration to `offer` and the ownership sweep over thirteen
 addressed attempts, and [testing.md](testing.md) §8 records what each proves that
 the 51 per-operation cases cannot. It is counted as evidence in §1.5 and it is
-**not** a substitute for the two items above: it has never been run and no
-reviewer has read it. Unlike `tests/claims_flow.rs` it has no seeded read; the
+**not** a substitute for the two items above: it has never been run, and the
+review recorded no run of it. Unlike `tests/claims_flow.rs` it has no seeded read; the
 seeded rows are asserted by `tests/seeder.rs`.
 
 `Verified` additionally requires that the schema, endpoint, flow, contract and
 seeder cases pass in one recorded run. Neither word is used loosely here:
 `Implemented` is about the tree, `Verified` is about a measurement.
 
-One status discrepancy is recorded rather than resolved here:
-[`schema.md`](../../database/schema.md) §11 still heads its section `Proposed`
-and lists `companies`, `job_applications` and `application_events` as tables
-that exist but have no endpoint. The second half of that sentence is now false:
-all fourteen operations are mounted. Reconciling the wording is the schema
-document's edit, not this file's.
+The earlier status discrepancy in [`schema.md`](../../database/schema.md) §11 is
+resolved: the section now records the five built tables as served and only
+`embeddings` as proposed.
 
 ## 3. What a future change must do to keep it `Implemented` and reach `Verified`
 

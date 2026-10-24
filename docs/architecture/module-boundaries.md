@@ -6,7 +6,8 @@
 
 What each module owns, what it may depend on, and which invariant it is
 responsible for. §1–§7 describe the modules that **exist**; the last section
-describes the three **planned** Phase 2 modules and says so throughout.
+describes the Phase 2 modules — the two that are built and the one still
+planned — and marks each.
 The layering rule that this document enforces is fixed by
 [`../../AGENTS.md`](../../AGENTS.md) §2:
 
@@ -142,23 +143,27 @@ Source: `src/tasks/handlers.rs`, `src/tasks/service.rs`,
 
 ---
 
-## Phase 2 modules (planned, except reimbursements)
+## Phase 2 modules (planned, except reimbursements and job-applications)
 
 > **Mostly planned.** `reimbursements` is **`Implemented`**: `src/reimbursements/`
 > holds six modules, and `migrations/0004_expense_claims.sql` creates
 > `expense_claim_status`, `expense_claims` and `expense_items` with their
 > constraints and indexes. All twelve published operations are served, and
 > `tests/claims_schema.rs`, `tests/claims_api.rs` and `tests/claims_flow.rs`
-> prove the constraints and the behaviour. `job-applications` has its **schema
-> only**: `migrations/0005_job_applications.sql` and
-> `src/job_applications/{mod,models}.rs`, proved by `tests/jobs_schema.rs`, with
-> no handler, service, repository, DTO or route. There is no `src/ml/` and no
+> prove the constraints and the behaviour. `job-applications` is also
+> **`Implemented`**: `src/job_applications/` holds six modules, and
+> `migrations/0005_job_applications.sql` creates `job_application_status`,
+> `application_event_kind`, `companies`, `job_applications` and
+> `application_events` with their constraints and indexes. All fourteen
+> published operations are served, and `tests/jobs_schema.rs`,
+> `tests/job_applications_api.rs` and `tests/job_applications_flow.rs` prove the
+> constraints and the behaviour. There is no `src/ml/` and no
 > `migrations/0006`; `ml` is `Accepted`, not built.
 
 **What "every module" means from here.** §1–§7 describe every module that
 **exists**. From this section on, the phrase means "every module that exists
-plus the three planned ones listed here"; a module that appears in neither place
-is not covered by this document.
+plus the one still planned, `ml`, listed here"; a module that appears in neither
+place is not covered by this document.
 
 The heading is unnumbered on purpose: `§7` and `§8` are cited by number from
 [`../decisions/ADR-0006-configuration-source-of-truth.md`](../decisions/ADR-0006-configuration-source-of-truth.md)
@@ -184,10 +189,10 @@ users ──┬──► reimbursements ──(optional, SET NULL)──► proj
                  └─reads──► job-applications
 ```
 
-| Module | Status | Planned source | Owns in the database | May depend on |
-| ------ | ------ | -------------- | -------------------- | ------------- |
-| `reimbursements` | `Accepted`, schema only | `src/reimbursements/` (`mod.rs`, `models.rs`) | `expense_claims`, `expense_items` | `error` |
-| `job-applications` | `Accepted`, planned | `src/job_applications/` | `companies`, `job_applications`, `application_events` | `error`, `pagination`, `helpers`, `money`, `config`, `api`, `tasks` (read-only, through `projects`) |
+| Module | Status | Source | Owns in the database | May depend on |
+| ------ | ------ | ------ | -------------------- | ------------- |
+| `reimbursements` | `Implemented` | `src/reimbursements/` (six modules) | `expense_claims`, `expense_items` | `error` |
+| `job-applications` | `Implemented` | `src/job_applications/` (six modules) | `companies`, `job_applications`, `application_events` | `error`, `pagination`, `helpers`, `money`, `config`, `api`, `tasks` (read-only, through `projects`) |
 | `ml` | `Accepted`, planned | `src/ml/` | `embeddings` | `error`, `pagination`, `helpers`, `config`, `notes` (repository), `job_applications` (repository), `burn` |
 
 **The arrow into `ml` is one-way.** No module may depend on `ml`: no module
@@ -201,7 +206,7 @@ confirmed (owner decision O1). This section depends on **A2** (a receipt is a
 reference), **A4** (inference is local) and **A6** (money is `NUMERIC(19,4)`); a
 revision of one changes this plan, not the requirement.
 
-### `reimbursements` (planned)
+### `reimbursements`
 
 Expense claims: a claim with one currency, a lifecycle from `draft` to `paid`,
 and the line items whose amounts sum to its total. It owns the only stored
@@ -221,7 +226,7 @@ module that writes money.
 | Verification the implementing change must provide | Unit tests for `ensure_transition` (every allowed and every forbidden edge) and for the money validator (`validate_money`, not a type — see the note under *The planned cross-cutting addition: `money`*); integration tests for cross-account `404` on every verb, for the total after each item write, and for the `ON DELETE SET NULL` behaviour when a project is deleted. |
 | Limitations already known | The total is a stored column, not a view; the submit precondition is a service rule, because a `CHECK` cannot count another table's rows; deleting a claim is permanent. The feature document §10 lists the rest. |
 
-### `job-applications` (planned)
+### `job-applications`
 
 Companies, the applications the owner is pursuing at them, and the dated events
 in one application's timeline. A company name is unique per owner; an
@@ -230,7 +235,7 @@ cannot be deleted.
 
 | Aspect | Description |
 | ------ | ----------- |
-| Public interface | `JobService` with `create_company`, `list_companies`, `get_company`, `update_company`, `delete_company`, `create_application`, `list_applications`, `get_application`, `update_application`, `delete_application`, `list_events`, `create_event`, `update_event` and `delete_event`; the repository statements the feature document lists, plus `update_company_owned`, `update_application_owned` and `delete_application_owned`, which it does not name and which the implementing change adds in the Phase 1 `*_owned` style; the stage guard `ensure_transition`; the DTOs `CompanyResponse`, `CompanyPage`, `ApplicationResponse`, `ApplicationDetailResponse`, `ApplicationPage`, `EventResponse`, `EventPage`, the create and update requests and the query types. A handler reaches it as `state.job_applications`. |
+| Public interface | `JobService` with `create_company`, `list_companies`, `get_company`, `update_company`, `delete_company`, `create_application`, `list_applications`, `get_application`, `update_application`, `delete_application`, `list_events`, `create_event`, `update_event` and `delete_event`; the repository statements the feature document lists, plus `update_company_owned`, `update_application_owned` and `delete_application_owned`, which it does not name and which the implementing change adds in the Phase 1 `*_owned` style; the stage guard `ensure_transition`; the DTOs `CompanyResponse`, `CompanyPage`, `ApplicationResponse`, `ApplicationPage`, `EventResponse`, `EventPage`, the create and update requests and the query types. A handler reaches it as `state.job_applications`. |
 | Internal layering | The five layers, in the five files the feature document names: `handlers.rs`, `service.rs`, `repository.rs`, `models.rs` (`Company`, `JobApplication`, `ApplicationEvent`), `dto.rs`. |
 | May depend on | `error`, `pagination`, `helpers`, `money`, `config` (the message catalogue), `api::extract`, `api::middleware`. It reads `tasks` to prove that an optional next-action task belongs to the caller, and that read necessarily joins `projects`, because `tasks` carries no `user_id` (see [`data-architecture.md`](data-architecture.md) §2.1). |
 | Must not depend on | `notes`, `reimbursements`, `ml`; and it does not write the `tasks` or `projects` tables at all. |

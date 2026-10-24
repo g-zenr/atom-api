@@ -5,7 +5,7 @@
 //! operation cannot be called without saying whose row is meant. The service
 //! never compares identifiers and never returns `403`: a repository miss becomes
 //! [`AppError::NotFound`] with the same message for "does not exist" and
-//! "belongs to somebody else" (`ADR-0005` Â§3).
+//! "belongs to somebody else" (`ADR-0005` §3).
 //!
 //! Three rules hold in this order:
 //!
@@ -25,8 +25,8 @@
 //! | ---- | ----- |
 //! | A company name is unique per owner, ignoring case | The functional index `companies_user_id_lower_name_unique_idx`; the service only maps `23505` to `409` and never compares names itself |
 //! | The seven stages | The `job_application_status` enum |
-//! | The twelve edges and the three terminal stages | [`ALLOWED_MOVES`], in this file â€” a `CHECK` sees one row and cannot see the previous stage |
-//! | A company with applications cannot be deleted | One `DELETE â€¦ AND NOT EXISTS`, in the repository |
+//! | The twelve edges and the three terminal stages | [`ALLOWED_MOVES`], in this file — a `CHECK` sees one row and cannot see the previous stage |
+//! | A company with applications cannot be deleted | One `DELETE … AND NOT EXISTS`, in the repository |
 //! | The next-action task belongs to the caller | [`JobService`], because `tasks` has no `user_id` for a composite key |
 //! | `role_title`, `summary` and `source` are trimmed | This file: the schema documents "trimmed" but has no `CHECK` for those three, so an untrimmed value would be stored untrimmed rather than refused |
 //!
@@ -66,7 +66,7 @@ use crate::utils::text::char_len;
 ///
 /// This constant is the **only** definition of the edge table. Both
 /// [`ensure_transition`] and [`permitted_sources`] read it, so the `409` a
-/// client receives and the predicate the write carries cannot disagree â€” which
+/// client receives and the predicate the write carries cannot disagree — which
 /// is what a second, hand-written copy would eventually do.
 ///
 /// It is a `match` on the pair and not a rank comparison, because `rejected`
@@ -131,7 +131,7 @@ pub fn ensure_transition(
 
 /// The stages a request may come from when it asks for `next`.
 ///
-/// It is the requested stage itself â€” the accepted no-op â€” plus every `from`
+/// It is the requested stage itself — the accepted no-op — plus every `from`
 /// of an allowed edge into it. The result is what the guarded `UPDATE` binds, so
 /// it must be derived from [`ALLOWED_MOVES`] rather than written out again.
 pub fn permitted_sources(next: ApplicationStatus) -> Vec<ApplicationStatus> {
@@ -272,7 +272,7 @@ impl JobService {
     ///
     /// An omitted field is left untouched; `website` may be cleared with an
     /// explicit `null`. A rename onto another company's name is a `409`, and a
-    /// rename onto the company's **own** name â€” in any casing â€” is accepted,
+    /// rename onto the company's **own** name — in any casing — is accepted,
     /// because the index excludes the row being updated.
     pub async fn update_company(
         &self,
@@ -724,10 +724,10 @@ impl JobService {
     /// The guarded statement is the decision; this read only names its reason,
     /// so the order matters:
     ///
-    /// 1. the application is absent or foreign â†’ `404`;
-    /// 2. a company in the body is foreign â†’ `404`;
-    /// 3. a task in the body is foreign â†’ `404`;
-    /// 4. the requested stage is not reachable from the stored one â†’ `409`;
+    /// 1. the application is absent or foreign → `404`;
+    /// 2. a company in the body is foreign → `404`;
+    /// 3. a task in the body is foreign → `404`;
+    /// 4. the requested stage is not reachable from the stored one → `409`;
     /// 5. anything else is a concurrent move that landed between the statement
     ///    and this read, which is also a `409`.
     async fn explain_update_refusal(
@@ -785,7 +785,7 @@ impl JobService {
 ///
 /// The comparison is folded by `companies_user_id_lower_name_unique_idx`, in the
 /// database, over `LOWER(name)`. The service does not lower-case anything, so
-/// the two cannot disagree about which code points fold â€” the failure mode the
+/// the two cannot disagree about which code points fold — the failure mode the
 /// commitment category in `D2` had to avoid with an ASCII-only fold. The stored
 /// casing is preserved because a company name is a display form.
 pub fn validate_company_name(name: &str, messages: &Messages) -> AppResult<String> {
@@ -969,7 +969,7 @@ pub fn validate_currency(currency: &str, messages: &Messages) -> AppResult<Strin
 
 /// Validates the whole salary triple of a create request.
 ///
-/// Three rules, all published in `api.md` Â§9:
+/// Three rules, all published in `api.md` §9:
 ///
 /// * a bound without a currency is a `422` naming `salary_currency`, because a
 ///   number whose currency is unknown is worse than no number;
@@ -1125,8 +1125,8 @@ fn validate_salary_order(
 
 /// Compares two validated four-decimal money strings, without parsing them.
 ///
-/// Both inputs are in the form [`validate_money`] accepts â€”
-/// `^[0-9]{1,15}\.[0-9]{4}$` â€” so comparing the left-padded integer part and
+/// Both inputs are in the form [`validate_money`] accepts —
+/// `^[0-9]{1,15}\.[0-9]{4}$` — so comparing the left-padded integer part and
 /// then the fraction is exact. Leading zeros have to be trimmed first: `"05.0000"`
 /// and `"5.0000"` are the same value and a plain string comparison would order
 /// them by length.
@@ -1256,11 +1256,11 @@ mod tests {
     /// Seven stages, forty-nine ordered pairs. The test walks every pair rather
     /// than the cases someone thought of, and pins the three counts the contract
     /// states: **12** allowed edges, **7** accepted no-ops and **30** refusals.
-    /// A self-pair is a no-op, not a refusal â€” that is the trap, and the
+    /// A self-pair is a no-op, not a refusal — that is the trap, and the
     /// `NoOp` arm below is what catches it.
     #[test]
     fn the_stage_machine_allows_exactly_the_twelve_edges() {
-        // `from`, `to` â€” the contract's table, row for row.
+        // `from`, `to` — the contract's table, row for row.
         const EDGES: [(ApplicationStatus, ApplicationStatus); 12] = [
             (ApplicationStatus::Wishlist, ApplicationStatus::Applied),
             (ApplicationStatus::Applied, ApplicationStatus::Screening),

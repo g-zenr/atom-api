@@ -1,6 +1,6 @@
 # Job applications — API
 
-> **Status:** Accepted
+> **Status:** Implemented
 > **Last updated:** 2026-10-24
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-JOB-001`](specification.md)
@@ -13,7 +13,9 @@ the API root. The general rules are in
 **All fourteen operations answer.** They are served, published in
 `/api/v1/openapi.json`, and asserted by `tests/job_applications_api.rs` and
 `tests/openapi_contract.rs`. The feature is `Implemented`; it is not `Verified`,
-because no reviewer has read the chain that completed it.
+because no gate run after the review's fixes is recorded and
+`ATOM-REVIEW-20261024-010`, which read the chain and found no code defect,
+returned FAIL on documentation only.
 
 ## 1. Endpoint summary
 
@@ -615,7 +617,11 @@ the `CompanyResponse`, `CompanyPage`, `ApplicationResponse`,
 `UpdateApplicationRequest`, `CreateEventRequest` and `UpdateEventRequest`
 schemas. The `bearer` security scheme applies to all fourteen.
 
-The list operations publish their parameters exactly once each, and the
-contract test asserts the published set exactly
-([`conventions.md`](../../api/conventions.md) §5). The salary fields are
-`type: string` in the document, never `type: number`.
+The two job list operations — `GET /api/v1/companies` and
+`GET /api/v1/job-applications` — publish their parameters exactly once each,
+and the contract test
+`each_list_endpoint_publishes_its_filter_and_pagination_parameters_once`
+asserts those two published sets exactly
+([`conventions.md`](../../api/conventions.md) §5). The event listing publishes
+only `limit` and `offset` and is not in that test's table. The salary fields
+are `type: string` in the document, never `type: number`.

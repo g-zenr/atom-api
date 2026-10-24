@@ -6,8 +6,8 @@
 
 The complete Phase 1 schema of the ATOM database, table by table, as it is
 defined in `migrations/`. Section 11 is the Phase 2 schema. Its first two tables
-are created by `migrations/0004_expense_claims.sql` and are served by the five
-claim endpoints of chain `R2`; its next three are created by
+are created by `migrations/0004_expense_claims.sql` and are served by the twelve
+claim operations of chains `R2`-`R4`; its next three are created by
 `migrations/0005_job_applications.sql` and are served by the fourteen
 operations of chains `J2`-`J4`. `embeddings` is still proposed and
 does not exist.
@@ -402,8 +402,9 @@ written with that in mind, and the policy in
 > `application_event_kind`, `companies`, `job_applications` and
 > `application_events` with every constraint and index named in §11.3-§11.5,
 > including the two composite foreign keys and the functional unique index on
-> `(user_id, LOWER(name))`. No statement reads them yet, so the indexes below
-> are the published access paths, not a measurement of a running query. §11.6
+> `(user_id, LOWER(name))`. `src/job_applications/repository.rs` holds every
+> statement that reads and writes them, so the indexes below are the published
+> access paths, not a measurement of a running query. §11.6
 > remains proposed.
 
 Six provisional assumptions underlie this section: **A1** (a claim has one

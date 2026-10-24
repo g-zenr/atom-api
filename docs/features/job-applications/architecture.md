@@ -61,7 +61,7 @@ result is recorded in this document ([status.md](status.md) §1).
 | `get_application(owner, application_id)` | One owner-scoped read; a miss is `404`. |
 | `update_application(owner, application_id, request)` | Validates, resolves the salary triple against the stored one when touched, derives `permitted_sources`, runs the guarded update, explains a zero-row result. |
 | `delete_application(owner, application_id)` | One owner-scoped delete; the events go by the schema's cascade. |
-| `list_events(owner, application_id, pagination)` | One page statement plus a count; the empty page is checked against `APPLICATION_EXISTS` so a missing application is still `404`. |
+| `list_events(owner, application_id, pagination)` | One page statement plus a count; the empty page is checked against `EVENTS_EXISTS_WITH_TOTAL` so a missing application is still `404`. |
 | `create_event(owner, application_id, request)` | Validates, inserts through `SELECT … FROM job_applications`, names the `404`. |
 | `update_event(owner, application_id, event_id, request)` | Validates the present fields, updates in place, never writes a timestamp. |
 | `delete_event(owner, application_id, event_id)` | One delete scoped by id, application and owner. |
@@ -258,7 +258,7 @@ only; `id DESC` is the statement's job, and it is what makes the order total.
 There is no filter and no client-selectable sort.
 
 **The empty page.** `list_events_owned` runs the page statement, and only when
-it returns nothing does it run `APPLICATION_EXISTS`. That keeps the two cases
+it returns nothing does it run `EVENTS_EXISTS_WITH_TOTAL`. That keeps the two cases
 apart — an application with no events is `200` with an empty page, a missing or
 foreign application is `404` — without making every page pay for the check.
 
