@@ -42,8 +42,48 @@ define the target state. The requirements live in
 
 ## Entries
 
-### ATOM-CHANGE-20261024-011 - Local ML: the settings, the module, the three operations
+### ATOM-CHANGE-20261025-001 - The first executable gate verdict, and its repairs
 
+**Date:** 2026-10-25 (UTC)
+**Type:** Fix and process
+**Author:** The ATOM engineering team - the orchestrator with the `docs` subagent, on the verdict of the `quality-gate`.
+**Status:** Complete - **review rows 10-11 closed for `D0`-`D5`**
+
+#### Summary
+
+The `quality-gate` could not execute a gate for the whole of the Phase 2 run
+(`KI-023`). `scripts/gate.ps1` and one allow rule fixed that, and the first
+executable verdict returned **FAIL on documentation with all six gates green and
+483 tests**. Every blocking finding is fixed here.
+
+#### What the gate found, and what was done
+
+| Finding | Disposition |
+| ------- | ----------- |
+| `ml/testing.md` said "no case has been run, and none has passed" | Rewritten against the tree: 40 `ml_api` cases, 39 module unit cases, 20 seeder cases, all passing |
+| `schema.md` said the embeddings Rust side did not exist | Corrected: `src/ml/{repository,service,handlers}.rs` and the delete-purge statements exist |
+| `implementation-status.md` said five migrations, 387 tests, 19 seeder cases | Six, 483, 20 |
+| The ledger had no `D4`/`D5` scorecard, `Resume` said 302 tests | `D4.M1`-`M6` and `D5.H1/H2/H4` added; `Resume` corrected |
+| Two `#[allow(clippy::cast_possible_truncation)]` in `src/ml/burn_embedder.rs` | **Removed.** They were no-ops for `-D warnings` because the pedantic group is not enabled, so they were rule violations rather than gate workarounds - which is worse, not better |
+
+A re-gate then confirmed B1-B5 resolved and raised two new items, both fixed here:
+two documents still called the `#[allow]` removal *uncommitted* (it is committed
+in `505a189`), and this entry was missing.
+
+#### Checks and results
+
+`script/gate.ps1` at `505a189`: `fmt` 0, `clippy` 0, `test` 0, `nodefault` 0,
+`docs` 0, `strict` 0. **483 tests on Windows**, 485 on CI where the two unix
+`shutdown` cases run.
+
+#### What is not verified
+
+`ML-R02` remains **not met** - the six-layer Burn encoder is unbuilt, and every
+document says so. `H3`, the 20k-row performance measurement, is deferred. No
+claim in this repository is `Verified`.
+
+ - Local ML: the settings, the module, the three operations
+### ATOM-CHANGE-20261024-011 - Local ML: settings, the embeddings table and three operations
 **Date:** 2026-10-24 (UTC)
 **Type:** Feature
 **Author:** The ATOM engineering team - the orchestrator with the `rust-backend` subagent.

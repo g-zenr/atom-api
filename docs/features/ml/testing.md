@@ -15,9 +15,9 @@ is in [`../../testing/strategy.md`](../../testing/strategy.md) §7.
 Read from the working tree on 2026-10-25. The feature is committed: the spike at
 `bfd1288`, the finalised ADR at `a4d33a3`, the module, schema, three operations
 and seeder flag at `ba198ff`, and the close-out at `ba91008`. The only
-uncommitted change to the feature is the removal of two
-`#[allow(clippy::cast_possible_truncation)]` attributes in
-`src/ml/burn_embedder.rs`.
+The two `#[allow(clippy::cast_possible_truncation)]` attributes in `src/ml/burn_embedder.rs`
+were removed and committed in `505a189`; zero suppressions remain in `src/` or
+`tests/`, and the tree is clean.
 
 | Layer | File | On disk | ML cases |
 | ----- | ---- | ------- | -------- |

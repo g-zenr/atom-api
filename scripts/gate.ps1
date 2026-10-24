@@ -23,10 +23,10 @@
     running; the test gate is then reported as NOT RUN, never as passing.
 
 .EXAMPLE
-    pwsh ./scripts/gate.ps1
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\gate.ps1
 
 .EXAMPLE
-    pwsh ./scripts/gate.ps1 -SkipTests
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\gate.ps1 -SkipTests
 #>
 [CmdletBinding()]
 param(

@@ -189,7 +189,7 @@ in `src/ml/burn_embedder.rs`. No re-gate is recorded, so nothing is promoted to
 This was the first `quality-gate` run that could execute a gate. Until `58f9532`
 the role's shell allow-list matched whole command strings, so every earlier
 attempt reported the six gates as not run (`KI-023`). The run used the single
-read-only entry point, `pwsh ./scripts/gate.ps1`:
+read-only entry point, `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\gate.ps1`:
 
 | # | Gate | Exit |
 | - | ---- | ---- |
@@ -240,7 +240,7 @@ None recorded. The repairs are uncommitted at the time of this entry, so the
 re-gate command has not been run against them:
 
 ```powershell
-pwsh ./scripts/gate.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\gate.ps1
 ```
 
 Until it is green and recorded, no feature moves to `Verified` and `ML-R02`

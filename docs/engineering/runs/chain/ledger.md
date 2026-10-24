@@ -1449,7 +1449,7 @@ tests run), all six gates are `0`, and `migrations/` ends at `0006`. The working
 tree carries one uncommitted change: the two
 `#[allow(clippy::cast_possible_truncation)]` attributes are removed from
 `src/ml/burn_embedder.rs` (`B5` of the gate). The removal itself has not been
-gated yet - run `pwsh ./scripts/gate.ps1`.
+gated yet - run `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\gate.ps1`.
 
 `D0` closed the Phase 1 leftovers the audit had deferred: the version prefix is
 declared once and mounted from that constant, the route table and the OpenAPI
@@ -1488,7 +1488,7 @@ nothing moves to `Verified` and `ML-R02` stays unmet.
 `D5` chains:
 
 ```powershell
-pwsh ./scripts/gate.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\gate.ps1
 ```
 
 If it is green, run `code-reviewer` over `git diff 58f9532..HEAD` and
