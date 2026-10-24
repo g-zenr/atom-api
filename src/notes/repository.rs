@@ -76,6 +76,71 @@ const COUNT_WITH_SEARCH: &str = r#"
       AND search_vector @@ plainto_tsquery('simple', $3)
 "#;
 
+/// The lexical candidate set of a hybrid search.
+///
+/// It is deliberately the **same** full-text predicate as [`PAGE_WITH_SEARCH`],
+/// so the two modes cannot disagree about what matches, and the same order, so
+/// the two pages are drawn from the same sequence. Only the identifiers are
+/// read: the bodies are loaded for the page that is actually returned, which
+/// keeps the memory of one hybrid search bounded by `ml.candidate_limit`
+/// identifiers instead of `ml.candidate_limit` note bodies.
+const LEXICAL_CANDIDATES: &str = r#"
+    SELECT id
+    FROM notes
+    WHERE user_id = $1
+      AND is_archived = FALSE
+      AND search_vector @@ plainto_tsquery('simple', $2)
+    ORDER BY created_at DESC, id DESC
+    LIMIT $3
+"#;
+
+/// Loads the notes of one page by identifier.
+///
+/// The predicate is `user_id = $1` and not only `id = ANY($2)`: the identifier
+/// list was produced by an owner-scoped query, and it is scoped again here,
+/// because a list is an input and not an authorisation.
+const FIND_MANY_OWNED: &str = r#"
+    SELECT id, user_id, title, content, is_archived, created_at, updated_at
+    FROM notes
+    WHERE user_id = $1
+      AND id = ANY($2)
+"#;
+
+/// Every note of the caller, for a reindex.
+///
+/// The order is `id`, which is stable, so two runs visit the sources in the
+/// same sequence and an interrupted run resumes in a predictable place.
+const EMBEDDABLE_OWNED: &str = r#"
+    SELECT id, user_id, title, content, is_archived, created_at, updated_at
+    FROM notes
+    WHERE user_id = $1
+    ORDER BY id
+"#;
+
+/// Deletes a note owned by the caller, and its embeddings, in one statement.
+///
+/// `embeddings.source_id` is polymorphic and carries no foreign key
+/// ([`ADR-0008`](../../docs/decisions/ADR-0008-local-pure-rust-ml.md) §3), so
+/// the cascade the schema cannot express is written here. One statement means
+/// one transaction, which is the only shape that makes the guarantee real: two
+/// repository calls would be two commits with an orphan between them.
+///
+/// The trailing `SELECT EXISTS` returns the scalar the method already returns;
+/// `rows_affected()` cannot be read from a statement that ends in a `SELECT`.
+const DELETE_NOTE_OWNED_WITH_EMBEDDINGS: &str = r#"
+    WITH removed AS (
+        DELETE FROM notes
+         WHERE id = $1 AND user_id = $2
+         RETURNING id
+    ), purged AS (
+        DELETE FROM embeddings
+         WHERE user_id = $2
+           AND source_type = 'note'
+           AND source_id IN (SELECT id FROM removed)
+    )
+    SELECT EXISTS (SELECT 1 FROM removed)
+"#;
+
 /// Persistence operations for notes.
 #[derive(Debug, Clone)]
 pub struct NoteRepository {
@@ -226,13 +291,69 @@ impl NoteRepository {
     }
 
     /// Deletes a note owned by `user_id`.
+    ///
+    /// The note and its embeddings are removed by one statement, so a reader
+    /// can never observe the note gone and its vector still present. The
+    /// embeddings of `source_type = 'note'` are the only ones touched: the
+    /// column is polymorphic, so the predicate is what names the table the
+    /// identifiers belong to.
     pub async fn delete_owned(&self, id: Uuid, user_id: Uuid) -> AppResult<bool> {
-        let result = sqlx::query("DELETE FROM notes WHERE id = $1 AND user_id = $2")
+        let removed = sqlx::query_scalar::<_, bool>(DELETE_NOTE_OWNED_WITH_EMBEDDINGS)
             .bind(id)
             .bind(user_id)
-            .execute(&self.pool)
+            .fetch_one(&self.pool)
             .await?;
 
-        Ok(result.rows_affected() > 0)
+        Ok(removed)
+    }
+
+    /// The identifiers of the caller's lexical matches, newest first.
+    ///
+    /// The set is bounded by `limit`, which is `ml.candidate_limit`: the
+    /// re-rank in Rust is therefore bounded by configuration, never by the size
+    /// of the corpus.
+    pub async fn lexical_candidates(
+        &self,
+        user_id: Uuid,
+        search: &str,
+        limit: i64,
+    ) -> AppResult<Vec<Uuid>> {
+        let ids = sqlx::query_scalar::<_, Uuid>(LEXICAL_CANDIDATES)
+            .bind(user_id)
+            .bind(search)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(ids)
+    }
+
+    /// Loads the caller's notes with the given identifiers.
+    ///
+    /// The result is unordered: the caller already has the order it asked for,
+    /// and re-sorting here would make the ranking depend on the database's
+    /// collation.
+    pub async fn find_many_owned(&self, user_id: Uuid, ids: &[Uuid]) -> AppResult<Vec<Note>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let notes = sqlx::query_as::<_, Note>(FIND_MANY_OWNED)
+            .bind(user_id)
+            .bind(ids)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(notes)
+    }
+
+    /// Every note of the caller, for a reindex.
+    pub async fn embeddable_owned(&self, user_id: Uuid) -> AppResult<Vec<Note>> {
+        let notes = sqlx::query_as::<_, Note>(EMBEDDABLE_OWNED)
+            .bind(user_id)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(notes)
     }
 }

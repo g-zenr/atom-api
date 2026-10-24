@@ -23,6 +23,7 @@ config/
 ├── api.toml                    the API metadata, CORS, pagination, rate limit
 ├── auth.toml                   the token lifetimes, the Argon2 cost, the password policy
 ├── database.toml               the connection pool and the timeouts
+├── ml.toml                     the local machine-learning settings
 ├── messages.toml               the client-facing message catalogue
 └── environments/
     ├── development.toml        the overrides for a local machine
@@ -122,6 +123,18 @@ file.
 | `database.acquire_timeout_seconds` | `5` | `DATABASE_ACQUIRE_TIMEOUT_SECS` | How long a caller waits for a pooled connection. Zero would mean "wait forever", so it is refused. |
 | `database.connect_timeout_seconds` | `10` | `DATABASE_CONNECT_TIMEOUT_SECS` | How long the initial connection may take. Without a bound, an unreachable database hangs the process before it binds a port. |
 
+### `ml.toml`
+
+| Key | Default | Environment variable | Meaning |
+| --- | ------- | -------------------- | ------- |
+| `ml.enabled` | `false` | `APP_ML_ENABLED` | Whether the Burn embedder is attempted at all. `false` selects the disabled embedder whatever `ml.backend` says, so a default deployment never reads a model file. |
+| `ml.backend` | `flex` | `APP_ML_BACKEND` | `flex` or `deterministic`, and nothing else. An unknown value is a start-up error, never a silent fallback. `deterministic` is the hash-based embedder the test suite and the seeder use. |
+| `ml.model_path` | empty — no model | `APP_ML_MODEL_PATH` | The local SafeTensors file. A path that does not exist selects the disabled embedder, and the process still starts. |
+| `ml.tokenizer_path` | empty — the `vocab.txt` beside `ml.model_path` | `APP_ML_TOKENIZER_PATH` | The WordPiece vocabulary. Empty means the sibling of the weights, so an extracted sentence-transformers directory needs one line of configuration. |
+| `ml.dimension` | `384` | `APP_ML_DIMENSION` | The vector length the embedder must produce. It is a property of the model, not a tuning knob. |
+| `ml.timeout_seconds` | `2` | `APP_ML_TIMEOUT_SECONDS` | The budget for one embed or one re-rank. It may not exceed `app.limits.request_timeout_seconds`. |
+| `ml.candidate_limit` | `200` | `APP_ML_CANDIDATE_LIMIT` | The largest lexical candidate set a hybrid search re-ranks. It may not be smaller than `api.pagination.max_limit`. |
+
 ### `messages.toml`
 
 The client-facing message catalogue. See §5.
@@ -186,7 +199,14 @@ them is an error, not a warning:
   degree of parallelism are at least one;
 - the clock-skew allowance is at most five minutes;
 - the password policy has a minimum of at least twelve characters and a maximum
-  that is at least the minimum.
+  that is at least the minimum;
+- `ml.dimension` is positive, `ml.timeout_seconds` is positive and no longer
+  than the request timeout, `ml.backend` is `flex` or `deterministic`, and
+  `ml.candidate_limit` is positive and at least `api.pagination.max_limit`.
+
+A missing *model file* is deliberately **not** in that list: it selects the
+disabled embedder, and the three endpoints answer `200` with lexical results or
+`409` rather than failing to start (ADR-0008 §8.3).
 
 ## 7. Adding a setting
 

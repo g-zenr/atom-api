@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::loader::{CONFIG_DIR_VAR, ConfigLoader, EnvironmentSource};
 use super::messages::render;
+use super::settings::{MlBackend, MlSettings};
 use super::validation::ConfigError;
 use super::{Config, Environment};
 
@@ -864,4 +865,186 @@ fn a_password_maximum_below_the_minimum_is_refused() {
         "[auth.password]\nmin_length = 12\nmax_length = 8\n",
         "auth.password.max_length",
     );
+}
+
+// ---------------------------------------------------------------------------
+// The `ml.*` settings — ADR-0008 §5, §7 and §10
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_ml_settings_have_their_documented_defaults() {
+    let config = Config::defaults().expect("the base configuration must be valid");
+    let ml = &config.ml;
+
+    // ML is off by default: a deployment that does nothing never looks for a
+    // model file, and every scored endpoint degrades (ML-R06).
+    assert!(!ml.enabled, "ml.enabled must default to false");
+    assert_eq!(ml.backend, MlBackend::Flex);
+    assert_eq!(ml.model_path, "");
+    assert_eq!(ml.tokenizer_path, "");
+    assert_eq!(ml.dimension, 384);
+    assert_eq!(ml.timeout, std::time::Duration::from_secs(2));
+    assert_eq!(ml.candidate_limit, 200);
+
+    // The compiled defaults agree with the file, so a build whose `ml.toml` is
+    // replaced by the embedded copy cannot change the documented values.
+    let compiled = MlSettings::default();
+    assert_eq!(compiled.enabled, ml.enabled);
+    assert_eq!(compiled.backend, ml.backend);
+    assert_eq!(compiled.dimension, ml.dimension);
+    assert_eq!(compiled.timeout, ml.timeout);
+    assert_eq!(compiled.candidate_limit, ml.candidate_limit);
+}
+
+#[test]
+fn the_ml_settings_can_be_set_from_the_environment() {
+    let config = loader_with_secrets(&[
+        ("APP_ML_ENABLED", "true"),
+        ("APP_ML_BACKEND", "deterministic"),
+        (
+            "APP_ML_MODEL_PATH",
+            "/models/all-MiniLM-L6-v2/model.safetensors",
+        ),
+        (
+            "APP_ML_TOKENIZER_PATH",
+            "/models/all-MiniLM-L6-v2/vocab.txt",
+        ),
+        ("APP_ML_DIMENSION", "768"),
+        ("APP_ML_TIMEOUT_SECONDS", "5"),
+        ("APP_ML_CANDIDATE_LIMIT", "500"),
+    ])
+    .load()
+    .expect("the configuration must be valid");
+
+    assert!(config.ml.enabled);
+    assert_eq!(config.ml.backend, MlBackend::Deterministic);
+    assert_eq!(
+        config.ml.model_path,
+        "/models/all-MiniLM-L6-v2/model.safetensors"
+    );
+    assert_eq!(
+        config.ml.tokenizer_path,
+        "/models/all-MiniLM-L6-v2/vocab.txt"
+    );
+    assert_eq!(config.ml.dimension, 768);
+    assert_eq!(config.ml.timeout, std::time::Duration::from_secs(5));
+    assert_eq!(config.ml.candidate_limit, 500);
+}
+
+#[test]
+fn the_ml_backend_is_one_of_the_supported_values() {
+    // The two accepted values, through the environment layer.
+    for (raw, expected) in [
+        ("flex", MlBackend::Flex),
+        ("deterministic", MlBackend::Deterministic),
+        (" FLEX ", MlBackend::Flex),
+    ] {
+        let config = loader_with_secrets(&[("APP_ML_BACKEND", raw)])
+            .load()
+            .expect("a supported backend must be accepted");
+
+        assert_eq!(config.ml.backend, expected);
+    }
+
+    // Anything else is a start-up error, never a silent fallback to lexical.
+    let error = loader_with_secrets(&[("APP_ML_BACKEND", "cuda")])
+        .load()
+        .expect_err("an unknown backend must be refused");
+
+    assert_invalid(error, "APP_ML_BACKEND");
+
+    // The file layer refuses it as a parse error, because the type has exactly
+    // two variants and every settings structure denies unknown values.
+    let directory = temporary_directory();
+    fs::write(directory.join("ml.toml"), "[ml]\nbackend = \"cuda\"\n")
+        .expect("the file must be writable");
+    let loader = loader_with_files(
+        &directory,
+        &[
+            ("DATABASE_URL", TEST_DATABASE_URL),
+            ("APP_JWT_SECRET", TEST_SECRET),
+        ],
+    );
+    let error = loader
+        .load()
+        .expect_err("an unknown backend in the file must be refused");
+    assert!(
+        matches!(error, ConfigError::Parse { .. }),
+        "an unknown backend must be a parse error, got {error:?}"
+    );
+    remove_directory(&directory);
+}
+
+#[test]
+fn the_candidate_limit_must_be_at_least_the_max_page_size() {
+    // `api.pagination.max_limit` is 100 in the base configuration, so 99 is
+    // one row short of a page: page two could never be filled.
+    let error = loader_with_secrets(&[("APP_ML_CANDIDATE_LIMIT", "99")])
+        .load()
+        .expect_err("a candidate set smaller than a page is refused");
+
+    assert_invalid(error, "ml.candidate_limit");
+
+    // A limit equal to the page maximum is accepted, and so is the default.
+    let config = loader_with_secrets(&[("APP_ML_CANDIDATE_LIMIT", "100")])
+        .load()
+        .expect("a candidate limit equal to the page maximum must be accepted");
+    assert_eq!(config.ml.candidate_limit, 100);
+}
+
+#[test]
+fn a_non_positive_candidate_limit_is_refused() {
+    for refused in ["0", "-1"] {
+        let error = loader_with_secrets(&[("APP_ML_CANDIDATE_LIMIT", refused)])
+            .load()
+            .expect_err("a non-positive candidate limit is refused");
+
+        assert_invalid(error, "ml.candidate_limit");
+    }
+}
+
+#[test]
+fn a_zero_ml_dimension_is_refused() {
+    assert_file_is_refused("ml.toml", "[ml]\ndimension = 0\n", "ml.dimension");
+}
+
+#[test]
+fn an_ml_timeout_above_the_request_timeout_is_refused() {
+    // The inference budget is spent inside a request, so it may not outlast it.
+    // The development overlay sets the request timeout to 60 s.
+    let error = loader_with_secrets(&[("APP_ML_TIMEOUT_SECONDS", "61")])
+        .load()
+        .expect_err("a budget longer than the request is refused");
+
+    assert_invalid(error, "ml.timeout_seconds");
+
+    assert_variable_is_refused("APP_ML_TIMEOUT_SECONDS", "0", "ml.timeout_seconds");
+}
+
+#[test]
+fn the_tokenizer_path_defaults_to_the_models_directory() {
+    let mut settings = MlSettings {
+        model_path: "/models/minilm/model.safetensors".to_string(),
+        ..MlSettings::default()
+    };
+
+    // Unset means "the `vocab.txt` beside the weights" (ADR-0008 §10), so the
+    // common case — an extracted sentence-transformers directory — needs one
+    // line of configuration.
+    assert_eq!(
+        settings.tokenizer_file(),
+        Some(std::path::PathBuf::from("/models/minilm/vocab.txt"))
+    );
+
+    // An explicit path wins.
+    settings.tokenizer_path = "/elsewhere/vocab.txt".to_string();
+    assert_eq!(
+        settings.tokenizer_file(),
+        Some(std::path::PathBuf::from("/elsewhere/vocab.txt"))
+    );
+
+    // With no weights there is no sibling either.
+    let empty = MlSettings::default();
+    assert_eq!(empty.tokenizer_file(), None);
+    assert_eq!(empty.model_file(), None);
 }

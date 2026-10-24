@@ -12,6 +12,7 @@ use crate::auth::handlers;
 use crate::config::Config;
 use crate::error::AppError;
 use crate::job_applications::handlers as job_handlers;
+use crate::ml::handlers as ml_handlers;
 use crate::notes::handlers as note_handlers;
 use crate::projects::handlers as project_handlers;
 use crate::reimbursements::handlers as claim_handlers;
@@ -40,6 +41,7 @@ use crate::tasks::handlers as task_handlers;
         note_handlers::get_note,
         note_handlers::update_note,
         note_handlers::delete_note,
+        ml_handlers::search_notes,
         project_handlers::list_projects,
         project_handlers::create_project,
         project_handlers::get_project,
@@ -76,6 +78,8 @@ use crate::tasks::handlers as task_handlers;
         job_handlers::create_event,
         job_handlers::update_event,
         job_handlers::delete_event,
+        ml_handlers::match_application,
+        ml_handlers::reindex,
     ),
     components(
         schemas(
@@ -129,6 +133,16 @@ use crate::tasks::handlers as task_handlers;
             crate::job_applications::dto::UpdateEventRequest,
             crate::job_applications::models::ApplicationStatus,
             crate::job_applications::models::ApplicationEventKind,
+            crate::ml::dto::SearchMode,
+            crate::ml::dto::MatchMode,
+            crate::ml::dto::DegradedReason,
+            crate::ml::dto::SearchRequest,
+            crate::ml::dto::SearchHit,
+            crate::ml::dto::SearchResponse,
+            crate::ml::dto::MatchRequest,
+            crate::ml::dto::MatchHit,
+            crate::ml::dto::MatchResponse,
+            crate::ml::dto::ReindexResponse,
             crate::pagination::Pagination,
         )
     ),
@@ -142,6 +156,10 @@ use crate::tasks::handlers as task_handlers;
         (name = "claims", description = "Expense claims and their line items"),
         (name = "companies", description = "Employers a job application points at"),
         (name = "job-applications", description = "Job applications and their event timeline"),
+        (
+            name = "ml",
+            description = "Semantic search, note matching and the embedding reindex"
+        ),
     )
 )]
 pub struct ApiDoc;
@@ -212,6 +230,11 @@ pub const ROUTE_TABLE: &[(&str, &str)] = &[
     // --- notes ---
     ("GET", "/notes"),
     ("POST", "/notes"),
+    // `POST /notes/search` is ownership of the `ml` module even though it lives
+    // under `/notes`: it is a search over the same rows, and its shape is the
+    // scored one. `GET /notes/search` is answered by `GET /notes/{note_id}`
+    // and is a `400`, because `search` is not a UUID.
+    ("POST", "/notes/search"),
     ("GET", "/notes/{note_id}"),
     ("PATCH", "/notes/{note_id}"),
     ("DELETE", "/notes/{note_id}"),
@@ -265,6 +288,9 @@ pub const ROUTE_TABLE: &[(&str, &str)] = &[
         "DELETE",
         "/job-applications/{application_id}/events/{event_id}",
     ),
+    // --- machine learning ---
+    ("POST", "/job-applications/{application_id}/match"),
+    ("POST", "/ml/reindex"),
 ];
 
 /// Every operation outside [`API_PREFIX`], as `(METHOD, path)`.
@@ -291,6 +317,7 @@ pub fn api_routes() -> Router<AppState> {
             "/notes",
             get(note_handlers::list_notes).post(note_handlers::create_note),
         )
+        .route("/notes/search", post(ml_handlers::search_notes))
         .route(
             "/notes/{note_id}",
             get(note_handlers::get_note)
@@ -382,6 +409,12 @@ pub fn api_routes() -> Router<AppState> {
             "/job-applications/{application_id}/events/{event_id}",
             patch(job_handlers::update_event).delete(job_handlers::delete_event),
         )
+        // --- machine learning ---
+        .route(
+            "/job-applications/{application_id}/match",
+            post(ml_handlers::match_application),
+        )
+        .route("/ml/reindex", post(ml_handlers::reindex))
 }
 
 /// The API explorer, as an Axum router.

@@ -23,15 +23,23 @@ The per-feature endpoint references are:
 | Tasks | [`../features/tasks/api.md`](../features/tasks/api.md) | 5 |
 | Reimbursements | [`../features/reimbursements/api.md`](../features/reimbursements/api.md) | all 12 it specifies |
 | Job applications | [`../features/job-applications/api.md`](../features/job-applications/api.md) | 14 |
+| Machine learning | [`../features/ml/api.md`](../features/ml/api.md) | 3 specified, **none published yet** |
 
-**The document describes 48 operations**: 46 under `/api/v1` and the two health
+**The document describes 51 operations**: 49 under `/api/v1` and the two health
 probes outside it. The reimbursement feature contributes twelve of them - five
-claim operations, three item operations and four lifecycle actions - and the
+claim operations, three item operations and four lifecycle actions - the
 job-application feature fourteen - five company, five application and four event
-operations. A reader who counts the inventory below must agree with those
-numbers; the contract test
+operations - and the machine-learning feature three. A reader who counts the
+inventory below must agree with those numbers; the contract test
 `the_route_table_and_the_document_describe_the_same_operations` fails if they
 disagree in either direction.
+
+**The three machine-learning operations are published.** They answer, and they
+degrade as their contract says: a scored search returns lexical results with
+`200` when `ml.enabled` is `false` (the default), a match and a reindex return
+`409`. No run of their suite is recorded, so the feature is `Implemented` and
+not `Verified`; see [`../features/ml/status.md`](../features/ml/status.md) and
+[`../features/ml/testing.md`](../features/ml/testing.md).
 
 ## 1. Where the OpenAPI document lives
 
@@ -108,8 +116,8 @@ curl -s http://127.0.0.1:3000/api/v1/openapi.json
 To change the document, change the `#[utoipa::path(...)]` annotations on the
 handlers in `src/auth/handlers.rs`, `src/notes/handlers.rs`,
 `src/projects/handlers.rs`, `src/tasks/handlers.rs`,
-`src/reimbursements/handlers.rs`, `src/job_applications/handlers.rs` and
-`src/health.rs`, and add any new schema to
+`src/reimbursements/handlers.rs`, `src/job_applications/handlers.rs`,
+`src/ml/handlers.rs` and `src/health.rs`, and add any new schema to
 the `components(schemas(...))` list in `src/api/routes.rs`.
 
 ## 3. Endpoint inventory
@@ -167,10 +175,13 @@ is required.
 | `POST` | `/api/v1/job-applications/{application_id}/events` | bearer | `201` | job applications |
 | `PATCH` | `/api/v1/job-applications/{application_id}/events/{event_id}` | bearer | `200` | job applications |
 | `DELETE` | `/api/v1/job-applications/{application_id}/events/{event_id}` | bearer | `204` | job applications |
+| `POST` | `/api/v1/notes/search` | bearer | `200` | machine learning |
+| `POST` | `/api/v1/job-applications/{application_id}/match` | bearer | `200` | machine learning |
+| `POST` | `/api/v1/ml/reindex` | bearer | `200` | machine learning |
 | `GET` | `/api/v1/openapi.json` | — | `200` | the document itself |
 | `GET` | `/api/v1/docs/` | — | `200` | the explorer |
 
-The first 48 rows are the operations the document describes and the two route
+The first 51 rows are the operations the document describes and the two route
 tables declare, and `tests/openapi_contract.rs` holds them together in both
 directions. The last two rows are the explorer and the document itself: they are
 served, but they are mounted by `swagger_ui` and are **not** operations in the
@@ -185,9 +196,17 @@ All twelve reimbursement operations answer. `GET /api/v1/claims/{claim_id}`
 returns the claim with its `items` array, and the three item endpoints and four
 lifecycle actions are served and published, so a claim can move from `draft` to
 `paid`. The fourteen job-application operations also answer: five company, five
-application and four event operations. See
+application and four event operations. The three machine-learning operations
+answer too, and are described in
+[`../features/ml/api.md`](../features/ml/api.md): a scored search returns lexical
+results with `200` while `ml.enabled` is `false`, which is the shipped default, a
+match returns `409`, and a reindex returns `409`. See
 [`../features/reimbursements/api.md`](../features/reimbursements/api.md) and
 [`../features/job-applications/api.md`](../features/job-applications/api.md).
+
+`GET /api/v1/notes/search` is **not** the search operation: the dynamic
+`{note_id}` segment matches it first and answers `400`, because `search` is not a
+UUID. The search operation is the `POST` on that path.
 
 ## 4. The request pipeline
 

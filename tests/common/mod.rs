@@ -28,6 +28,8 @@ use uuid::Uuid;
 
 use atom_api::api;
 use atom_api::config::Config;
+#[cfg(feature = "ml")]
+use atom_api::config::MlBackend;
 use atom_api::state::AppState;
 
 /// Environment variable holding the URL of the disposable test database.
@@ -167,6 +169,78 @@ pub async fn test_state_with_body_limit(max_body_bytes: usize) -> AppState {
 
     let mut config = test_config();
     config.app.limits.max_body_bytes = max_body_bytes;
+    state_with(config).await
+}
+
+/// The test configuration with the machine-learning settings chosen explicitly.
+///
+/// The embedder is selected **once**, at start-up, from `ml.enabled` and
+/// `ml.backend` (`docs/features/ml/architecture.md` §2). The suite therefore
+/// varies those two values instead of touching a model file: no test loads
+/// weights, downloads anything or performs a network call.
+///
+/// `ml.backend = "deterministic"` selects the hash-based embedder, which is the
+/// implementation `ADR-0008` §7.1 reserves for exactly this purpose. `"flex"`
+/// with no model artifact selects `Disabled`, which is the `model_missing`
+/// degradation path.
+#[cfg(feature = "ml")]
+pub fn test_config_with_ml(enabled: bool, backend: MlBackend) -> Config {
+    let mut config = test_config();
+
+    config.ml.enabled = enabled;
+    config.ml.backend = backend;
+
+    config
+}
+
+/// A test state whose embedder is selected by `ml.enabled` and `ml.backend`.
+#[cfg(feature = "ml")]
+pub async fn test_state_with_ml(enabled: bool, backend: MlBackend) -> AppState {
+    state_with(test_config_with_ml(enabled, backend)).await
+}
+
+/// A test state that serves the scored search modes with the deterministic
+/// embedder, without a model file and without a network.
+#[cfg(feature = "ml")]
+pub async fn test_state_with_deterministic_ml() -> AppState {
+    test_state_with_ml(true, MlBackend::Deterministic).await
+}
+
+/// A test state whose ML is switched off, whatever the backend says.
+#[cfg(feature = "ml")]
+pub async fn test_state_with_ml_disabled() -> AppState {
+    test_state_with_ml(false, MlBackend::Deterministic).await
+}
+
+/// A test state with ML enabled and **no model artifact**: `flex` is asked for
+/// and there is nothing to load, so start-up succeeds with `Disabled` and the
+/// degradation reason is `model_missing` (`ADR-0008` §8.3).
+#[cfg(feature = "ml")]
+pub async fn test_state_with_a_missing_model() -> AppState {
+    let mut config = test_config_with_ml(true, MlBackend::Flex);
+
+    // An explicit path under a directory no run creates, so the state cannot
+    // depend on whether this machine happens to hold weights somewhere.
+    config.ml.model_path = "atom-test-absent-model-directory/no-such-model.safetensors".to_string();
+    config.ml.tokenizer_path = "atom-test-absent-model-directory/no-such-vocab.txt".to_string();
+
+    state_with(config).await
+}
+
+/// A test state with the deterministic embedder and explicit bounds.
+///
+/// `candidate_limit` bounds the hybrid candidate set; `max_limit` is the page
+/// bound of the shared pagination envelope. `ml.candidate_limit` may not be
+/// smaller than `api.pagination.max_limit` (§7 of the architecture), so the two
+/// values in a test that lowers the candidate bound must be chosen together.
+#[cfg(feature = "ml")]
+pub async fn test_state_with_candidate_limit(candidate_limit: i64, max_limit: i64) -> AppState {
+    let mut config = test_config_with_ml(true, MlBackend::Deterministic);
+
+    config.api.pagination.default_limit = max_limit;
+    config.api.pagination.max_limit = max_limit;
+    config.ml.candidate_limit = candidate_limit;
+
     state_with(config).await
 }
 

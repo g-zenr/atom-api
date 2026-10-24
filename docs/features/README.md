@@ -23,7 +23,7 @@ each of them is in [§2](#2-the-per-feature-document-contract).
 | Tasks | `ATOM-FEAT-TASK-001` | Verified | [specification](tasks/specification.md) · [architecture](tasks/architecture.md) · [api](tasks/api.md) · [testing](tasks/testing.md) · [status](tasks/status.md) |
 | Reimbursements | `ATOM-FEAT-REIMB-001` | Implemented | [specification](reimbursements/specification.md) · [architecture](reimbursements/architecture.md) · [api](reimbursements/api.md) · [testing](reimbursements/testing.md) · [status](reimbursements/status.md) |
 | Job application tracking | `ATOM-FEAT-JOB-001` | Implemented | [specification](job-applications/specification.md) · [architecture](job-applications/architecture.md) · [api](job-applications/api.md) · [testing](job-applications/testing.md) · [status](job-applications/status.md) |
-| Local machine learning | `ATOM-FEAT-ML-001` | Accepted | [specification](ml/specification.md) · [architecture](ml/architecture.md) · [api](ml/api.md) · [testing](ml/testing.md) · [status](ml/status.md) |
+| Local machine learning | `ATOM-FEAT-ML-001` | Implemented | [specification](ml/specification.md) · [architecture](ml/architecture.md) · [api](ml/api.md) · [testing](ml/testing.md) · [status](ml/status.md) |
 
 The three Phase 2 features were accepted in
 [`project-truth.md`](../project-truth.md) §18 with acceptance criteria.
@@ -37,7 +37,9 @@ and all fourteen published operations, with `tests/jobs_schema.rs`,
 `Verified`: no reviewer has read the reimbursement chain, and the
 job-application review (`ATOM-REVIEW-20261024-010`) found no code defect but
 returned FAIL on documentation only; a passing suite
-is not a review. Local machine learning has no code yet, so it stays `Accepted`.
+is not a review. Local machine learning is `Implemented`: the three operations,
+migration `0006`, the seven `ml.*` settings and 40 cases in `tests/ml_api.rs`
+exist; `ML-R02` is not met, no run is recorded, and the seeder flag is missing.
 
 The status column summarises the feature as a whole. The per-requirement
 evidence behind it is in each feature's `status.md`; a feature can contain both

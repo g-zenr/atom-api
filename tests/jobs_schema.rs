@@ -457,7 +457,7 @@ async fn the_job_tables_apply_from_an_empty_database() {
     );
     assert_eq!(
         probe.versions,
-        vec![1, 2, 3, 4, 5],
+        vec![1, 2, 3, 4, 5, 6],
         "an empty database must end up carrying every migration, including 0005"
     );
     assert!(

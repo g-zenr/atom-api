@@ -489,12 +489,47 @@ const UPDATE_APPLICATION_OWNED: &str = r#"
               created_at, updated_at
 "#;
 
-/// Deletes one application of the caller.
+/// Deletes one application of the caller, and its embeddings, in one statement.
 ///
 /// Its events go with it through `application_events_application_fk … ON DELETE
-/// CASCADE`, in the same statement, so no transaction is needed.
-const DELETE_APPLICATION_OWNED: &str =
-    "DELETE FROM job_applications WHERE id = $1 AND user_id = $2";
+/// CASCADE`, in the same statement.
+///
+/// `embeddings.source_id` is polymorphic and carries no foreign key
+/// ([`ADR-0008`](../../docs/decisions/ADR-0008-local-pure-rust-ml.md) §3), so
+/// the embedding purge is written out here as a data-modifying CTE: one
+/// statement means one transaction, which is the only shape that keeps "the
+/// embedding is deleted with its source" true without a transaction handle.
+///
+/// The trailing `SELECT EXISTS` returns the scalar the method already returns;
+/// `rows_affected()` cannot be read from a statement that ends in a `SELECT`.
+const DELETE_APPLICATION_OWNED: &str = r#"
+    WITH removed AS (
+        DELETE FROM job_applications
+         WHERE id = $1 AND user_id = $2
+         RETURNING id
+    ), purged AS (
+        DELETE FROM embeddings
+         WHERE user_id = $2
+           AND source_type = 'application'
+           AND source_id IN (SELECT id FROM removed)
+    )
+    SELECT EXISTS (SELECT 1 FROM removed)
+"#;
+
+/// Every application of the caller, for a reindex.
+///
+/// The text that is embedded is `role_title` and `description`
+/// ([`docs/features/ml/architecture.md`](../../docs/features/ml/architecture.md)
+/// §4.4), which the statement reads in the same row.
+const EMBEDDABLE_APPLICATIONS: &str = r#"
+    SELECT id, user_id, company_id, role_title, source, status, applied_on,
+           salary_min::text AS salary_min, salary_max::text AS salary_max,
+           salary_currency, job_url, description, next_action_task_id,
+           created_at, updated_at
+    FROM job_applications
+    WHERE user_id = $1
+    ORDER BY id
+"#;
 
 /// The page statement for the event listing of one application.
 ///
@@ -848,19 +883,30 @@ impl JobRepository {
         Ok(updated)
     }
 
-    /// Deletes an application owned by `owner`. Its events cascade.
+    /// Deletes an application owned by `owner`. Its events cascade, and its
+    /// embeddings are purged by the same statement.
     pub async fn delete_application_owned(
         &self,
         application_id: Uuid,
         owner: Uuid,
     ) -> AppResult<bool> {
-        let result = sqlx::query(DELETE_APPLICATION_OWNED)
+        let removed = sqlx::query_scalar::<_, bool>(DELETE_APPLICATION_OWNED)
             .bind(application_id)
             .bind(owner)
-            .execute(&self.pool)
+            .fetch_one(&self.pool)
             .await?;
 
-        Ok(result.rows_affected() > 0)
+        Ok(removed)
+    }
+
+    /// Every application of the caller, for a reindex.
+    pub async fn embeddable_owned(&self, owner: Uuid) -> AppResult<Vec<JobApplication>> {
+        let applications = sqlx::query_as::<_, JobApplication>(EMBEDDABLE_APPLICATIONS)
+            .bind(owner)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(applications)
     }
 
     /// Lists the events of one application of the caller.

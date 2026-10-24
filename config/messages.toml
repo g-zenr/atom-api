@@ -247,3 +247,12 @@ company_has_applications = "The company still has job applications. Delete or mo
 # The message never names the current stage or the requested one, so it stays
 # true for every refused pair of the stage machine.
 stage_transition_not_allowed = "The application's current stage does not allow this change."
+
+# 409, when a match or a reindex is asked for while the embedder is
+# unavailable.
+#
+# Neither operation has a lexical fallback, so there is nothing honest to
+# return: a ranking without a model would be a fiction, and a reindex would
+# report work it did not do. The message names neither the setting nor the
+# cause; the cause is logged once at start-up (ADR-0008 §8.3, §12.6).
+ml_unavailable = "Machine learning is unavailable, so this operation cannot be performed."

@@ -1550,3 +1550,202 @@ async fn the_seeder_dev_profile_inserts_the_documented_company_and_application_c
         "every seeded application with a salary bound must carry exactly one currency"
     );
 }
+
+// ---------------------------------------------------------------------------
+// S4 - the embeddings, behind `--with-embeddings`
+// ---------------------------------------------------------------------------
+
+/// The embedder the seeder constructs directly (`ADR-0008` §7.2).
+///
+/// The seeder does not read `ml.backend` and does not read a model file, so its
+/// rows carry this identifier whatever the deployment's ML settings are.
+#[cfg(feature = "ml")]
+const SEEDED_MODEL_ID: &str = "deterministic-sha256-v1-384";
+
+/// The vector length that embedder produces.
+#[cfg(feature = "ml")]
+const SEEDED_DIMENSION: usize = 384;
+
+/// The tolerance of a unit-norm comparison on a seeded vector.
+///
+/// `embeddings.vector` is `REAL[]`, so every component is rounded to `f32`.
+/// 384 of those roundings make an exact `1.0` unreachable, and `1e-5` is the
+/// bound `ADR-0008` §9 states for the stored representation.
+#[cfg(feature = "ml")]
+const SEEDED_UNIT_NORM_TOLERANCE: f64 = 1e-5;
+
+/// The number of embedding rows owned by the two seeded accounts.
+#[cfg(feature = "ml")]
+async fn seeded_embedding_count(pool: &PgPool) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM embeddings WHERE user_id = ANY($1)")
+        .bind(seeded_user_ids())
+        .fetch_one(pool)
+        .await
+        .expect("the seeded embeddings must be countable")
+}
+
+/// One seeded embedding row: source type, model id, dim, vector.
+#[cfg(feature = "ml")]
+type SeededEmbedding = (String, String, i32, Vec<f32>);
+
+/// Every embedding row of the two seeded accounts.
+#[cfg(feature = "ml")]
+async fn seeded_embeddings(pool: &PgPool) -> Vec<SeededEmbedding> {
+    sqlx::query_as::<_, SeededEmbedding>(
+        "SELECT source_type, model_id, dim, vector
+         FROM embeddings
+         WHERE user_id = ANY($1)
+         ORDER BY source_type, source_id",
+    )
+    .bind(seeded_user_ids())
+    .fetch_all(pool)
+    .await
+    .expect("the seeded embeddings must be readable")
+}
+
+/// The Euclidean norm, in `f64` so the sum does not lose precision.
+#[cfg(feature = "ml")]
+fn seeded_l2(values: &[f32]) -> f64 {
+    values
+        .iter()
+        .map(|value| f64::from(*value) * f64::from(*value))
+        .sum::<f64>()
+        .sqrt()
+}
+
+/// `S4`: the seeder writes embeddings **only** when it is asked to.
+///
+/// Two halves, because either alone is a weaker claim. Without the flag the
+/// table stays empty for the seeded accounts - a seeder that embedded by
+/// default would make every `--reset` cost 220 inferences nobody asked for.
+/// With it, one row exists per note and per application, every vector is unit
+/// length, and the row names the deterministic embedder that `ADR-0008` §7.2
+/// makes the seeder construct directly.
+#[cfg(feature = "ml")]
+#[tokio::test]
+async fn the_seeder_writes_embeddings_only_with_the_flag() {
+    let _serialised = seeder_lock().await;
+    let pool = migrated_pool().await;
+
+    // --- without the flag ---------------------------------------------------
+    run_in_test_database(&["--profile", "dev", "--reset", "--allow-non-empty"])
+        .require_success("the dev profile without --with-embeddings");
+
+    assert_eq!(
+        seeded_embedding_count(&pool).await,
+        0,
+        "a run without --with-embeddings must write no embedding row"
+    );
+
+    // --- with the flag ------------------------------------------------------
+    let run = run_in_test_database(&[
+        "--profile",
+        "dev",
+        "--reset",
+        "--allow-non-empty",
+        "--with-embeddings",
+    ]);
+    let output = run.require_success("the dev profile with --with-embeddings");
+
+    // One row per note and per application (`architecture.md` §12.7). Nothing
+    // else is a source: `source_type` has exactly those two values.
+    let sources = DEV_NOTES + DEV_APPLICATIONS;
+    assert_eq!(
+        entity_count(&output, "embeddings"),
+        (sources, 0),
+        "--reset inserts every embedding fresh, so the report must account for all {sources}\n{output}"
+    );
+
+    assert_eq!(
+        seeded_embedding_count(&pool).await,
+        sources,
+        "the database must agree with the count the seeder reported"
+    );
+
+    let (notes, applications): (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*) FILTER (WHERE source_type = 'note'),
+                COUNT(*) FILTER (WHERE source_type = 'application')
+         FROM embeddings
+         WHERE user_id = ANY($1)",
+    )
+    .bind(seeded_user_ids())
+    .fetch_one(&pool)
+    .await
+    .expect("the seeded embeddings must be countable by source type");
+    assert_eq!(notes, DEV_NOTES, "one row per seeded note");
+    assert_eq!(
+        applications, DEV_APPLICATIONS,
+        "one row per seeded application"
+    );
+
+    // Every source really exists: a row whose source does not would be an
+    // orphan the reindex sweep has to clean, and the seeder must not create one.
+    let orphans: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM embeddings e
+         WHERE e.user_id = ANY($1)
+           AND NOT EXISTS (
+                 SELECT 1 FROM notes n
+                  WHERE e.source_type = 'note'
+                    AND n.id = e.source_id
+                    AND n.user_id = e.user_id
+               )
+           AND NOT EXISTS (
+                 SELECT 1 FROM job_applications a
+                  WHERE e.source_type = 'application'
+                    AND a.id = e.source_id
+                    AND a.user_id = e.user_id
+               )",
+    )
+    .bind(seeded_user_ids())
+    .fetch_one(&pool)
+    .await
+    .expect("the seeded embeddings must be readable with their sources");
+    assert_eq!(orphans, 0, "every seeded embedding must name a real source");
+
+    let rows = seeded_embeddings(&pool).await;
+    assert_eq!(
+        rows.len(),
+        usize::try_from(sources).expect("the count fits"),
+    );
+
+    for (source_type, model_id, dim, vector) in &rows {
+        assert_eq!(
+            model_id, SEEDED_MODEL_ID,
+            "the seeder constructs the deterministic embedder directly, so its rows name it \
+             ({source_type})"
+        );
+        assert_eq!(
+            *dim,
+            i32::try_from(SEEDED_DIMENSION).expect("the dimension fits"),
+            "the row records the vector length ({source_type})"
+        );
+        assert_eq!(
+            vector.len(),
+            SEEDED_DIMENSION,
+            "the vector has the declared number of elements ({source_type})"
+        );
+
+        let norm = seeded_l2(vector);
+        assert!(
+            (1.0 - norm).abs() <= SEEDED_UNIT_NORM_TOLERANCE,
+            "a seeded vector is unit length like every stored vector: {source_type} has norm \
+             {norm}, outside 1.0 +/- {SEEDED_UNIT_NORM_TOLERANCE}"
+        );
+    }
+
+    // A second run with the flag and without --reset must skip, not rewrite:
+    // the rows are deterministic, so there is nothing to change.
+    let second =
+        run_in_test_database(&["--profile", "dev", "--allow-non-empty", "--with-embeddings"]);
+    let output = second.require_success("a second run with --with-embeddings");
+    assert_eq!(
+        entity_count(&output, "embeddings"),
+        (0, sources),
+        "a second run must report every embedding as skipped\n{output}"
+    );
+    assert_eq!(
+        seeded_embedding_count(&pool).await,
+        sources,
+        "a second run must insert no embedding row"
+    );
+}

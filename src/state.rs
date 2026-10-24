@@ -17,6 +17,8 @@ use crate::auth::token::TokenService;
 use crate::config::Config;
 use crate::job_applications::repository::JobRepository;
 use crate::job_applications::service::JobService;
+use crate::ml::MlService;
+use crate::ml::repository::MlRepository;
 use crate::notes::repository::NoteRepository;
 use crate::notes::service::NoteService;
 use crate::projects::repository::ProjectRepository;
@@ -50,6 +52,8 @@ pub struct AppState {
     pub reimbursements: ClaimService,
     /// The company, job-application and event use cases.
     pub job_applications: JobService,
+    /// The machine-learning use cases and the embedder selected at start-up.
+    pub ml: MlService,
 }
 
 impl AppState {
@@ -93,9 +97,25 @@ impl AppState {
             config.auth.refresh_token_ttl,
         );
 
+        let note_repository = NoteRepository::new(db.clone());
+        let job_repository = JobRepository::new(db.clone());
+
         let notes = NoteService::new(
-            NoteRepository::new(db.clone()),
+            note_repository.clone(),
             messages.clone(),
+            config.api.pagination,
+        );
+
+        // The embedder is selected exactly once, here. `select` cannot fail:
+        // a missing model file is the `Disabled` state, not a start-up error
+        // (ADR-0008 §8.3).
+        let ml = MlService::new(
+            MlRepository::new(db.clone()),
+            note_repository,
+            job_repository.clone(),
+            crate::ml::embedder::select(&config.ml),
+            messages.clone(),
+            config.ml.clone(),
             config.api.pagination,
         );
         let projects = ProjectService::new(
@@ -113,11 +133,8 @@ impl AppState {
             messages.clone(),
             config.api.pagination,
         );
-        let job_applications = JobService::new(
-            JobRepository::new(db.clone()),
-            messages.clone(),
-            config.api.pagination,
-        );
+        let job_applications =
+            JobService::new(job_repository, messages.clone(), config.api.pagination);
 
         Ok(Self {
             config: Arc::new(config),
@@ -129,6 +146,7 @@ impl AppState {
             tasks,
             reimbursements,
             job_applications,
+            ml,
         })
     }
 }

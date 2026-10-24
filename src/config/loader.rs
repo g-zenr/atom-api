@@ -22,16 +22,17 @@ use std::time::Duration;
 
 use toml::Table;
 
-use crate::config::settings::Settings;
+use crate::config::settings::{MlBackend, Settings};
 use crate::config::validation::{ConfigError, validate};
 use crate::config::{Config, Environment};
 
 /// The base configuration files, in the order they are merged.
-const BASE_FILES: [&str; 5] = [
+const BASE_FILES: [&str; 6] = [
     "app.toml",
     "api.toml",
     "auth.toml",
     "database.toml",
+    "ml.toml",
     "messages.toml",
 ];
 
@@ -155,6 +156,7 @@ impl ConfigLoader {
             api: settings.api,
             auth: settings.auth,
             database: settings.database,
+            ml: settings.ml,
             // The catalogue is read on every error path, so the services share
             // one copy behind an `Arc`.
             messages: Arc::new(settings.messages),
@@ -191,6 +193,7 @@ impl ConfigLoader {
             api: settings.api,
             auth: settings.auth,
             database: settings.database,
+            ml: settings.ml,
             messages: Arc::new(settings.messages),
         };
 
@@ -379,6 +382,39 @@ impl ConfigLoader {
             settings.auth.argon2.parallelism = parse_number("APP_ARGON2_PARALLELISM", &value)?;
         }
 
+        // The seven `ml.*` settings. `ml.model_path` and `ml.tokenizer_path`
+        // are not secrets, so a literal value in the committed file is allowed;
+        // a machine-specific path belongs here, in the environment, because a
+        // committed file is shared by every host.
+        if let Some(value) = self.variable("APP_ML_ENABLED") {
+            settings.ml.enabled = parse_bool("APP_ML_ENABLED", &value)?;
+        }
+
+        if let Some(value) = self.variable("APP_ML_BACKEND") {
+            settings.ml.backend = MlBackend::parse(&value)?;
+        }
+
+        if let Some(value) = self.variable("APP_ML_MODEL_PATH") {
+            settings.ml.model_path = value;
+        }
+
+        if let Some(value) = self.variable("APP_ML_TOKENIZER_PATH") {
+            settings.ml.tokenizer_path = value;
+        }
+
+        if let Some(value) = self.variable("APP_ML_DIMENSION") {
+            settings.ml.dimension = parse_number("APP_ML_DIMENSION", &value)?;
+        }
+
+        if let Some(value) = self.variable("APP_ML_TIMEOUT_SECONDS") {
+            settings.ml.timeout =
+                Duration::from_secs(parse_number("APP_ML_TIMEOUT_SECONDS", &value)?);
+        }
+
+        if let Some(value) = self.variable("APP_ML_CANDIDATE_LIMIT") {
+            settings.ml.candidate_limit = parse_number("APP_ML_CANDIDATE_LIMIT", &value)?;
+        }
+
         Ok(())
     }
 
@@ -396,6 +432,7 @@ const fn embedded(name: &str) -> &'static str {
         b"api.toml" => include_str!("../../config/api.toml"),
         b"auth.toml" => include_str!("../../config/auth.toml"),
         b"database.toml" => include_str!("../../config/database.toml"),
+        b"ml.toml" => include_str!("../../config/ml.toml"),
         b"messages.toml" => include_str!("../../config/messages.toml"),
         _ => "",
     }

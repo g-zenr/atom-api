@@ -26,7 +26,7 @@ process.
 Three layers, later wins over earlier, key by key:
 
 ```text
-1. the base files in config/          app, api, auth, database, messages
+1. the base files in config/          app, api, auth, database, ml, messages
 2. the environment overlay            config/environments/<APP_ENV>.toml
 3. the environment variables          the names in .env.example
 ```
@@ -144,6 +144,24 @@ constants `MIN_PASSWORD_LENGTH`, `MAX_CLOCK_SKEW_SECONDS`,
 `MIN_PRUNE_GRACE_SECONDS`. The table above repeats them so that an operator
 can act without reading the source; the source is the enforced copy.
 
+#### `ml.toml`
+
+| Key | Default | Environment variable | Constraint |
+| --- | ------- | -------------------- | ---------- |
+| `ml.enabled` | `false` | `APP_ML_ENABLED` | A boolean. `false` selects the `disabled` embedder whatever `ml.backend` says, so a default deployment never reads a model file. |
+| `ml.backend` | `flex` | `APP_ML_BACKEND` | One of `flex` or `deterministic`. Anything else is a start-up error, never a silent fallback. `deterministic` is the hash-based embedder the test suite and the seeder use; it needs no file and no network. |
+| `ml.model_path` | empty — no model | `APP_ML_MODEL_PATH` | A path to a local SafeTensors file. When it is set and the file is absent, the embedder is `disabled`; **start-up still succeeds** (§1.6). |
+| `ml.tokenizer_path` | empty — the `vocab.txt` beside `ml.model_path` | `APP_ML_TOKENIZER_PATH` | A path to the WordPiece vocabulary. Unset means the sibling of the weights ([`ADR-0008`](../decisions/ADR-0008-local-pure-rust-ml.md) §10). A missing vocabulary is the disabled state, not a start-up failure. |
+| `ml.dimension` | `384` | `APP_ML_DIMENSION` | Must be positive. It is a property of the model rather than a tuning knob. |
+| `ml.timeout_seconds` | `2` | `APP_ML_TIMEOUT_SECONDS` | Must be positive and at most `app.limits.request_timeout_seconds`: the budget is spent inside a request and may not outlast it. |
+| `ml.candidate_limit` | `200` | `APP_ML_CANDIDATE_LIMIT` | Must be positive and **at least `api.pagination.max_limit`**. A candidate set smaller than one page would make page two impossible. |
+
+The seven settings are the whole configuration surface of the local
+machine-learning feature
+([`../features/ml/architecture.md`](../features/ml/architecture.md) §7). None of
+them is a secret: the model is a local file, and there is no model service and
+therefore no credential for one.
+
 #### `messages.toml`
 
 `messages.toml` holds the client-facing message catalogue, not a setting.
@@ -221,6 +239,8 @@ rule below stops it **before** the socket is bound.
 | The password policy has a positive minimum and a maximum that is at least the minimum. | `validate_settings` in `src/config/validation.rs`. |
 | The password minimum is at least twelve characters. | `validate_settings` in `src/config/validation.rs`, as `MIN_PASSWORD_LENGTH`. See *The floors that are not settings* in §1.3. |
 | The clock-skew allowance is positive and at most five minutes. | `validate_settings` in `src/config/validation.rs`, as `MAX_CLOCK_SKEW_SECONDS`. See *The floors that are not settings* in §1.3. |
+| `ml.dimension` is positive, `ml.timeout_seconds` is positive and not longer than the request timeout, and `ml.candidate_limit` is positive and at least `api.pagination.max_limit`. | `validate_ml` in `src/config/validation.rs`. A candidate set smaller than a page would make page two impossible. |
+| `ml.backend` is `flex` or `deterministic`. | The `MlBackend` type in `src/config/settings.rs`, for the file layer, and `MlBackend::parse` in `src/config/loader.rs`, for the environment layer. |
 | The database can be reached, and the pending migrations can be applied. | `src/main.rs`, before the listener is bound. |
 
 ### 1.5 What the operator sees when the start-up fails
@@ -248,76 +268,48 @@ error: environment variable APP_JWT_SECRET has invalid value <16 bytes>: expecte
 The process exits with a non-zero status and never binds a port in a
 partially configured state.
 
-## Phase 2 settings (planned, not yet present)
-
-> **None of the settings in this section exists.** They are not in `config/`,
-> not in [`.env.example`](../../.env.example), not in `src/config/settings.rs`
-> and not in the tables of §1.3. A configuration file that contains one is
-> refused at start-up, because every settings structure uses
-> `deny_unknown_fields`. The list is here so that the operator reference is
-> complete *in plan*, and so that the implementing change has one place that
-> fixes the names and the defaults.
+## Phase 2 settings — local machine learning
 
 *The heading is unnumbered on purpose:* the section sits between §1.5 and §2
 without renumbering either, because §1.3, §5.1 and §6.2 are cited by number from
 other documents.
 
-Phase 2 adds **no new process, no new service, no new secret and no credential
-for a third party**. Its one configuration surface is local machine learning
+The seven `ml.*` settings are implemented and are listed in the table of §1.3:
+`ml.enabled`, `ml.backend`, `ml.model_path`, `ml.tokenizer_path`,
+`ml.dimension`, `ml.timeout_seconds` and `ml.candidate_limit`. They are the
+whole configuration surface of the feature: Phase 2 adds **no new process, no
+new service, no new secret and no credential for a third party**
 ([`../features/ml/architecture.md`](../features/ml/architecture.md),
-[`../decisions/ADR-0008-local-pure-rust-ml.md`](../decisions/ADR-0008-local-pure-rust-ml.md)),
-which is six settings:
+[`../decisions/ADR-0008-local-pure-rust-ml.md`](../decisions/ADR-0008-local-pure-rust-ml.md)).
 
-- **`ml.enabled`** — `false` by default. When it is `false` the embedder is
-  `Disabled`, semantic and hybrid requests degrade to lexical results, and no
-  model file is read.
-- **`ml.backend`** — `flex` by default, and the only two values it accepts are
-  `flex` and `deterministic`. `flex` is the Burn v0.22 CPU backend that runs the
-  model; `deterministic` selects the hash-based embedder that every test uses.
-  `wgpu`, `cuda` and `tch` are not options, and neither is an external model
-  server ([`../../AGENTS.md`](../../AGENTS.md) §4.12).
-- **`ml.model_path`** — empty by default. The path to a local SafeTensors file
-  holding the weights.
-- **`ml.dimension`** — the vector length the loaded model produces. It is a
-  property of the model rather than a tuning knob — the plan's working value is
-  `384` — and the validation must refuse a value that disagrees with what the
-  embedder reports.
-- **`ml.timeout_seconds`** — a positive budget for one inference, two seconds in
-  the plan, and never larger than the request timeout.
-- **`ml.candidate_limit`** — a positive cap on the lexical candidate set a
-  hybrid search re-ranks, 200 in the plan, and never smaller than
-  `api.pagination.max_limit`, because a candidate set smaller than one page
-  would make page two impossible.
-
-Four properties of the plan are worth stating here, because they are operational
-rather than internal:
+Four properties are worth stating here, because they are operational rather than
+internal:
 
 - **The weights are a local file.** A SafeTensors file is placed on the host by
   the operator. It is not in the repository, not baked into the image and not
   downloaded by the build or at run time; there is no outbound call to any
   hosted service, at build time or at run time.
-- **A missing model file does not stop the process.** It selects the `Disabled`
+- **A missing model file does not stop the process.** It selects the `disabled`
   embedder, and every semantic or hybrid request answers `200` with lexical
   results and names the mode that was applied — the deliberate difference from
   every rule in §1.4, where a bad setting is a start-up failure. A model is an
   optional artifact, so its absence is a supported state, not a misconfiguration
   (`ML-R02`, `ML-R06`).
-- **Adding one of the six means all seven places in one change**, as
+- **The Burn encoder is not implemented yet.** `ml.enabled = true` with
+  `ml.backend = flex` still yields the `disabled` embedder, whatever artifacts
+  are present, because the six-layer encoder and the WordPiece tokenizer that
+  [`../features/ml/architecture.md`](../features/ml/architecture.md) §12.3
+  describes do not exist. The endpoints, the storage, the ownership predicates
+  and the degradation rule do, and they are what
+  [`../features/ml/status.md`](../features/ml/status.md) records.
+- **Adding one of the seven means all seven places in one change**, as
   [`../../AGENTS.md`](../../AGENTS.md) §4.11 requires: the file in `config/`, the
   typed structure, the loader, the validation, `.env.example`, the reference
   tables (this document and [`../../config/README.md`](../../config/README.md))
-  and the tests. A key that lands in only some of them is either a start-up
-  error or an undocumented setting, and both are defects.
-- **The documentation checker does not cover these keys, and must not be made to
-  pretend that it does.** `check_settings_reference` in
-  [`../../src/bin/atom-docs.rs`](../../src/bin/atom-docs.rs) compares the keys in
-  `config/` with the two reference tables, and it only recognises a row whose
-  first cell is a backticked dotted key beginning `app.`, `api.`, `auth.` or
-  `database.`. That is why the list above is a list and not a table: a `ml.` row
-  would be invisible to the checker and would read like a setting an operator
-  could set today. `SETTINGS_FILES` is likewise a fixed list of the four
-  existing files. **Both must be extended in the same change that adds the
-  settings** — until then `ml.*` is checked by nothing.
+  and the tests. `check_settings_reference` in
+  [`../../src/bin/atom-docs.rs`](../../src/bin/atom-docs.rs) now recognises `ml.`
+  rows and `config/ml.toml` is in `SETTINGS_FILES`, so a key that lands in only
+  some of them is reported instead of being silently unchecked.
 
 ## 2. Secrets
 

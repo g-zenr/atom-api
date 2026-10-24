@@ -9,8 +9,10 @@ defined in `migrations/`. Section 11 is the Phase 2 schema. Its first two tables
 are created by `migrations/0004_expense_claims.sql` and are served by the twelve
 claim operations of chains `R2`-`R4`; its next three are created by
 `migrations/0005_job_applications.sql` and are served by the fourteen
-operations of chains `J2`-`J4`. `embeddings` is still proposed and
-does not exist.
+operations of chains `J2`-`J4`; and its last, `embeddings`, is created by
+`migrations/0006_embeddings.sql`, for which chains `M3`-`M6` still owe the
+service, the repository statements and the three routes. No table in §11 is
+proposed any more, and `migrations/` ends at `0006`.
 
 The conventions the schema follows are in
 [`../project-truth.md`](../project-truth.md) §12. The rules for changing it
@@ -44,14 +46,17 @@ users ──1:N──► refresh_sessions
 | `companies` | `migrations/0005_job_applications.sql` | One row per employer (§11.3). Served by `J2`'s five operations. |
 | `job_applications` | `migrations/0005_job_applications.sql` | One row per role being pursued at a company (§11.4). Served by the five application operations of `J3`. |
 | `application_events` | `migrations/0005_job_applications.sql` | One row per dated entry in an application's timeline (§11.5). Served by the four event operations of `J4`. |
+| `embeddings` | `migrations/0006_embeddings.sql` | One row per source, model and owner (§11.6). Written and read by chains `M3`-`M6`; no statement uses it yet. |
 
 Two enum types are created by `migrations/0003_projects_and_tasks.sql`:
 `task_status` and `task_priority`. `migrations/0004_expense_claims.sql` adds a
 third, `expense_claim_status`, and `migrations/0005_job_applications.sql` adds
 `job_application_status` and `application_event_kind` (§11.7).
+`migrations/0006_embeddings.sql` adds no type:
+`embeddings.source_type` is a `CHECK`ed `TEXT`, for the reason §11.7 gives.
 
-One table is still proposed for Phase 2 in §11 and does not exist:
-`embeddings` (§11.6). `migrations/` ends at `0005`.
+No table of §11 is still proposed. The last one, `embeddings` (§11.6), is
+created by `migrations/0006_embeddings.sql`, and `migrations/` ends at `0006`.
 
 ### 1.1 A stale comment in an applied migration
 
@@ -377,7 +382,7 @@ written with that in mind, and the policy in
 
 ## 11. Phase 2 (Proposed, except what has been built)
 
-> **Status:** **Proposed**, except for the five tables two migrations already
+> **Status:** **Proposed**, except for the six tables three migrations already
 > create. `expense_claims` and `expense_items` are served by the twelve claim
 > operations of chains `R2`-`R4` (§11.1). `companies`, `job_applications` and
 > `application_events` are created by `migrations/0005_job_applications.sql`
@@ -404,8 +409,19 @@ written with that in mind, and the policy in
 > including the two composite foreign keys and the functional unique index on
 > `(user_id, LOWER(name))`. `src/job_applications/repository.rs` holds every
 > statement that reads and writes them, so the indexes below are the published
-> access paths, not a measurement of a running query. §11.6
-> remains proposed.
+> access paths, not a measurement of a running query.
+>
+> `migrations/0006_embeddings.sql` creates `embeddings` with the three `CHECK`s
+> and the two indexes named in §11.6, and nothing else: no enum type, no
+> extension, and no foreign key on `source_id`. The table's Rust side does not
+> exist yet — `src/ml/` holds the `Embedder` surface only — so chains `M3`-`M6`
+> owe `src/ml/repository.rs`, the service, the three routes, and the
+> delete-and-purge statements in `src/notes/repository.rs` and
+> `src/job_applications/repository.rs` that compensate for the absent key
+> (§11.6). The migration was applied from `0001` to a clean scratch database
+> and its constraints and indexes were exercised; the access-path measurements
+> quoted in §11.6 are recorded evidence for those two indexes, not a claim that
+> a running endpoint uses them today.
 
 Six provisional assumptions underlie this section: **A1** (a claim has one
 currency and there is no FX), **A2** (a receipt is a reference), **A3**
@@ -413,10 +429,10 @@ currency and there is no FX), **A2** (a receipt is a reference), **A3**
 **A5** (single owner, no sharing) and **A6** (money is `NUMERIC(19,4)`, a JSON
 string with four decimals). All six are **provisional defaults, owner decision
 O1**; they were never confirmed by the owner. A1, A5 and A6 shape the columns
-most directly. A revision of any of them changes this section, and for
-§11.1-§11.5 it needs a new migration as well because `0004` and `0005` are
-applied; the requirements in [`../project-truth.md`](../project-truth.md) §18.4
-say how.
+most directly, and A4 shapes §11.6. A revision of any of them changes this
+section, and for §11.1-§11.6 it needs a new migration as well because `0004`,
+`0005` and `0006` are applied; the requirements in
+[`../project-truth.md`](../project-truth.md) §18.4 say how.
 
 The design follows the conventions of §10 and the rules of
 [`migration-policy.md`](migration-policy.md). Where a rule cannot be expressed
@@ -820,7 +836,9 @@ no orphaned event.
 
 ### 11.6 `embeddings`
 
-One vector per source, model and owner.
+One vector per source, model and owner. The table is created by
+`migrations/0006_embeddings.sql`; the migration is the enforced copy of this
+section.
 
 | Column | Type | Null | Default | Notes |
 | ------ | ---- | ---- | ------- | ----- |
@@ -861,6 +879,37 @@ column comparison rather than an array length computed per row.
 `(user_id, source_type)` is a prefix of both indexes. A lookup by `source_id`
 alone is always written with `user_id` in front of it, because every statement
 is owner-scoped.
+
+**Measured access paths.** The two indexes were exercised on a scratch database
+created from `0001`-`0006` (PostgreSQL 18.1), filled with 40 000 synthetic rows
+of `dim = 2` for one owner and analysed. Every statement shape the feature is
+written against was an index scan, not a sequential scan. The plan and the
+buffer counts were identical on three runs; the durations moved by a factor of
+two between them, so they are given as a range rather than as a figure:
+
+| Statement shape | Plan | Buffers | Duration |
+| --------------- | ---- | ------- | -------- |
+| The search pipeline: `user_id`, `source_type`, `model_id` and `source_id = ANY($3)` | `Index Scan using embeddings_user_id_source_model_unique_idx` | 4 shared | 0.07-0.13 ms |
+| The semantic scan: `user_id`, `source_type`, `model_id`, no `source_id` | `Bitmap Index Scan on embeddings_user_id_source_type_model_id_idx` | 17 index of 834 | 6.3-12.8 ms for 20 001 rows |
+| The reindex skip check: the full unique tuple | `Index Scan using embeddings_user_id_source_model_unique_idx` | 4 shared | 0.03-0.05 ms |
+| The purge in the source delete: `user_id`, `source_type`, `source_id` | `Index Scan using embeddings_user_id_source_model_unique_idx`, the three-column prefix | 6 shared | 0.05-0.06 ms |
+
+Two honest qualifications. On the empty table the planner chooses a sequential
+scan, because a handful of rows are cheaper to read than an index; the plans
+above are what the same statements become once there are rows to find. And the
+corpus is `dim = 2` against the model's 384: the buffer and row counts are the
+finding, not the byte size of the array. The 6-13 ms of the semantic scan is the
+honest cost of the design in §9 of the specification: it is a linear scan of the
+caller's rows, not an indexed nearest-neighbour query, and it is a scan *of the
+owner's rows* rather than of the table.
+
+The two indexes are not duplicates of each other. The unique index is the
+arbiter for `ON CONFLICT (user_id, source_type, source_id, model_id)` and serves
+every lookup that names a source; the three-column index is the one the semantic
+scan uses, because it can seek on `model_id` where the unique index cannot. A
+query with no `source_id` predicate — semantic mode — is the statement that
+needs the second one, and dropping it turns that scan into a filter over every
+embedding the owner has.
 
 #### Ownership and deletion
 
@@ -1011,5 +1060,5 @@ if every table-level constraint still passes.
   the tables.
 - [`../architecture/data-architecture.md`](../architecture/data-architecture.md)
   — why the model is shaped this way.
-- [`../project-truth.md`](../project-truth.md) §18 — the requirements the
-  proposed tables serve.
+- [`../project-truth.md`](../project-truth.md) §18 — the requirements the six
+  Phase 2 tables serve.

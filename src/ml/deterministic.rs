@@ -8,8 +8,6 @@
 //! Construction reads no file and contact no network, which is what the spike
 //! asserts.
 
-use sha2::{Digest, Sha256};
-
 use super::embedder::{DEFAULT_DIMENSION, Embedder, EmbedderStatus, MlError};
 
 /// A deterministic, file-free embedder.
@@ -62,40 +60,102 @@ impl Embedder for Deterministic {
     }
 
     fn embed(&self, text: &str) -> Result<Vec<f32>, MlError> {
-        // Counter mode: hash the text with a block counter until the requested
-        // length is filled. Four bytes per block, so the vector of a long
-        // dimension costs a handful of hashes and stays stable forever.
-        let mut vector = Vec::with_capacity(self.dimension);
-        let mut counter: u32 = 0;
+        // Counter mode over SHA-256 fills the vector, and `normalise` rescales
+        // it and refuses one that has no unit form. Both steps live in
+        // `super::hash_vector`, which `atom-seed` also compiles in, so the
+        // seeder's rows and a query vector at run time come from the same code.
+        let mut vector = super::hash_vector::raw(text, self.dimension);
 
-        while vector.len() < self.dimension {
-            let mut hasher = Sha256::new();
-            hasher.update(counter.to_le_bytes());
-            hasher.update(text.as_bytes());
-            let digest = hasher.finalize();
-
-            let chunks = digest.as_slice().as_chunks::<4>().0;
-            for chunk in chunks {
-                if vector.len() == self.dimension {
-                    break;
-                }
-                let raw = u32::from_le_bytes(*chunk);
-                // Map the unsigned value onto [-1, 1).
-                vector.push((raw as f32 / u32::MAX as f32) * 2.0 - 1.0);
-            }
-
-            counter = counter.wrapping_add(1);
-        }
-
-        // Unit length, so a cosine score is a plain dot product downstream.
-        let norm = super::embedder::l2_norm(&vector);
-        if norm > 0.0 {
-            let scale = 1.0 / norm as f32;
-            for value in &mut vector {
-                *value *= scale;
-            }
-        }
+        super::embedder::normalise(&mut vector, self.dimension)?;
 
         Ok(vector)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ml::embedder::{UNIT_NORM_TOLERANCE, l2_norm};
+
+    #[test]
+    fn the_deterministic_embedder_is_stable() {
+        let first = Deterministic::new(64);
+        let second = Deterministic::new(64);
+
+        let a = first
+            .embed("kubernetes rollout")
+            .expect("the embedder works");
+        let b = first
+            .embed("kubernetes rollout")
+            .expect("the embedder works");
+        let c = second
+            .embed("kubernetes rollout")
+            .expect("the embedder works");
+
+        assert_eq!(a, b, "the same input must produce the same vector");
+        assert_eq!(a, c, "two instances must agree");
+
+        let other = first.embed("a different note").expect("the embedder works");
+        assert_ne!(
+            a, other,
+            "a different input must produce a different vector"
+        );
+    }
+
+    #[test]
+    fn the_deterministic_embedder_has_the_configured_dimension() {
+        for dimension in [1, 3, 64, DEFAULT_DIMENSION, 1_000] {
+            let embedder = Deterministic::new(dimension);
+            let vector = embedder.embed("hello").expect("the embedder works");
+
+            assert_eq!(vector.len(), embedder.dimension());
+            assert_eq!(vector.len(), dimension);
+        }
+
+        // The identifier records the dimension, so a model change is a new id
+        // rather than a rewrite of the old rows (ADR-0008 §9).
+        assert_eq!(
+            Deterministic::new(384).model_id(),
+            "deterministic-sha256-v1-384"
+        );
+        assert_eq!(
+            Deterministic::new(8).model_id(),
+            "deterministic-sha256-v1-8"
+        );
+    }
+
+    #[test]
+    fn the_deterministic_embedder_returns_a_unit_vector() {
+        let embedder = Deterministic::with_default_dimension();
+
+        for text in ["", " ", "kubernetes", "a sentence with several words in it"] {
+            let vector = embedder.embed(text).expect("the embedder works");
+
+            // `vector` is `REAL[]`: the norm is compared with a tolerance,
+            // never with equality.
+            assert!(
+                (1.0 - l2_norm(&vector)).abs() <= UNIT_NORM_TOLERANCE,
+                "the vector for {text:?} must be unit length"
+            );
+        }
+    }
+
+    #[test]
+    fn the_deterministic_embedder_performs_no_io() {
+        // The testable half of ML-R01: construction takes no path, no file and
+        // no client, and the only argument is a dimension. If this ever needed
+        // a model artifact the signature would have to change, which is what
+        // makes the assertion meaningful.
+        let embedder = Deterministic::with_default_dimension();
+
+        assert!(embedder.status().is_ready());
+        assert_eq!(embedder.model_id(), "deterministic-sha256-v1-384");
+    }
+
+    #[test]
+    fn the_model_identifier_is_the_documented_one() {
+        // ADR-0008 §9 retired `burn-minilm-l6-v2-spike-v1` because it named an
+        // unnormalised, meaningless vector. The test double has its own name.
+        assert!(!Deterministic::new(384).model_id().contains("burn"));
     }
 }

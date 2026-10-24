@@ -42,6 +42,105 @@ define the target state. The requirements live in
 
 ## Entries
 
+### ATOM-CHANGE-20261024-011 - Local ML: the settings, the module, the three operations
+
+**Date:** 2026-10-24 (UTC)
+**Type:** Feature
+**Author:** The ATOM engineering team - the orchestrator with the `rust-backend` subagent.
+**Status:** Complete - **chains `D4.M3` and `D4.M4`**, with `ML-R02` deliberately unmet
+
+#### Summary
+
+The feature stops being a spike surface. It now has the seven `ml.*` settings in
+all seven places `AGENTS.md` §4.11 lists, the `embeddings` table, the
+`Embedder` boundary with the write-time normalisation invariant, the three
+operations of `docs/features/ml/api.md` with their published status codes, the
+degradation rule, the owner-scoped reindex and the seeder's `--with-embeddings`.
+
+**What it does not have is a Burn encoder.** `src/ml/burn_embedder.rs` still
+performs a lookup, a mean-pool and the wrong projection. `embedder::select`
+therefore reports `Disabled` with the published code `model_missing` for
+`ml.backend = flex`, whether or not the artifacts are present, and logs the
+cause `ml_model_unavailable` once at start-up. No code path claims to embed with
+Burn, and `ML-R02` is recorded as **not met** in
+[`../features/ml/status.md`](../features/ml/status.md) §1.4 and §2.1.
+
+#### What changed
+
+| Area | Change |
+| ---- | ------ |
+| Configuration | `config/ml.toml` (new) with `ml.enabled`, `ml.backend`, `ml.model_path`, `ml.tokenizer_path`, `ml.dimension`, `ml.timeout_seconds`, `ml.candidate_limit`; `MlSettings` and `MlBackend` in `src/config/settings.rs`; the `APP_ML_*` overrides in the loader; `validate_ml` in the validation; `.env.example`; both reference tables; seven tests in `src/config/tests.rs`. `config/ml.toml` is in `BASE_FILES`, in `embedded()` and in the checker's `CONFIG_FILES` / `SETTINGS_FILES`, and `check_settings_reference` now recognises `ml.` rows. |
+| Schema | `migrations/0006_embeddings.sql` - the table, three `CHECK`s and two indexes exactly as [`../database/schema.md`](../database/schema.md) §11.6 specifies. |
+| The module | `src/ml/{dto,repository,service,handlers}.rs` (new); `embedder::select` and `embedder::normalise` (the unit-length invariant, in one place); `hash_vector.rs`, the dependency-free vector function that `atom-seed` also compiles in. |
+| The operations | `POST /api/v1/notes/search`, `POST /api/v1/job-applications/{application_id}/match`, `POST /api/v1/ml/reindex`; `ROUTE_TABLE` 48 → 51; the `ml` tag; ten component schemas. |
+| Deletion | The `notes` and `job_applications` delete statements became data-modifying CTEs that purge the source's embeddings in the same statement, which is the only shape that keeps the guarantee with the code that exists. |
+| The seeder | `--with-embeddings` writes one deterministic row per seeded note and per application; `--reset` purges `embeddings`; `SEEDED_TABLES` names the table so `V6` keeps holding. |
+
+#### Decisions taken where the documents were silent
+
+- **`degraded_reason` did not grow.** The brief for the chain named the reason
+  `ml_model_unavailable`. That would be a fourth client-visible value, which
+  `architecture.md` §12.9 forbids and `api.md` §2.2 does not publish. The client
+  sees `model_missing` — which is what
+  [`ADR-0008`](../decisions/ADR-0008-local-pure-rust-ml.md) §9 already says an
+  unusable model maps to — and `ml_model_unavailable` is the logged cause.
+- **`the ml Cargo feature no longer gates the whole module.** It gates `burn`
+  and `burn_embedder`; the trait, `Deterministic`, `Disabled`, the service and
+  the three routes are always compiled. A gated module would have meant a
+  `#[cfg]` route table and a `#[cfg]` OpenAPI derive, i.e. two published
+  contracts in one source tree. `cargo check --no-default-features` still
+  compiles the API without Burn, which is the property ADR-0008 §7.3 requires.
+- **Archived notes are candidates in every mode.** `lexical` already excluded
+  them; `semantic` and `hybrid` now do too, so the three modes cannot disagree
+  about which notes exist.
+- **The seeder shares the vector function by source, not by duplication.**
+  `src/bin/atom-seed.rs` includes `src/ml/hash_vector.rs` by path rather than
+  linking the library crate, which would pull Burn and the Swagger bundle into a
+  development tool. One implementation, so a seeded row and a query vector are
+  comparable.
+- **Rows of a superseded `model_id` are left alone by a reindex.** Deleting
+  another model's vectors because this run cannot read them would destroy data a
+  different deployment produced.
+
+#### Checks and results
+
+Run from the repository root on Windows, `TEST_DATABASE_URL` pointing at
+`atom_test`:
+
+| Command | Result |
+| ------- | ------ |
+| `cargo fmt --all` | applied |
+| `cargo check --all-targets --locked` | `0` |
+| `cargo clippy --all-targets --all-features --locked -- -D warnings` | `0` |
+| `cargo check --no-default-features --all-targets --locked` | `0` |
+| `cargo test --all-targets --locked` | `0` — 191 library tests, 40 in `tests/ml_api.rs`, 20 in `tests/seeder.rs`, 10 in `tests/openapi_contract.rs` |
+| `cargo run --bin atom-docs` | `OK (0 warning(s))` |
+
+The manual degradation run on `atom_dev` — `200` with lexical results for a
+semantic search with ML off, `409` for a match and for a reindex, and `200` with
+`model_missing` for a semantic search with ML on and no model file — is recorded
+in [`../features/ml/status.md`](../features/ml/status.md) §1.6.
+
+#### What is not verified
+
+- **`ML-R02`**: no Burn encoder, no tokenizer, no Burn-produced embedding. The
+  existing tests never load weights.
+- **`ML-R09`'s quality half**: not measured, because there is no encoder to
+  evaluate.
+- **A live `408` on a match**: the timeout mapping is unit-tested; the HTTP case
+  needs a slow model or a fourth `Embedder`, which `ML-R03` forbids.
+
+#### Files
+
+`migrations/0006_embeddings.sql`, `config/ml.toml`, `config/messages.toml`,
+`config/README.md`, `.env.example`, `src/config/{settings,loader,validation,mod,tests,messages}.rs`,
+`src/ml/{mod,embedder,deterministic,disabled,hash_vector,dto,repository,service,handlers}.rs`,
+`src/notes/repository.rs`, `src/job_applications/repository.rs`, `src/state.rs`,
+`src/api/routes.rs`, `src/helpers/mod.rs`, `src/lib.rs`, `src/bin/atom-docs.rs`,
+`src/bin/atom-seed.rs`, `tests/common/mod.rs`, `tests/claims_schema.rs`,
+`tests/jobs_schema.rs`, `docs/architecture/deployment.md`,
+`docs/features/ml/status.md`.
+
 ### ATOM-CHANGE-20261024-010 - The local ML spike: Burn on flex, measured
 
 **Date:** 2026-10-24 (UTC)

@@ -117,7 +117,7 @@ A feature is never `Verified` because its code exists or compiles.
 | [`features/tasks/`](features/tasks/) | Tasks, status, priority, ordering, filtering. |
 | [`features/reimbursements/`](features/reimbursements/) | Expense claims, line items, money and the claim lifecycle. `Implemented`: all twelve published operations, the schema and the tests exist; `Verified` waits on the chain reviews. |
 | [`features/job-applications/`](features/job-applications/) | Companies, applications, stages and events. `Implemented`: migration `0005`, the six-module `src/job_applications/` and the fourteen operations exist; `Verified` waits on a re-review and a gate run after the review's fixes. |
-| [`features/ml/`](features/ml/) | Local embeddings, hybrid search and match ranking. `Accepted`, not built. |
+| [`features/ml/`](features/ml/) | Local embeddings, hybrid search and match ranking. `Implemented`: the three operations, the schema and the suite exist; `ML-R02` is not met and no run is recorded. |
 
 Each feature directory contains the same five documents:
 

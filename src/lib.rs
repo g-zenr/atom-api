@@ -10,6 +10,7 @@
 //! * `tasks`   — tasks belonging to a project.
 //! * `reimbursements` — expense claims and their line items.
 //! * `job_applications` — companies, applications and their timeline.
+//! * `ml`      — local embeddings, the three search modes and the degradation rule.
 //! * `config`  — configuration loading, validation and the message catalogue.
 //! * `helpers` — cohesive operations that support a behaviour.
 //! * `utils`   — generic, domain-independent utilities.
@@ -28,7 +29,6 @@ pub mod error;
 pub mod health;
 pub mod helpers;
 pub mod job_applications;
-#[cfg(feature = "ml")]
 pub mod ml;
 pub mod notes;
 pub mod pagination;

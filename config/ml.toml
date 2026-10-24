@@ -1,0 +1,46 @@
+# ATOM — local machine learning.
+#
+# The seven settings of ADR-0008 §5, §7 and §10. Every one of them is
+# documented in `config/README.md` and in
+# `docs/architecture/deployment.md` §1.3, and the loader overrides each of
+# them from an environment variable.
+#
+# `ml.enabled` defaults to `false`, so a deployment that does nothing never
+# looks for a model file: the embedder is `Disabled`, a semantic or hybrid
+# search answers with lexical results and `200`, a match and a reindex answer
+# `409`. That is a supported configuration, not a broken one (ML-R06).
+#
+# No file in this directory may contain a secret; none of these values is one.
+# `ml.model_path` and `ml.tokenizer_path` are machine-specific, so a real
+# deployment sets them in the environment and leaves the empty defaults here.
+
+[ml]
+# Whether the Burn embedder is attempted at all. `false` selects the
+# `Disabled` embedder whatever `ml.backend` says.
+enabled = false
+
+# The backend: `flex` or `deterministic`. Any other value is a start-up error,
+# never a silent fallback. `deterministic` is the hash-based embedder that the
+# test suite and the seeder use; it needs no model file and no network.
+backend = "flex"
+
+# The local SafeTensors file. Empty means "not configured"; a configured path
+# that does not exist selects `Disabled` and start-up still succeeds.
+model_path = ""
+
+# The WordPiece vocabulary for `flex`. Empty means "the `vocab.txt` beside
+# `ml.model_path`". A missing vocabulary is `Disabled`, not a start-up failure.
+tokenizer_path = ""
+
+# The vector length the embedder must produce. A property of the model, not a
+# tuning knob.
+dimension = 384
+
+# The budget for one embed or one re-rank, in seconds. It may not exceed
+# `app.limits.request_timeout_seconds`.
+timeout_seconds = 2
+
+# The largest lexical candidate set a hybrid search will re-rank. It may not be
+# smaller than `api.pagination.max_limit`, because a candidate set smaller than
+# one page would make page two impossible.
+candidate_limit = 200

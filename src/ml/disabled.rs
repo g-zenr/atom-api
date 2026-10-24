@@ -17,6 +17,10 @@ pub struct Disabled {
 
 impl Disabled {
     /// Build a disabled embedder that explains itself with `reason`.
+    ///
+    /// `reason` is a **published** degradation code — `ml_disabled` or
+    /// `model_missing` — because it is what a client receives. The internal
+    /// cause belongs in the log line at start-up, not in this value.
     #[must_use]
     pub fn new(dimension: usize, reason: impl Into<String>) -> Self {
         Self {
@@ -24,6 +28,18 @@ impl Disabled {
             dimension,
             reason: reason.into(),
         }
+    }
+
+    /// A disabled embedder because ML is switched off.
+    #[must_use]
+    pub fn ml_disabled(dimension: usize) -> Self {
+        Self::new(dimension, super::embedder::REASON_ML_DISABLED)
+    }
+
+    /// A disabled embedder because the model cannot be used.
+    #[must_use]
+    pub fn model_missing(dimension: usize) -> Self {
+        Self::new(dimension, super::embedder::REASON_MODEL_MISSING)
     }
 
     /// The reason this implementation reports.

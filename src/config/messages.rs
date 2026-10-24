@@ -203,6 +203,8 @@ pub struct ConflictMessages {
     pub company_has_applications: String,
     /// 409, when a stage is not reachable from the application's current one.
     pub stage_transition_not_allowed: String,
+    /// 409, when a match or a reindex is asked for without a usable model.
+    pub ml_unavailable: String,
 }
 
 impl Messages {

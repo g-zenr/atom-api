@@ -33,8 +33,8 @@ pub use loader::ConfigLoader;
 pub use messages::Messages;
 pub use settings::{
     ApiSettings, AppSettings, Argon2Params, AuthSettings, CorsSettings, DatabaseSettings,
-    PaginationSettings, PasswordPolicy, RateLimitSettings, RequestLimits, SessionSettings,
-    Settings,
+    MlBackend, MlSettings, PaginationSettings, PasswordPolicy, RateLimitSettings, RequestLimits,
+    SessionSettings, Settings,
 };
 pub use validation::ConfigError;
 pub use validation::MAX_BODY_BYTES_BACKSTOP;
@@ -55,6 +55,8 @@ pub struct Config {
     pub auth: AuthSettings,
     /// The database settings.
     pub database: DatabaseSettings,
+    /// The local machine-learning settings.
+    pub ml: MlSettings,
     /// The client-facing message catalogue.
     pub messages: Arc<Messages>,
 }

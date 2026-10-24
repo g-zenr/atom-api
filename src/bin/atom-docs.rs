@@ -74,12 +74,13 @@ const FEATURES: [&str; 7] = [
 ];
 
 /// The files that must exist in the configuration directory.
-const CONFIG_FILES: [&str; 8] = [
+const CONFIG_FILES: [&str; 9] = [
     "config/README.md",
     "config/app.toml",
     "config/api.toml",
     "config/auth.toml",
     "config/database.toml",
+    "config/ml.toml",
     "config/messages.toml",
     "config/environments/development.toml",
     "config/environments/production.toml",
@@ -90,11 +91,12 @@ const CONFIG_FILES: [&str; 8] = [
 ///
 /// The message catalogue is not here: it is documented in `config/README.md`,
 /// and its keys are messages, not settings.
-const SETTINGS_FILES: [&str; 4] = [
+const SETTINGS_FILES: [&str; 5] = [
     "config/app.toml",
     "config/api.toml",
     "config/auth.toml",
     "config/database.toml",
+    "config/ml.toml",
 ];
 
 /// The document that is the operator's reference for the settings.
@@ -758,7 +760,7 @@ fn collect_setting_values(
 /// table.
 ///
 /// Only a backticked, dotted, lower-case name in the first cell is taken, and
-/// only one of the four settings sections. Anything else in a table cell is
+/// only one of the five settings sections. Anything else in a table cell is
 /// prose. A value cell that is not a plain integer or a plain `true`/`false`
 /// becomes `None`, which the comparison skips.
 ///
@@ -799,7 +801,8 @@ fn reference_setting_rows(contents: &str) -> BTreeMap<String, Vec<Option<Setting
         if !(key.starts_with("app.")
             || key.starts_with("api.")
             || key.starts_with("auth.")
-            || key.starts_with("database."))
+            || key.starts_with("database.")
+            || key.starts_with("ml."))
         {
             continue;
         }

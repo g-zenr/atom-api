@@ -6,11 +6,13 @@
 //! error rather than a silently ignored setting.
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::Deserialize;
 
 use crate::config::messages::Messages;
+use crate::config::validation::ConfigError;
 
 /// Deserialises a number of seconds into a [`Duration`].
 ///
@@ -42,6 +44,9 @@ pub struct Settings {
     pub auth: AuthSettings,
     /// The database settings.
     pub database: DatabaseSettings,
+    /// The local machine-learning settings.
+    #[serde(default)]
+    pub ml: MlSettings,
     /// The client-facing message catalogue.
     pub messages: Messages,
 }
@@ -368,6 +373,147 @@ impl std::fmt::Debug for DatabaseSettings {
     }
 }
 
+/// Local machine-learning settings.
+///
+/// The seven settings of [`ADR-0008`](../../docs/decisions/ADR-0008-local-pure-rust-ml.md)
+/// §5, §7 and §10. They live in `config/ml.toml`, and every one of them has an
+/// `APP_ML_*` environment override.
+///
+/// Nothing here is a secret: the model is a local file, and there is no model
+/// service and therefore no credential for one.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MlSettings {
+    /// Whether the Burn embedder is attempted at all.
+    ///
+    /// `false` selects [`crate::ml::Disabled`] whatever [`Self::backend`]
+    /// says, so a default deployment never reads a model file.
+    #[serde(default = "default_ml_enabled")]
+    pub enabled: bool,
+    /// Which embedder the build selects. See [`MlBackend`].
+    #[serde(default)]
+    pub backend: MlBackend,
+    /// The local SafeTensors file. Empty means "not configured".
+    #[serde(default)]
+    pub model_path: String,
+    /// The WordPiece vocabulary. Empty means "the `vocab.txt` beside the
+    /// weights" ([`ADR-0008`](../../docs/decisions/ADR-0008-local-pure-rust-ml.md) §10).
+    #[serde(default)]
+    pub tokenizer_path: String,
+    /// The vector length the embedder must produce.
+    #[serde(default = "default_ml_dimension")]
+    pub dimension: usize,
+    /// The budget for one embed or one re-rank.
+    #[serde(
+        default = "default_ml_timeout",
+        deserialize_with = "seconds",
+        rename = "timeout_seconds"
+    )]
+    pub timeout: Duration,
+    /// The largest lexical candidate set a hybrid search re-ranks.
+    #[serde(default = "default_ml_candidate_limit")]
+    pub candidate_limit: i64,
+}
+
+// The derived `Default` would use zero for the dimension and the limit, which
+// no configuration may hold, so it is written out to match the serde defaults.
+impl Default for MlSettings {
+    fn default() -> Self {
+        Self {
+            enabled: default_ml_enabled(),
+            backend: MlBackend::default(),
+            model_path: String::new(),
+            tokenizer_path: String::new(),
+            dimension: default_ml_dimension(),
+            timeout: default_ml_timeout(),
+            candidate_limit: default_ml_candidate_limit(),
+        }
+    }
+}
+
+impl MlSettings {
+    /// The weights file, when one is configured.
+    #[must_use]
+    pub fn model_file(&self) -> Option<PathBuf> {
+        let configured = self.model_path.trim();
+
+        if configured.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(configured))
+        }
+    }
+
+    /// The vocabulary file: [`Self::tokenizer_path`] when it is set, otherwise
+    /// the `vocab.txt` beside the weights.
+    ///
+    /// `None` means neither is known, which is the same disabled state as a
+    /// file that does not exist
+    /// ([`ADR-0008`](../../docs/decisions/ADR-0008-local-pure-rust-ml.md) §10).
+    #[must_use]
+    pub fn tokenizer_file(&self) -> Option<PathBuf> {
+        let configured = self.tokenizer_path.trim();
+
+        if !configured.is_empty() {
+            return Some(PathBuf::from(configured));
+        }
+
+        self.model_file()
+            .map(|model| model.with_file_name("vocab.txt"))
+    }
+}
+
+/// The value of `ml.backend`.
+///
+/// The two values are the whole set
+/// ([`ADR-0008`](../../docs/decisions/ADR-0008-local-pure-rust-ml.md) §7.1):
+/// `flex` is the Burn CPU backend, and `deterministic` selects the hash-based
+/// embedder that the test suite and the seeder use. Anything else is a
+/// start-up error, never a silent fallback — a build with a typo must not
+/// quietly serve lexical results.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MlBackend {
+    /// Burn v0.22 on the `flex` CPU backend.
+    #[default]
+    Flex,
+    /// The hash-based embedder: stable, file-free, not semantically meaningful.
+    Deterministic,
+}
+
+impl MlBackend {
+    /// Parses a backend name, for the environment layer.
+    ///
+    /// The file layer is parsed by serde, which refuses an unknown variant as a
+    /// parse error; this function gives the environment layer the same rule
+    /// with the variable named in the message.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError::Invalid`] when the value is neither `flex` nor
+    /// `deterministic`.
+    pub fn parse(raw: &str) -> Result<Self, ConfigError> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "flex" => Ok(Self::Flex),
+            "deterministic" => Ok(Self::Deterministic),
+            _ => Err(ConfigError::Invalid {
+                key: "APP_ML_BACKEND".to_string(),
+                value: raw.to_string(),
+                expected: "one of: flex, deterministic".to_string(),
+            }),
+        }
+    }
+
+    /// The canonical name of this backend.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Flex => "flex",
+            Self::Deterministic => "deterministic",
+        }
+    }
+}
+
 fn default_bind_addr() -> SocketAddr {
     "127.0.0.1:3000"
         .parse()
@@ -476,4 +622,20 @@ fn default_acquire_timeout() -> Duration {
 
 fn default_connect_timeout() -> Duration {
     Duration::from_secs(10)
+}
+
+fn default_ml_enabled() -> bool {
+    false
+}
+
+fn default_ml_dimension() -> usize {
+    crate::ml::embedder::DEFAULT_DIMENSION
+}
+
+fn default_ml_timeout() -> Duration {
+    Duration::from_secs(2)
+}
+
+fn default_ml_candidate_limit() -> i64 {
+    200
 }

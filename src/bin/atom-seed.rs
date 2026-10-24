@@ -34,7 +34,11 @@
 //!
 //! The binary deliberately does not link the `atom_api` library: it needs
 //! nothing from it, and importing the crate would pull its whole build graph -
-//! including the vendored Swagger UI bundle - into a development tool.
+//! including the vendored Swagger UI bundle and Burn - into a development tool.
+//! The one thing it must share with the library is the deterministic embedding
+//! function, so it **includes that source file by path** instead
+//! (`src/ml/hash_vector.rs`), which keeps one implementation without linking a
+//! crate this tool does not need.
 
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 
@@ -49,6 +53,23 @@ use sha2::{Digest, Sha256};
 use sqlx::PgConnection;
 use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
 use uuid::Uuid;
+
+/// The deterministic vector algorithm, shared with `src/ml/deterministic.rs`.
+///
+/// It is included as source rather than linked, because this binary does not
+/// link the library crate; see the module docs. The file has no `crate::` or
+/// `super::` reference for exactly that reason.
+#[path = "../ml/hash_vector.rs"]
+mod hash_vector;
+
+/// The identifier of the embedder `--with-embeddings` constructs directly.
+///
+/// It mirrors `Deterministic::model_id()`; the S4 case in `tests/seeder.rs`
+/// pins both this value and the unit length of every row.
+const SEEDED_MODEL_ID: &str = "deterministic-sha256-v1-384";
+
+/// The vector length that embedder produces.
+const SEEDED_DIMENSION: usize = 384;
 
 /// The binding credential for both seeded accounts.
 ///
@@ -73,15 +94,18 @@ const ARGON2_PARALLELISM: u32 = 1;
 /// hang the process for the operating system's connect timeout.
 const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Every table the seeder handles: the nine it inserts into and
-/// `refresh_sessions`, which `--reset` deletes but the seeder never inserts.
+/// Every table the seeder handles: the nine it inserts into,
+/// `refresh_sessions`, which `--reset` deletes but the seeder never inserts, and
+/// `embeddings`, which no seed profile writes yet but which `--reset` must
+/// purge before the notes and applications it belongs to are deleted.
 ///
 /// `V6` compares this list with the schema and fails the run when a table
 /// exists that the list does not name. That is what makes "add a table, extend
 /// the seeder" enforceable.
-const SEEDED_TABLES: [&str; 10] = [
+const SEEDED_TABLES: [&str; 11] = [
     "application_events",
     "companies",
+    "embeddings",
     "expense_claims",
     "expense_items",
     "job_applications",
@@ -108,6 +132,9 @@ Options:
   --profile <name>   Data volume: minimal, dev (default) or demo.
   --reset            Delete every row owned by the two seeded accounts, then insert.
                      Deletes every row owned by the two seeded accounts, including rows you created through the API while logged in as them.
+  --with-embeddings  Also write one deterministic embedding per seeded note and per
+                     seeded application, in the shape the reindex produces. Needs no
+                     model file and no network; a second run skips what exists.
   --allow-non-empty  Admit a database that holds accounts outside the seeded set.
   --help             Print this text and exit with status 0.
 
@@ -400,6 +427,7 @@ struct SeedArgs {
     profile: Profile,
     reset: bool,
     allow_non_empty: bool,
+    with_embeddings: bool,
     help: bool,
 }
 
@@ -418,6 +446,7 @@ impl SeedArgs {
             profile: Profile::default(),
             reset: false,
             allow_non_empty: false,
+            with_embeddings: false,
             help: false,
         };
 
@@ -445,6 +474,7 @@ impl SeedArgs {
                 }
                 "--reset" => parsed.reset = true,
                 "--allow-non-empty" => parsed.allow_non_empty = true,
+                "--with-embeddings" => parsed.with_embeddings = true,
                 "--help" => parsed.help = true,
                 other => {
                     return Err(format!("unknown argument {other:?}; run --help for usage"));
@@ -529,6 +559,7 @@ struct SeedOutcome {
     companies: EntityOutcome,
     applications: EntityOutcome,
     events: EntityOutcome,
+    embeddings: EntityOutcome,
 }
 
 impl SeedOutcome {
@@ -542,6 +573,7 @@ impl SeedOutcome {
             + self.companies.inserted
             + self.applications.inserted
             + self.events.inserted
+            + self.embeddings.inserted
     }
 
     fn total_skipped(&self) -> u64 {
@@ -554,6 +586,7 @@ impl SeedOutcome {
             + self.companies.skipped
             + self.applications.skipped
             + self.events.skipped
+            + self.embeddings.skipped
     }
 }
 
@@ -676,6 +709,11 @@ async fn run(args: SeedArgs) -> Result<(), Failure> {
     outcome.companies = seed_companies(&mut transaction, args.profile).await?;
     outcome.applications = seed_applications(&mut transaction, args.profile).await?;
     outcome.events = seed_events(&mut transaction, args.profile).await?;
+
+    // Embeddings come last, and only when they are asked for: every source
+    // they name must already exist, and a run without `--with-embeddings` must
+    // write none (S4 of docs/database/seeding.md).
+    outcome.embeddings = seed_embeddings(&mut transaction, &seed_ids, args.with_embeddings).await?;
 
     if let Err(failure) = verify(&mut transaction, args.profile, &seed_ids).await {
         transaction.rollback().await.ok();
@@ -900,6 +938,10 @@ async fn reset_seeded_rows(
     seed_ids: &[Uuid],
 ) -> Result<(), Failure> {
     let statements = [
+        (
+            "embeddings",
+            "DELETE FROM embeddings WHERE user_id = ANY($1)",
+        ),
         (
             "application_events",
             "DELETE FROM application_events WHERE user_id = ANY($1)",
@@ -1630,6 +1672,165 @@ async fn seed_events(
     Ok(outcome)
 }
 
+/// Writes one deterministic embedding per seeded note and per application.
+///
+/// `S4` of [`docs/database/seeding.md`](../../docs/database/seeding.md): with
+/// `--with-embeddings` the two source tables of the seeded accounts are
+/// embedded, and without it the table is left alone. The run is idempotent, so
+/// a second call skips every row instead of rewriting it — the insert is an
+/// `ON CONFLICT … DO NOTHING` against
+/// `embeddings_user_id_source_model_unique_idx`.
+///
+/// The embedder is constructed **directly**, as
+/// [`ADR-0008`](../../docs/decisions/ADR-0008-local-pure-rust-ml.md) §7.2
+/// requires: the seeder reads neither `ml.backend` nor a model file, so seeding
+/// works on a machine with no weights and produces the same rows whatever the
+/// deployment's ML settings are. The vector function is the one the runtime
+/// uses — `src/ml/hash_vector.rs`, included by path — so a seeded row and a
+/// query vector are comparable.
+///
+/// The identifier of each row is derived from the source's position, so `--reset`
+/// writes the same identifiers every time; a rerun without `--reset` conflicts on
+/// the unique index first, which is the case that must be *skipped*, not rewritten.
+async fn seed_embeddings(
+    connection: &mut PgConnection,
+    seed_ids: &[Uuid],
+    with_embeddings: bool,
+) -> Result<EntityOutcome, Failure> {
+    let mut outcome = EntityOutcome::default();
+
+    if !with_embeddings {
+        return Ok(outcome);
+    }
+
+    // Notes first, then applications, each in `id` order so the derived
+    // identifiers are stable across runs.
+    let notes: Vec<(Uuid, Uuid, String, String)> = sqlx::query_as(
+        "SELECT id, user_id, title, content FROM notes \
+          WHERE user_id = ANY($1) ORDER BY id",
+    )
+    .bind(seed_ids)
+    .fetch_all(&mut *connection)
+    .await
+    .map_err(|error| {
+        Failure::failed(format!(
+            "could not read the seeded notes for embedding: {}",
+            describe_database_error(&error)
+        ))
+    })?;
+
+    let applications: Vec<(Uuid, Uuid, String, String)> = sqlx::query_as(
+        "SELECT id, user_id, role_title, description FROM job_applications \
+          WHERE user_id = ANY($1) ORDER BY id",
+    )
+    .bind(seed_ids)
+    .fetch_all(&mut *connection)
+    .await
+    .map_err(|error| {
+        Failure::failed(format!(
+            "could not read the seeded applications for embedding: {}",
+            describe_database_error(&error)
+        ))
+    })?;
+
+    let mut index = 0_usize;
+
+    for (source_id, user_id, title, content) in &notes {
+        let text = format!("{title}\n{content}");
+        let inserted = insert_embedding(
+            connection,
+            seeded_id("embeddings", index),
+            *user_id,
+            "note",
+            *source_id,
+            &text,
+        )
+        .await?;
+
+        outcome.record(inserted);
+        index += 1;
+    }
+
+    for (source_id, user_id, role_title, description) in &applications {
+        let text = format!("{role_title}\n{description}");
+        let inserted = insert_embedding(
+            connection,
+            seeded_id("embeddings", index),
+            *user_id,
+            "application",
+            *source_id,
+            &text,
+        )
+        .await?;
+
+        outcome.record(inserted);
+        index += 1;
+    }
+
+    Ok(outcome)
+}
+
+/// Writes one seeded embedding, and reports whether a row was inserted.
+///
+/// The `WHERE EXISTS` is the ownership predicate of the write: `source_id` is
+/// polymorphic and carries no foreign key, so the statement reads the source
+/// table rather than trusting its caller. It is the same rule as
+/// `MlRepository::upsert_note`, with `DO NOTHING` instead of `DO UPDATE`: the
+/// seeder must report a second run as *skipped*, and the value is deterministic,
+/// so there is nothing to update.
+async fn insert_embedding(
+    connection: &mut PgConnection,
+    id: Uuid,
+    user_id: Uuid,
+    source_type: &str,
+    source_id: Uuid,
+    text: &str,
+) -> Result<u64, Failure> {
+    let mut vector = hash_vector::raw(text, SEEDED_DIMENSION);
+
+    if !hash_vector::normalise(&mut vector) {
+        return Err(Failure::failed(format!(
+            "the deterministic embedder produced a vector with no unit form for one {source_type}; \
+             nothing was written"
+        )));
+    }
+
+    let dimension = i32::try_from(vector.len()).unwrap_or(i32::MAX);
+
+    // One statement per source type, so the `EXISTS` names the right table.
+    // Both fragments are static: no user input reaches the SQL text.
+    let statement = match source_type {
+        "note" => {
+            "INSERT INTO embeddings \
+                 (id, user_id, source_type, source_id, model_id, dim, vector) \
+             SELECT $1, $2, 'note', $3, $4, $5, $6 \
+              WHERE EXISTS (SELECT 1 FROM notes WHERE id = $3 AND user_id = $2) \
+             ON CONFLICT (user_id, source_type, source_id, model_id) DO NOTHING"
+        }
+        _ => {
+            "INSERT INTO embeddings \
+                 (id, user_id, source_type, source_id, model_id, dim, vector) \
+             SELECT $1, $2, 'application', $3, $4, $5, $6 \
+              WHERE EXISTS (SELECT 1 FROM job_applications WHERE id = $3 AND user_id = $2) \
+             ON CONFLICT (user_id, source_type, source_id, model_id) DO NOTHING"
+        }
+    };
+
+    let inserted = sqlx::query(statement)
+        .bind(id)
+        .bind(user_id)
+        .bind(source_id)
+        .bind(SEEDED_MODEL_ID)
+        .bind(dimension)
+        .bind(vector)
+        .execute(&mut *connection)
+        .await
+        .map_err(|error| insert_failure("embeddings", &error))?
+        .rows_affected();
+
+    Ok(inserted)
+}
+
 /// Runs the six post-insert checks before the transaction commits.
 async fn verify(
     connection: &mut PgConnection,
@@ -2112,6 +2313,7 @@ fn print_report(profile: Profile, outcome: &SeedOutcome) {
     print_entity("companies", outcome.companies);
     print_entity("applications", outcome.applications);
     print_entity("events", outcome.events);
+    print_entity("embeddings", outcome.embeddings);
     println!(
         "atom-seed: verification passed (6 checks); {} rows inserted, {} skipped",
         outcome.total_inserted(),
@@ -2686,6 +2888,7 @@ mod tests {
             "demo",
             "--reset",
             "--allow-non-empty",
+            "--with-embeddings",
         ]))
         .map_err(|error| format!("the parser rejected valid arguments: {error}"))?;
 
@@ -2697,6 +2900,9 @@ mod tests {
         }
         if !parsed.allow_non_empty {
             return Err("--allow-non-empty was not recorded".to_string());
+        }
+        if !parsed.with_embeddings {
+            return Err("--with-embeddings was not recorded".to_string());
         }
         if parsed.help {
             return Err("--help was recorded without being passed".to_string());

@@ -1,6 +1,6 @@
 # Local machine learning — API
 
-> **Status:** Accepted
+> **Status:** Implemented
 > **Last updated:** 2026-10-24
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-ML-001`](specification.md)
@@ -11,9 +11,23 @@ the API root. The general rules are in
 [`conventions.md`](../../api/conventions.md) §17, and the error codes in
 [`error-contract.md`](../../api/error-contract.md).
 
-**This contract is not implemented.** No route below answers today. It is
-recorded as an accepted contract that is not built, so that the implementing
-change has a contract to meet.
+## 0. Implementation status
+
+The contract below is implemented: the three operations are mounted, and
+`ROUTE_TABLE` and the document agree on **51** operations. Read from the working
+tree on 2026-10-24:
+
+| Check | Result |
+| ----- | ------ |
+| An ML path in `ROUTE_TABLE` and in `api_routes()` | All three |
+| The published surface, as pinned by `tests/openapi_contract.rs` | **51** operations |
+| `src/ml/handlers.rs`, `service.rs`, `dto.rs`, `repository.rs` | Present |
+| The `embeddings` table | Present (migration `0006`) |
+
+What has **not** happened is a run. No case in [`testing.md`](testing.md) has
+been executed, so the answers below are what the code implements and asserts,
+not an observation. The evidence for the status, and the three gaps that keep it
+out of `Verified`, are in [status.md](status.md) §1.3.
 
 ## 1. Endpoint summary
 
@@ -23,8 +37,8 @@ change has a contract to meet.
 | `POST` | `/api/v1/job-applications/{application_id}/match` | bearer token | `200` `MatchResponse` |
 | `POST` | `/api/v1/ml/reindex` | bearer token | `200` `ReindexResponse` |
 
-All three are authenticated. There is no anonymous route in this feature, and
-a request without a valid token is `401 unauthorized`.
+All three are authenticated. There is no anonymous operation in this feature,
+and a request without a valid token is `401 unauthorized`.
 
 `POST /notes/search` is owned by this module even though it lives under
 `/notes`. The router has a dynamic segment `{note_id}` there, so
@@ -42,7 +56,29 @@ contract test pins that fact rather than claiming the path is unserved.
 | `semantic` | Cosine similarity against the caller's embeddings. |
 | `hybrid` | Bounded lexical candidates re-ranked by cosine similarity. **The default.** |
 
-### 2.2 The degradation fields
+### 2.2 The degradation contract
+
+This is the part of the feature a client depends on most, so it is stated once,
+in full, and without qualification. **`ml.enabled` defaults to `false`, so a
+default deployment serves the first row of the table.**
+
+| Requested | `ml.enabled = false` | The model file is missing | ML ready |
+| --------- | -------------------- | ------------------------- | -------- |
+| `POST /notes/search`, `mode` `lexical` | `200`, lexical results, `degraded` `false` | `200`, lexical, `degraded` `false` | `200`, lexical, `degraded` `false` |
+| `POST /notes/search`, `mode` `semantic` or `hybrid` | **`200`**, lexical results, `mode` `lexical`, `degraded` `true`, `degraded_reason` `ml_disabled` | **`200`**, lexical, `degraded_reason` `model_missing` | `200`, the requested mode, `degraded` `false` |
+| `POST /job-applications/{id}/match` | **`409 conflict`** | **`409 conflict`** | `200`, a ranked list |
+| `POST /ml/reindex` | **`409 conflict`** | **`409 conflict`** | `200`, the counts |
+
+Three sentences, which are the whole rule:
+
+1. **Search degrades with `200`.** A scored mode that cannot be scored returns
+   the lexical results with `mode` `lexical` and `degraded_reason`
+   `ml_disabled` or `model_missing`. It never returns `500`, `503` or `408`: a
+   missing optional model is a configuration state.
+2. **Match refuses with `409`.** A match that ranks nothing is a fiction, so it
+   is refused rather than degraded.
+3. **Reindex refuses with `409`.** An operation that says "rebuild the index"
+   cannot do what it says without a model.
 
 `SearchResponse` carries the four degradation fields:
 
@@ -53,18 +89,14 @@ contract test pins that fact rather than claiming the path is unserved.
 | `degraded` | boolean | `true` when a scored mode was requested and lexical results were returned. |
 | `degraded_reason` | enum or `null` | `ml_disabled`, `model_missing`, `inference_timeout`, or `null`. |
 
-`MatchResponse` does **not** carry them: a match needs a model, so an
-unavailable model is a `409`, not a degraded answer (`ML-R06`). The rule is in
+`MatchResponse` and `ReindexResponse` do **not** carry them: those operations
+fail rather than degrade (`ML-R06`). The rule is in
 [`conventions.md`](../../api/conventions.md) §17 and the decision in
-[`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md).
+[`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) §11.
 
-A deployment whose configuration yields the **disabled** embedder —
-`ml.enabled = false`, or a model file that cannot be loaded — answers a
-`semantic` or `hybrid` search with `degraded_reason` `ml_disabled` or
-`model_missing`, and answers a match with the `409` above. `deterministic` is
-a valid `ml.backend` value, so a test deployment can run the scored modes
-without a model file; the seeder constructs the deterministic embedder
-directly instead of reading the configuration. See
+`deterministic` is a valid `ml.backend` value, so a test deployment can run the
+scored modes without a model file; the seeder constructs the deterministic
+embedder directly instead of reading the configuration. See
 [`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) §7.
 
 ### 2.3 `SearchHit`
@@ -112,8 +144,8 @@ directly instead of reading the configuration. See
 | `hybrid` | The number of **scored candidates** after the bounded re-rank, which is never more than `ml.candidate_limit`. |
 
 A client must not read the hybrid `total` as "every relevant note". It is the
-size of the candidate set, and that is why the number is documented here
-rather than left to inference.
+size of the candidate set, and that is why the number is written here rather
+than left to inference.
 
 ### 2.5 `MatchResponse`
 
@@ -132,13 +164,8 @@ rather than left to inference.
 ```
 
 `matches` is ordered by `score DESC`, then `note_id ASC`, and is bounded by the
-request's `limit`. It is **not** paginated; a match is a short ranked list,
-not a collection to page through.
-
-A match is only defined when a model is available. When ML is disabled or the
-model is missing, the request is a `409 conflict` rather than an empty list:
-the operation could not be performed, and saying so is more useful than
-returning a ranked list that ranks nothing.
+request's `limit`. It is **not** paginated; a match is a short ranked list, not
+a collection to page through.
 
 ### 2.6 `ReindexResponse`
 
@@ -167,8 +194,8 @@ Searches the caller's notes in one of three modes.
 **Authentication:** bearer token required.
 
 **Query parameters:** the shared `limit` and `offset` from
-[`conventions.md`](../../api/conventions.md) §5, with the same defaults and
-the same clamp.
+[`conventions.md`](../../api/conventions.md) §5, with the same defaults and the
+same clamp.
 
 ### Request
 
@@ -201,8 +228,8 @@ In `hybrid`, an item always has a numeric score. In `semantic`, the same. In
 | `500` | `database_error` | The database failed. |
 
 A missing model never produces `503`, `500` or `408`. It produces a `200` with
-`degraded` `true` and `mode` `lexical`, which is the whole point of
-`ML-R06`.
+`degraded` `true` and `mode` `lexical` — that is `ML-R06`, and it is the first
+sentence of §2.2.
 
 ```bash
 curl -i -X POST "http://127.0.0.1:3000/api/v1/notes/search?limit=10" \
@@ -218,7 +245,7 @@ A degraded answer looks like this and is still `200`:
   "requested_mode": "hybrid",
   "mode": "lexical",
   "degraded": true,
-  "degraded_reason": "model_missing",
+  "degraded_reason": "ml_disabled",
   "items": [ { "note": { "...": "NoteResponse" }, "score": null } ],
   "pagination": { "limit": 10, "offset": 0, "total": 2, "has_more": false }
 }
@@ -255,7 +282,7 @@ A `MatchResponse`.
 | `400` | `bad_request` | The body is not JSON, or `application_id` is not a UUID. |
 | `401` | `unauthorized` | No token, or an invalid one. |
 | `404` | `not_found` | The application does not exist, or belongs to another account. |
-| `409` | `conflict` | ML is disabled or the model is not loaded. A match cannot be produced without a model. |
+| `409` | `conflict` | ML is disabled or the model is not loaded. A match cannot be produced without a model — the second sentence of §2.2. |
 | `422` | `validation_failed` | `mode` is `lexical` or unknown, or `limit` is out of range. |
 | `500` | `database_error` | The database failed. |
 | `408` | `timeout` | The inference exceeded `ml.timeout_seconds` and the request budget. Unlike search, a match has no lexical fallback, so it fails rather than degrades. |
@@ -295,7 +322,7 @@ A `ReindexResponse`.
 | Status | Code | When |
 | ------ | ---- | ---- |
 | `401` | `unauthorized` | No token, or an invalid one. |
-| `409` | `conflict` | ML is disabled or the model is not loaded. Reindexing cannot do what it says, so it is refused rather than silently doing nothing. |
+| `409` | `conflict` | ML is disabled or the model is not loaded. Reindexing cannot do what it says, so it is refused rather than silently doing nothing — the third sentence of §2.2. |
 | `500` | `database_error` | The database failed. |
 | `408` | `timeout` | The request exceeded the configured request timeout. A reindex of a large corpus can exceed it; the run is idempotent, so the client may start it again and the completed rows are skipped. |
 
@@ -306,13 +333,15 @@ curl -i -X POST http://127.0.0.1:3000/api/v1/ml/reindex \
 
 ## 6. Notes on the OpenAPI document
 
-When the feature is implemented, the three operations are registered in
-`src/api/routes.rs` and appear in the document at `/api/v1/openapi.json` with
-the `SearchRequest`, `SearchResponse`, `SearchHit`, `MatchRequest`,
-`MatchResponse`, `MatchHit` and `ReindexResponse` schemas. The `bearer`
-security scheme applies to all three.
+The three operations are registered in `src/api/routes.rs` and appear in the
+document at `/api/v1/openapi.json` with the `SearchRequest`, `SearchResponse`,
+`SearchHit`, `MatchRequest`, `MatchResponse`, `MatchHit` and `ReindexResponse`
+schemas. The `bearer` security scheme applies to all three.
 
 `POST /notes/search` declares `limit` and `offset` **once each**, from the
 shared pagination parameters, and its body carries only `query` and `mode`.
 A contract test asserts the published parameter set and that no second
 pagination parameter appears in the body schema.
+
+The document describes **51** operations, and the inventory in
+[`../../api/README.md`](../../api/README.md) lists the three ML paths among them.

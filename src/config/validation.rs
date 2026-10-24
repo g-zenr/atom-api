@@ -166,6 +166,7 @@ pub fn validate_settings(config: &Config) -> Result<(), ConfigError> {
     validate_cors(&config.api.cors.allowed_origins)?;
     validate_database(config)?;
     validate_auth(config)?;
+    validate_ml(config)?;
 
     Ok(())
 }
@@ -442,6 +443,70 @@ fn validate_auth(config: &Config) -> Result<(), ConfigError> {
             key: "auth.clock_skew".to_string(),
             value: format!("{}s", config.auth.clock_skew.as_secs()),
             expected: format!("at most {MAX_CLOCK_SKEW_SECONDS}s"),
+        });
+    }
+
+    Ok(())
+}
+
+/// Validates the local machine-learning settings.
+///
+/// The four rules are the ones
+/// [`docs/features/ml/architecture.md`](../../docs/features/ml/architecture.md)
+/// §7 lists. The backend value is not checked here: it is an enum, so the
+/// loader has already refused anything outside `{flex, deterministic}` before
+/// this function runs. Nothing in this group may stop the process because a
+/// *model file* is absent — that is the `Disabled` state, not a
+/// misconfiguration.
+fn validate_ml(config: &Config) -> Result<(), ConfigError> {
+    if config.ml.dimension == 0 {
+        return Err(ConfigError::Invalid {
+            key: "ml.dimension".to_string(),
+            value: "0".to_string(),
+            expected: "a positive number of dimensions".to_string(),
+        });
+    }
+
+    if config.ml.timeout.is_zero() {
+        return Err(ConfigError::Invalid {
+            key: "ml.timeout_seconds".to_string(),
+            value: "0s".to_string(),
+            expected: "a positive duration".to_string(),
+        });
+    }
+
+    // The inference budget is spent inside a request, so it may not outlast the
+    // request itself: a slower budget would be dead configuration that only
+    // makes a timeout look like a server fault.
+    if config.ml.timeout > config.app.limits.request_timeout {
+        return Err(ConfigError::Invalid {
+            key: "ml.timeout_seconds".to_string(),
+            value: format!("{}s", config.ml.timeout.as_secs()),
+            expected: format!(
+                "at most the request timeout ({}s)",
+                config.app.limits.request_timeout.as_secs()
+            ),
+        });
+    }
+
+    if config.ml.candidate_limit <= 0 {
+        return Err(ConfigError::Invalid {
+            key: "ml.candidate_limit".to_string(),
+            value: config.ml.candidate_limit.to_string(),
+            expected: "a positive number of candidate rows".to_string(),
+        });
+    }
+
+    // A candidate set smaller than one page would make page two impossible: the
+    // re-rank would have nothing left to slice.
+    if config.ml.candidate_limit < config.api.pagination.max_limit {
+        return Err(ConfigError::Invalid {
+            key: "ml.candidate_limit".to_string(),
+            value: config.ml.candidate_limit.to_string(),
+            expected: format!(
+                "at least the maximum page size ({})",
+                config.api.pagination.max_limit
+            ),
         });
     }
 
