@@ -88,19 +88,19 @@ These are deliberately **not** part of Phase 2:
 
 The source of truth is [`project-truth.md`](../../project-truth.md) §18.1.
 
-| ID | Requirement | Planned implementation | Planned coverage |
-| -- | ----------- | ---------------------- | ---------------- |
-| `REIMB-R01` | A claim has a title, an optional description, one currency and zero or more items. | `src/reimbursements/service.rs`, `dto.rs` | `a_claim_can_be_created_read_and_deleted`, `an_item_can_be_added_changed_and_removed` |
-| `REIMB-R02` | One currency per claim, immutable, no conversion. | `currency` column and a create-only field | `the_claim_currency_is_required_and_immutable` |
-| `REIMB-R03` | The total always equals the sum of the items. | `SUM(amount)` recomputed in the item transaction | `the_total_equals_the_sum_of_the_items`, `money_round_trips_with_four_decimals` |
+| ID | Requirement | Implementation | Coverage |
+| -- | ----------- | -------------- | -------- |
+| `REIMB-R01` | A claim has a title, an optional description, one currency and zero or more items. | `src/reimbursements/service.rs`, `dto.rs` | `a_claim_can_be_created_read_and_deleted`, `an_item_can_be_added_to_a_draft_claim`, `an_item_can_be_partially_updated` |
+| `REIMB-R02` | One currency per claim, immutable, no conversion. | `currency` column, required and upper-cased on create, absent from every request that could change it | `the_claim_currency_is_required_and_upper_cased`, `the_claim_currency_is_not_patchable` |
+| `REIMB-R03` | The total always equals the sum of the items. | `SUM(amount)` recomputed in the item transaction | `adding_an_item_recomputes_the_total`, `deleting_an_item_recomputes_the_total`, `the_claim_total_equals_the_sum_of_its_items` |
 | `REIMB-R04` | The five-state lifecycle, with `paid` terminal. | `POST …/submit`, `…/approve`, `…/reject`, `…/pay` | `a_draft_can_be_submitted_approved_and_paid`, `every_forbidden_transition_is_refused`, `paid_is_terminal` |
-| `REIMB-R05` | Submission needs at least one item and a positive total. | `ClaimService::submit` | `a_claim_without_items_cannot_be_submitted`, `a_claim_with_a_zero_total_cannot_be_submitted` |
-| `REIMB-R06` | Items change only while the claim is a draft. | `ClaimService` guard before every item write | `an_item_cannot_be_added_to_a_submitted_claim`, `an_item_cannot_be_changed_or_deleted_after_submission` |
-| `REIMB-R07` | Money is `NUMERIC(19,4)` and a four-decimal JSON string. | `dto.rs` money type, `::text` selects ([`ADR-0007`](../../decisions/ADR-0007-money-representation.md)) | `money_round_trips_with_four_decimals`, `a_json_number_where_money_is_expected_is_refused` |
-| `REIMB-R08` | A receipt is a URL on a line item, never an upload. | `receipt_url` column and validator ([`ADR-0009`](../../decisions/ADR-0009-receipt-references.md)) | `a_receipt_is_a_url_and_a_file_body_is_refused` |
+| `REIMB-R05` | Submission needs at least one item and a positive total. | The `WHERE` of the submit statement; the `422` field is chosen on the error path | `a_claim_without_items_cannot_be_submitted`, `a_claim_with_a_zero_total_cannot_be_submitted` |
+| `REIMB-R06` | Items change only while the claim is a draft. | The claim row lock that opens the item transaction | `an_item_cannot_be_added_to_a_submitted_claim`, `an_item_cannot_be_changed_or_deleted_after_submission` |
+| `REIMB-R07` | Money is `NUMERIC(19,4)` and a four-decimal JSON string. | `helpers::validation::validate_money` for input, `::text` selects for output ([`ADR-0007`](../../decisions/ADR-0007-money-representation.md)) | `an_item_amount_round_trips_with_four_decimals`, `an_item_amount_must_be_a_four_decimal_string`, `money_round_trips_with_four_decimals` |
+| `REIMB-R08` | A receipt is a URL on a line item, never an upload. | `receipt_url` column and validator ([`ADR-0009`](../../decisions/ADR-0009-receipt-references.md)) | `a_receipt_url_must_be_absolute_http_or_https`. A file body is not tested: no route accepts one |
 | `REIMB-R09` | An optional project link, cleared when the project is deleted. | `project_id` `ON DELETE SET NULL` | `deleting_the_project_clears_the_link_and_keeps_the_claim` |
-| `REIMB-R10` | Every read and write is owner-scoped; a foreign claim is `404`. | `user_id = $n` in every statement ([`ADR-0005`](../../decisions/ADR-0005-ownership-enforced-in-sql.md)) | `a_claim_of_another_user_is_invisible`, `an_item_of_another_users_claim_is_invisible`, `the_listing_only_contains_the_callers_claims` |
-| `REIMB-R11` | A claim may be deleted in any lifecycle status, and deleting it deletes its items. | `DELETE` on a `draft`, `submitted`, `approved`, `rejected` and `paid` claim each returns `204`; a following `GET` is `404`; the items are gone. | `a_claim_can_be_deleted_in_any_status` |
+| `REIMB-R10` | Every read and write is owner-scoped; a foreign claim is `404`. | `user_id = $n` in every statement ([`ADR-0005`](../../decisions/ADR-0005-ownership-enforced-in-sql.md)) | `a_claim_of_another_user_is_invisible`, `an_item_of_another_users_claim_is_invisible`, `the_listing_only_contains_the_callers_claims`, `a_lifecycle_action_on_another_users_claim_is_not_found` |
+| `REIMB-R11` | A claim may be deleted in any lifecycle status, and deleting it deletes its items. | `DELETE` with no status predicate; the items follow through `ON DELETE CASCADE` | `deleting_a_claim_deletes_its_items` (the schema), `a_claim_can_be_created_read_and_deleted` (a `draft`). `a_claim_can_be_deleted_in_any_status` is still to be written |
 
 ## 6. User-facing behaviour
 
@@ -196,7 +196,7 @@ endpoint name is broader than the transition it performs, and
 | `currency` | Three ASCII letters; trimmed; upper-cased. | `422` naming `currency`. |
 | `amount` | Four-decimal string, `>= 0`, at most 15 integer digits. | `422` naming `amount`. |
 | item `description` | Trimmed, not empty, at most 500 characters. | `422` naming `description`. |
-| `incurred_on` | `YYYY-MM-DD`, a real calendar date. | `422` naming `incurred_on`. |
+| `incurred_on` | `YYYY-MM-DD`, a real calendar date. | `422` with field `body`: the date is deserialized, so the shared extractor reports the body failure rather than the field |
 | `category` | Optional; trimmed and lower-cased; 1–64 characters; an empty value is stored as `null`. | `422` naming `category`. |
 | `receipt_url` | Optional; absolute `http`/`https`; at most 2048 characters. | `422` naming `receipt_url`. |
 | `project_id` | Optional UUID; must be owned by the caller. | `404` if it belongs to another account, `422` if it is not a UUID. |

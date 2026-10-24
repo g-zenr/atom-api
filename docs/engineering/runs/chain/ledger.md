@@ -113,8 +113,8 @@ step deliberately, and the rows are renamed only between runs.
 | D2.S1 | Seeder foundation | **done (checkpoint rows 10-11 outstanding)** | `5688de7` (+ `b635cc7`, `77a9b79`) | `atom-seed` for users, notes, projects and tasks: guards, determinism, `--reset`, 16 integration and 6 unit tests, docs. No new dependency. **Not pushed.** The two follow-ups were written after the checkpoint record and are not yet in it: `b635cc7` serialises the seeder suite with a PostgreSQL advisory lock and adds two assertions, `77a9b79` pins the 22-operation surface and asserts the canonical error code. |
 | D2.R1 | Reimbursements - schema and types | **done** (rows 10-11 outstanding) | `908166b` | Contract `C-R1`. `migrations/0004_expense_claims.sql`, `src/reimbursements/{mod,models}.rs`, seeder S2 (claims 1/25/50, items 0/48/98), `tests/claims_schema.rs`, 213 -> 225 tests, six gates green. No endpoint: `openapi.json` unchanged. |
 | D2.R2 | Claim CRUD | **done** (rows 10-11 outstanding) | pending commit | Five claim endpoints, 27 operations, 266 tests. |
-| D2.R3 | Items and the total invariant | pending | — | |
-| D2.R4 | Lifecycle actions | pending | — | |
+| D2.R3 | Items and the total invariant | **done** (rows 10-11 outstanding) | `93fb2f0` | Three item routes, one transaction per write, `validate_money`. |
+| D2.R4 | Lifecycle actions | **done** (rows 10-11 outstanding) | `93fb2f0` | Four actions, one guarded `UPDATE` each, reopen clears both stamps. |
 | D2.R5 | Flow and contract tests | pending | — | Uses the second seeded account for the ownership sweep. |
 | D2.R6 | Close: review, gate, commit | pending | — | Also D2.S2: extend the seeder with claims. |
 | D3 | Job applications | pending | — | Blocked by D2. |
@@ -1030,6 +1030,30 @@ Plus unit tests in `src/reimbursements/service.rs` for the transition table (5 a
 **SEEDER** - no table and no column changes, so the seeder is untouched. Its seeded claims already cover all five statuses, so the flow tests can read them.
 
 ---
+
+### D2.R3/D2.R4 - Items, the total invariant and the lifecycle, 2026-10-24
+
+Contract `C-R3/C-R4`. Agents: `rust-backend`, `test-engineer`, `docs`.
+
+| # | Criterion | Evidence | Pass |
+| - | --------- | -------- | ---- |
+| 1 | All six gates green | `fmt=0`, `clippy=0`, `test=0`, `nodefault=0`, `docs=0`, `strict=0` | **Pass** |
+| 2 | Every acceptance criterion maps to a test | 21 new names in `tests/claims_api.rs`; `the_transition_table_allows_exactly_the_five_edges` covers all 20 combinations; three `validate_money` unit tests | **Pass** |
+| 3 | New tests at least the contract's target | **266 -> 296**, +30 (21 api, 1 contract, 8 unit) | **Pass** |
+| 4 | A flow test exercises the chain end to end | Hand-run on `atom_dev`: add two items, total `149.8000`; patch an amount, total `153.9000`; delete an item, total `129.9000`; submit/approve/pay each `200` with its own stamp; the `R5` flow test is the automated form | **Pass** |
+| 5 | Ownership: the second account gets 404 | `an_item_of_another_users_claim_is_invisible`, `an_item_id_under_the_wrong_claim_is_not_found`, `a_lifecycle_action_on_another_users_claim_is_not_found`; the full sweep is `R5` | **Pass** |
+| 6 | Docs updated | reimbursements `status`/`architecture`/`testing`/`api`/`specification`, `docs/api/README.md`, `docs/testing/strategy.md`, `docs/features/README.md` | **Pass** |
+| 7 | Seeder updated for every new table | No table or column change; seeded claims already cover all five statuses | **n/a** |
+| 8 | OpenAPI changed only as intended | Seven operations added (27 -> 34), two components; the two-way comparison and the size pin assert it | **Pass** |
+| 9 | No forbidden construct added | No `unwrap`/`expect` outside `#[cfg(test)]`; no `403`; no `f32`/`f64`; no `format!`-built SQL; `validate_money` refuses rather than rounds | **Pass** |
+| 10 | code-reviewer pass on the chain diff | **Not run.** | **Fail** |
+| 11 | quality-gate pass on the evidence | **Not run.** | **Fail** |
+
+**Decision: ADVANCE on rows 1-9.** Three implementation decisions are worth carrying:
+
+- Item writes and the total recompute are one transaction, so `REIMB-R03` cannot be violated by a partial failure.
+- The lifecycle is one guarded `UPDATE` per action, so two concurrent actions cannot both win; the transition table is consulted on the error path to choose `409` versus the submit `422`.
+- Lifecycle stamps use `clock_timestamp()`, not `NOW()`: `NOW()` is the transaction start, which after waiting on the row lock can predate the `submitted_at` it is compared against, and `expense_claims_timestamp_order_chk` would then reject a correct approval as `23514`. That is a defect the hand-run would have surfaced as an intermittent 500.
 
 ## Parked
 

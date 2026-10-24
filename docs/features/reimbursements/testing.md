@@ -10,19 +10,24 @@ not. Three layers are covered:
 
 - the **schema layer**, by `tests/claims_schema.rs` (§1) and two cases in
   `tests/seeder.rs` (§1.1);
-- the **endpoint layer**, by `tests/claims_api.rs` — **55 cases**, of which 34
-  are the claim operations and **21 are the item and lifecycle operations**
-  (§2) — and the contract cases in `tests/openapi_contract.rs` (§2.8);
+- the **endpoint layer**, by `tests/claims_api.rs` — **55 cases in the tree at
+  `93fb2f0`**, of which 34 are the claim operations and **21 are the item and
+  lifecycle operations** (§2) — and the contract cases in
+  `tests/openapi_contract.rs` (§2.8);
 - **ten unit tests** inside `src/reimbursements/`, plus three money tests in
   `src/helpers/validation.rs` (§4).
 
-Every endpoint of the feature is now callable, so nothing in §2 is a plan.
+Every endpoint of the feature is callable, so nothing in §2.1–§2.9 is a plan.
+One part of §2 **is** a plan: the two cross-cutting cases `D2.R5` adds (§2.10)
+are not in `tests/claims_api.rs` at this revision, and the count above therefore
+stays 55 rather than 57.
 
-This document describes the suite. It does not claim that any run happened;
-what must pass before a change is complete is stated in
-[`verification-policy.md`](../../testing/verification-policy.md), and the
-record of a run belongs in that record and in [status.md](status.md), never
-here.
+This document describes the suite. The **result** of a run is not recorded here:
+`ATOM-CHANGE-20261024-007` in
+[`../../engineering/change-log.md`](../../engineering/change-log.md) records the
+one run this feature has, and [status.md](status.md) is where a status is
+derived from it. What must pass before a change is complete is stated in
+[`verification-policy.md`](../../testing/verification-policy.md).
 
 **The rule that makes this list evidence:** a test that cannot fail for the
 reason it names is not evidence. Each test below states the rule it proves,
@@ -71,13 +76,15 @@ router.
 
 ## 2. The endpoint layer — `tests/claims_api.rs`
 
-The file grows in two waves: `C-R2` adds the five claim operations and 34
+The file grows in waves: `C-R2` adds the five claim operations and 34
 cases, and `C-R3`/`C-R4` add the three item operations, the four lifecycle
-actions and **21 cases**. Every test drives the real router against a real
-PostgreSQL database through the shared harness in `tests/common/mod.rs`: no
-mocks, a unique user per test, and — where ownership is the subject — two
-accounts, because a cross-account case tested with one account's token proves
-nothing.
+actions and **21 cases**. A third wave, `D2.R5`, plans two cross-cutting cases
+that are not per-operation cases at all (§2.10); they are **not** in the file at
+this revision, so the counts here stay at 55. Every test drives the real router
+against a real PostgreSQL database through the shared harness in
+`tests/common/mod.rs`: no mocks, a unique user per test, and — where ownership is
+the subject — two accounts, because a cross-account case tested with one
+account's token proves nothing.
 
 The file's own comment sections are numbered `12.1`–`12.9`; this document
 groups the same cases by the rule they prove, so the two numbering schemes
@@ -255,39 +262,100 @@ Every requirement now names at least one test. A requirement whose entry ends
 in "still waiting for" is `Implemented` and not fully proved — the code exists,
 the assertion does not.
 
+**No row below rests on a planned case.** The two `D2.R5` names in §2.10 are not
+in `tests/claims_api.rs` at this revision, so they join a row only once they are
+on disk; a requirement is never moved closer to `Verified` by a name in this
+document.
+
 | Requirement | Proved by | Still waiting for |
 | ----------- | --------- | ----------------- |
 | `REIMB-R01` | §2.1 (seven cases: the five claim cases plus `an_item_can_be_added_to_a_draft_claim` and `an_item_can_be_partially_updated`), §2.5 (title, description, date range, malformed), §2.6 (search, dates, pagination, item order), §2.8 (the parameter set and the new status test) | The 1–500 item-description bound and a non-date `incurred_on`, both at HTTP level (§3) |
 | `REIMB-R02` | §1 (`23514`), §2.1 (`an_item_can_be_added_to_a_draft_claim` asserts the item has no currency), §2.5 (`the_claim_currency_is_required_and_upper_cased`, `the_claim_currency_is_not_patchable`), §2.6 (currency filter) | Nothing — the claim-level rule is complete, and the item level has no currency field to test |
 | `REIMB-R03` | §2.2 (`adding_an_item_recomputes_the_total`, `deleting_an_item_recomputes_the_total`, `the_claim_total_equals_the_sum_of_its_items`, `an_item_can_be_partially_updated`), §1.1 (the seeded sum), §1 (the column) | A concurrency case: two item writes on one claim. The transaction and the row lock are argued in [architecture.md](architecture.md) §2.7, not measured |
-| `REIMB-R04` | §2.3 (the ten cases), §4 (`the_transition_table_allows_exactly_the_five_edges`, `a_reviewed_claim_cannot_be_reopened`), §1 (both lifecycle-constraint cases), §2.7 (`an_unknown_status_filter_is_refused`) | Nothing except a recorded run |
+| `REIMB-R04` | §2.3 (the ten cases), §4 (`the_transition_table_allows_exactly_the_five_edges`, `a_reviewed_claim_cannot_be_reopened`), §1 (both lifecycle-constraint cases), §2.7 (`an_unknown_status_filter_is_refused`) | Nothing |
 | `REIMB-R05` | §2.3 (`a_claim_without_items_cannot_be_submitted`, `a_claim_with_a_zero_total_cannot_be_submitted`) | Nothing — both refusals and the success case after the fix are asserted |
 | `REIMB-R06` | §2.3 (`an_item_cannot_be_added_to_a_submitted_claim`, `an_item_cannot_be_changed_or_deleted_after_submission`), and `a_rejected_claim_reopens_and_can_be_resubmitted` for the editable side | Nothing |
-| `REIMB-R07` | §1 (the scale), §2.2 (the input rule, the round trip, the string type, the sum), §2.8 (the document), §4 (three money unit tests) | Nothing except a recorded run |
+| `REIMB-R07` | §1 (the scale), §2.2 (the input rule, the round trip, the string type, the sum), §2.8 (the document), §4 (three money unit tests) | Nothing |
 | `REIMB-R08` | §2.5 (`a_receipt_url_must_be_absolute_http_or_https`), §2.1 (`an_item_can_be_partially_updated` clears it), §4 (`a_receipt_must_be_an_absolute_http_url`), §1 (the column `CHECK`) | A `multipart`/file-body case (§3). The "never fetched" half is unprovable by design: the suite must not reach the network |
 | `REIMB-R09` | §1 (`SET NULL`), §2.1, §2.4 (both directions), §2.5 (a bad UUID), §2.8 (the nullable field) | Nothing |
-| `REIMB-R10` | §2.4 (seven cases, three of them new), §2.5 (path and query), §2.7 (all twelve operations without a credential) | A non-UUID `item_id` (`400`), which is the one path shape not asserted (§3) |
-| `REIMB-R11` | §1 (`deleting_a_claim_deletes_its_items`, `deleting_an_account_deletes_its_claims_and_items`), §2.1 (`a_claim_can_be_created_read_and_deleted` on a `draft`), §2.4 (the foreign delete is `404` and the claim survives) | `a_claim_can_be_deleted_in_any_status`: the four non-draft statuses are now reachable, and no case deletes in one of them (§3, `D2.R5`) |
+| `REIMB-R10` | §2.4 (seven cases, three of them new), §2.5 (path and query), §2.7 (all twelve operations without a credential) | A non-UUID `item_id` (`400`), which is the one path shape not asserted (§3); and the twelve-operation sweep with a second account's token, planned in §2.10 and not in the tree |
+| `REIMB-R11` | §1 (`deleting_a_claim_deletes_its_items`, `deleting_an_account_deletes_its_claims_and_items`), §2.1 (`a_claim_can_be_created_read_and_deleted` on a `draft`), §2.4 (the foreign delete is `404` and the claim survives) | `a_claim_can_be_deleted_in_any_status`: the four non-draft statuses are now reachable, and no case deletes in one of them (§3). It is part of `D2.R5`'s charter and is **not in the tree** at this revision |
+
+### 2.10 Cross-cutting — the journey and the ownership sweep (`D2.R5`, planned)
+
+`D2.R5` plans two cases that are not per-operation cases: one walks the whole
+surface in a single request sequence, and one walks it with the wrong account's
+token. **Neither is in `tests/claims_api.rs` at this revision** — the file holds
+the 55 cases of §2.1–§2.8 — so the names below are the names the wave plans,
+not tests that exist. No row of §2.9 is proved by either until it is on disk.
+
+**Anchor.** Everything in this section is true of the committed tree at
+`93fb2f0`, where no flow test file exists. While this document was being edited,
+`D2.R5` was writing `tests/claims_flow.rs` — the journey, the ownership sweep
+and a case that reads the seeded claims through the API. That file was
+uncommitted, had run no gate and has no ledger checkpoint when this was written,
+so it is **not** described here: re-read the tree before relying on any sentence
+in this section, and treat the `R5` documentation pass as the place the flow
+layer is recorded.
+
+| Planned name | What it would prove that the per-operation cases do not |
+| ------------ | ------------------------------------------------------ |
+| `the_whole_reimbursement_journey_from_registration_to_payment` | One account, one claim, one database, a single request sequence from the registration that creates the account to the `pay` that closes the claim: create a claim, add two items, read the total, change one amount, delete one item, submit, approve, pay, then read the claim back and compare it with every response the sequence produced. Every case in §2.1–§2.3 starts from a fresh claim, and most build the status with `claim_in_status`, so a value one operation writes that another misreads can pass all of them; the journey is the only case in which the state an item `PATCH` wrote is the state the `pay` response returns. It also fixes the ordering a client depends on inside one claim's history: items are accepted before submission and refused after it. |
+| `the_second_account_sees_not_found_on_every_reimbursement_operation` | One owner fixture holding a claim, an item and a non-draft status; then **all twelve** published operations are called with a second account's token and each must be `404 not_found`, after which the owner's claim, items, total, status and three stamps are re-read and must be unchanged. §2.4 spreads ownership over four tests with a different fixture each; the sweep is the only case that enumerates the whole surface in one place, so a thirteenth operation added later without a `user_id` predicate fails here, while the four focused tests would simply not look at it. |
+
+**What the journey does not cover.** It is a flow test, not a proof of the
+surface:
+
+1. **The `408` and `500` paths.** Unchanged by this wave, for the reasons in §3:
+   a `408` needs a request slow enough to trip the configured timeout, and a
+   `500` needs fault injection into a live pool. A journey that passes says
+   nothing about either.
+2. **The seeded dataset read through the API.** `R5`'s charter is an ownership
+   sweep "with the second seeded account", and §3 item 1 is the gap that would
+   close. It closes only if a seeded row is addressable from a test. If the
+   seeded ids or timestamps turn out **not** to be deterministic across profiles,
+   the sweep has to register its own second account instead, and the seeder's
+   five statuses and the endpoint's transition rules still never meet in one
+   test — §3 item 1 then stays open. This document claims neither outcome
+   before the case exists.
+3. **A recorded run of the two planned cases.** The suite that exists is
+   recorded as green (`ATOM-CHANGE-20261024-007`, 296 tests), but neither case
+   in this section is in it. When they land they need their own run, and
+   [status.md](status.md) stays at `Implemented` until the chain's review rows
+   close.
+4. **The `rejected` branch.** The journey walks `draft → submitted → approved
+   → paid`; reject-and-reopen stays proved only by
+   `a_rejected_claim_reopens_and_can_be_resubmitted` (§2.3).
+5. **A deletion in a non-draft status.** §3 still lists
+   `a_claim_can_be_deleted_in_any_status` as missing. The journey ends on a paid
+   claim and does not delete it.
 
 ## 3. What is still not covered
 
 This section is the visible gap. Three of its items are the ones that matter
 most:
 
-1. **The seeded-claim flow across the API.** No test reads a claim created by
-   `atom-seed` through the router. The seeder's cases (§1.1) assert the counts
-   and the total in SQL; the endpoint cases build their own claims. So the
-   seeder's five statuses and the endpoint's transition rules have never met in
-   one test, and a seeded row that no endpoint can read would pass both suites.
+1. **The seeded-claim flow across the API.** At `93fb2f0` no test reads a claim
+   created by `atom-seed` through the router. The seeder's cases (§1.1) assert
+   the counts and the total in SQL; the endpoint cases build their own claims. So
+   the seeder's five statuses and the endpoint's transition rules had never met
+   in one test, and a seeded row that no endpoint can read would pass both
+   suites. `D2.R5`'s sweep is the planned attempt at the seeded side (§2.10);
+   the uncommitted `tests/claims_flow.rs` seen while this document was edited
+   contains a seeded-claims case, and §2.10's anchor paragraph says why this
+   document does not yet count it.
 2. **The `408` and `500` paths on these routes.** `timeout` is proved by the
    timeout test in `tests/projects_tasks_api.rs` and `database_error` is
    unit-tested in `src/error.rs`; neither is asserted on a claim, item or
    lifecycle route. The middleware is shared, which is an argument, not an
    assertion. A `408` would need a request slow enough to trip the configured
    timeout; a `500` needs fault injection into a live pool.
-3. **A recorded run.** No run of `tests/claims_api.rs` — or of the whole suite
-   — is recorded anywhere for this chain. [status.md](status.md) therefore says
-   `Implemented`, never `Verified`.
+3. **The review rows and the two planned cases.** The suite that exists is
+   recorded as green in `ATOM-CHANGE-20261024-007` (six gates, 296 tests), so a
+   run is no longer the missing piece. What is missing is the `code-reviewer`
+   and `quality-gate` verdict on this chain, and the two cross-cutting cases
+   `D2.R5` plans (§2.10). [status.md](status.md) therefore says `Implemented`,
+   never `Verified`.
 
 Everything else that is missing, with the rule each would prove:
 
@@ -300,7 +368,7 @@ Everything else that is missing, with the rule each would prove:
 | A file body on the item route | A `multipart/form-data` body and a base64-only "file" body create no item. True today because the handler's extractor is `Json`, not because a test refused one. | `REIMB-R08` |
 | Two concurrent item writes | Two inserts on one claim serialise on the row lock and the stored total equals the sum of both. Argued from `SELECT … FOR UPDATE`, not measured. | `REIMB-R03` |
 | Two concurrent lifecycle actions | Two `approve` calls in flight: exactly one `200`, one `409`, one `decided_at`. Argued from the guarded `UPDATE`, not measured. | `REIMB-R04` |
-| The ownership sweep | All twelve operations called with a second account's token on one fixture, in one test. Today they are spread over four tests and the credential test uses no token. | `REIMB-R10` |
+| The ownership sweep | All twelve operations called with a second account's token on one fixture, in one test. Planned in §2.10 and **not in the tree** at this revision; today they are spread over four tests and the credential test uses no token. | `REIMB-R10` |
 
 ## 4. Unit tests — in the module
 

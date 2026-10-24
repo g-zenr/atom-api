@@ -27,17 +27,37 @@ All twelve published operations answer. The five claim operations landed in
   `helpers::validation::validate_money`.
 
 `Implemented` is used in the `AGENTS.md` §6 sense: **the code exists**. Whether
-it compiles is the chain's gate, measured by the agents that run `cargo`, and
-this document does not claim a compile it did not see. `Verified` would
-additionally require a passing recorded check, and there is none: no run of
-`tests/claims_api.rs` is recorded anywhere in this session, and neither
-`code-reviewer` nor `quality-gate` has read `C-R2`, `C-R3` or `C-R4`. Nothing in
-this feature is `Verified` — not a requirement, not an endpoint, not a test
-file.
+it compiles, and what the suite reports, are the chain's gates — measured by the
+agents that run `cargo`, and this document does not claim a measurement it did
+not make.
 
-**The evidence column below names the test that is written against each rule.**
-A named test is not a passing run. The distinction is the whole difference
-between `Implemented` and `Verified`, and no row in this document crosses it.
+A run **is** recorded. `ATOM-CHANGE-20261024-007` in
+[`change-log.md`](../../engineering/change-log.md) records the six gates green,
+`cargo test --all-targets` exit 0 with **296** tests, and a hand run on
+`atom_dev` that exercised the total through an add, a patch and a delete, the
+three actions, and the refusals. That entry is the orchestrator's record; it is
+cited here as such, not as evidence this document gathered.
+
+The feature is nevertheless **not** promoted to `Verified` in this document.
+The promotion belongs to the change that closes the chain's review rows —
+`code-reviewer` and `quality-gate` have read neither `C-R2` nor `C-R3`/`C-R4` —
+and it is a deliberate edit to this file, not a by-product of a green gate.
+Nothing in this feature is `Verified` today: not a requirement, not an endpoint,
+not a test file.
+
+**The evidence column below names the test written against each rule.** The
+recorded run reports the whole suite green, so those are the tests that ran; the
+column does not, and cannot, say that any single one of them would fail if its
+rule were removed — that is the rule in
+[`verification-policy.md`](../../testing/verification-policy.md), and the
+implementing changes are where it is shown.
+
+**The intended cross-cutting evidence is planned, not present.** `D2.R5` adds
+`the_whole_reimbursement_journey_from_registration_to_payment` and
+`the_second_account_sees_not_found_on_every_reimbursement_operation`; at
+`93fb2f0` neither name is in `tests/claims_api.rs`, and the `tests/claims_flow.rs`
+that was being written while this file was edited is uncommitted, so neither is
+evidence of anything yet.
 
 ### 1.1 The requirements
 
@@ -101,23 +121,39 @@ unchanged ([testing.md](testing.md) §2.5).
 
 ## 2. What is still missing
 
-1. **The flow and the ownership sweep (`D2.R5`).** `a_draft_can_be_submitted_approved_and_paid`
-   walks one claim through `submit`, `approve` and `pay`, but that claim is
-   built through the API in the test. The chain still owes:
+1. **The flow and the ownership sweep (`D2.R5`, in progress).**
+   `a_draft_can_be_submitted_approved_and_paid` walks one claim through
+   `submit`, `approve` and `pay`, but that claim is built through the API in the
+   test. `D2.R5` plans
+   `the_whole_reimbursement_journey_from_registration_to_payment` and
+   `the_second_account_sees_not_found_on_every_reimbursement_operation`;
+   **neither is in `tests/claims_api.rs` at `93fb2f0`** (and `tests/claims_flow.rs`,
+   which was being written while this file was edited, is uncommitted and is not
+   counted), so what is still owed is:
    - a flow over a **seeded** claim, read through the API, so the seeder's five
-     statuses and the endpoint rules meet in one test;
+     statuses and the endpoint rules meet in one test. It closes only if a
+     seeded row is addressable from a test: if the seeded ids are not
+     deterministic across profiles, the sweep has to register its own second
+     account and this item stays open ([testing.md](testing.md) §2.10);
    - `a_claim_can_be_deleted_in_any_status`, which is the missing half of
      `REIMB-R11`;
    - the sweep that calls all twelve operations with a second account's token.
      `the_claim_routes_require_a_credential` covers twelve operations with no
      credential, which is a different question.
-2. **A recorded run.** Nothing in
-   [`testing.md`](testing.md) has a recorded passing run. Until one exists,
-   `Implemented` is the strongest honest status and every "what proves it"
-   sentence above means "a test is written for it".
+
+   A flow test is a composition check, not a proof of the surface: passing it
+   says nothing about the `408`/`500` paths, the `rejected` branch or a deletion
+   in a non-draft status ([testing.md](testing.md) §2.10).
+2. **The recorded run.** `ATOM-CHANGE-20261024-007` in
+   [`change-log.md`](../../engineering/change-log.md) records the six gates
+   green, `cargo test --all-targets` exit 0 with 296 tests and a hand run on
+   `atom_dev`. It is the run this feature was waiting for; it is the
+   orchestrator's record, and this document has not re-run the suite.
 3. **The review rows.** `code-reviewer` and `quality-gate` have not read this
-   chain, `C-R2`, `D2.S1` or `D1`. The twelve-operation surface and the seven
-   new operations are part of what they have to read.
+   chain, `C-R2`, `D2.S1`, `D1` or `D2.R5`. The twelve-operation surface and the
+   seven new operations are part of what they have to read. The promotion to
+   `Verified` belongs to the change that closes those rows; the recorded run of
+   item 2 exists, the verdicts do not.
 4. **Five small test gaps inside the operations that now exist**, each a rule
    in the code with no endpoint assertion: the 1–500 item-description bound, a
    non-date `incurred_on` (`422` with field `body`), a non-UUID `item_id`
@@ -128,9 +164,9 @@ unchanged ([testing.md](testing.md) §2.5).
    at once. [testing.md](testing.md) §3 lists them with the rule each would
    prove.
 
-A requirement is not `Verified` because a test exists next to it. The feature
-becomes `Verified` when the tests in [testing.md](testing.md) pass in a
-recorded run, and not before.
+A requirement is not `Verified` because a test exists next to it. The promotion
+to `Verified` is made by the change that closes the review rows, with the
+recorded run of item 2 behind it, and not before.
 
 ## 3. What a future change must do to keep it `Implemented` and then `Verified`
 
@@ -162,7 +198,7 @@ recorded run, and not before.
 | [`specification.md`](specification.md) | Purpose, scope, non-goals, accepted requirements, user-facing behaviour, acceptance criteria, limitations. |
 | [`architecture.md`](architecture.md) | The layering that exists, the twelve service methods and the nineteen statements, the item transaction, the transition table, the two list shapes, the `project_id` tri-state, the invariants and the limitations. |
 | [`api.md`](api.md) | The twelve endpoints with their request and response shapes, status codes and error cases. All twelve answer. |
-| [`testing.md`](testing.md) | The schema tests, the seeder cases, the 55 endpoint tests, the contract tests, the unit tests, and what R5 still owes. |
+| [`testing.md`](testing.md) | The schema tests, the seeder cases, the 55 endpoint cases, the contract tests, the unit tests, the two planned `D2.R5` cross-cutting cases, and what R5 still owes. |
 | [`../../api/conventions.md`](../../api/conventions.md) | Pagination, money, filtering and timestamps. |
 | [`../../database/schema.md`](../../database/schema.md) | The tables; §11 is the column, constraint and index definition that migration `0004` implements. |
 | [`../../decisions/ADR-0007-money-representation.md`](../../decisions/ADR-0007-money-representation.md) | The money decision. |

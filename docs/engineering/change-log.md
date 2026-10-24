@@ -42,6 +42,73 @@ define the target state. The requirements live in
 
 ## Entries
 
+### ATOM-CHANGE-20261024-007 - Item endpoints and the claim lifecycle
+
+**Date:** 2026-10-24 (UTC)
+**Type:** Feature (endpoints)
+**Author:** The ATOM engineering team - the orchestrator with the `rust-backend`, `test-engineer` and `docs` subagents.
+**Status:** Complete - **chains `D2.R3`/`D2.R4`, review rows outstanding**
+
+#### Summary
+
+Three item routes and four lifecycle actions take the published surface from
+**27 to 34 operations**. All twelve reimbursement operations now answer, so the
+feature moves to `Implemented`; it is not `Verified`.
+
+#### What changed
+
+| Area | Change |
+| ---- | ------ |
+| Endpoints | `POST /claims/{id}/items`, `PATCH`/`DELETE /claims/{id}/items/{item_id}`, `POST /claims/{id}/{submit,approve,reject,pay}` |
+| Money | `helpers::validation::validate_money`, `^[0-9]{1,15}\.[0-9]{4}$`, refuses rather than rounds |
+| Transaction | Item write and total recompute in one transaction |
+| Lifecycle | Five edges, 15 refusals, one guarded `UPDATE` per action |
+| Tests | 21 in `tests/claims_api.rs`, one contract test, eight unit tests; **266 -> 296** |
+
+#### Three decisions that are not obvious
+
+1. **The item write and the total recompute are one transaction.** Two
+   statements in sequence let the item and `total_amount` diverge if the second
+   fails, and `REIMB-R03` says the total *always* equals the sum.
+2. **A lifecycle action is one guarded `UPDATE ... WHERE status = $expected`.**
+   A read-then-write lets two concurrent `approve` requests both pass the check.
+   Zero rows affected is `409` - or `404` when the claim is not the caller's. The
+   transition table is consulted on the *error* path, to choose `409` from the
+   submit `422`.
+3. **Lifecycle stamps use `clock_timestamp()`, not `NOW()`.** `NOW()` is the
+   transaction start, which after waiting on the row lock can predate the
+   `submitted_at` it is compared against, and
+   `expense_claims_timestamp_order_chk` would then reject a *correct* approval
+   with `23514`. That would have been an intermittent `500` on the approve path.
+
+#### The reopen edge, which is the one that could have failed
+
+`rejected -> draft` must clear `submitted_at` **and** `decided_at`, because the
+`draft` arm of the lifecycle `CHECK` requires all three stamps null; clearing
+only `decided_at` - which the earlier specification said - is a `23514` **at
+commit**, i.e. a `500` on the only reopen edge. The hand run confirmed the fix:
+`POST /claims/B/submit` on a rejected claim returned `200 draft` with
+`submitted_at`, `decided_at` and `paid_at` all null, then accepted a new item and
+resubmitted.
+
+#### Checks and results
+
+Six gates: `fmt` 0, `clippy -D warnings` 0, `test --all-targets` 0 (**296**),
+`check --no-default-features` 0, `atom-docs` 0, `atom-docs --strict` 0.
+
+Hand run on `atom_dev`: two items summing to `149.8000`; a patched amount moved
+the total to `153.9000`; a delete moved it to `129.9000`; `submit`, `approve` and
+`pay` each `200` with exactly their own stamp; a second `pay` and a `reject` from
+`approved` both `409`; an item write on a submitted claim `409`; a claim with no
+items `422` naming `items`; `"12.5"` `422` naming `amount`; a `javascript:`
+receipt `422`; an item under the wrong claim `404`.
+
+#### What is not verified
+
+No reviewer has read this chain. The `408`/`500` paths on these routes are
+unexercised, the flow test lands in `R5`, and the seeded dataset has not been
+read through the API.
+
 ### ATOM-CHANGE-20261024-006 - Claim CRUD for reimbursements
 
 **Date:** 2026-10-24 (UTC)

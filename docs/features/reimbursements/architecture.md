@@ -283,7 +283,7 @@ The table has **five edges** and twenty combinations:
 Every other pair — fifteen of them — is refused, and `paid` is terminal.
 
 `ensure_transition(current, action) -> Option<ClaimStatus>` in `service.rs` is
-the single definition of that table, and the unit test
+the table's single definition in Rust, and the unit test
 `the_transition_table_allows_exactly_the_five_edges` walks all twenty
 combinations against it.
 
