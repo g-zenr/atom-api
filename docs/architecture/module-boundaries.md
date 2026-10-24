@@ -142,19 +142,18 @@ Source: `src/tasks/handlers.rs`, `src/tasks/service.rs`,
 
 ---
 
-## Phase 2 modules (planned — only the reimbursements schema exists)
+## Phase 2 modules (planned, except reimbursements)
 
-> **Mostly planned.** `src/reimbursements/` exists and holds `mod.rs` and
-> `models.rs` only, and `migrations/0004_expense_claims.sql` creates
-> `expense_claim_status`, `expense_claims` and `expense_items`. There is no
-> handler, service, repository or route for it, so no endpoint exists. There is
-> no `src/job_applications/` and no `src/ml/`, and no `migrations/0005` or
-> `0006`. The three modules are **accepted product scope** —
-> `REIMB-R01`…`R11`, `JOB-R01`…`R09` and `ML-R01`…`R09` in
-> [`../project-truth.md`](../project-truth.md) §18 — and their feature status is
-> `Accepted`, which means *not built*. Nothing here is `Implemented` or
-> `Verified`. The constraints that do exist are proved by
-> [`../../tests/claims_schema.rs`](../../tests/claims_schema.rs).
+> **Mostly planned.** `reimbursements` is **`Implemented`**: `src/reimbursements/`
+> holds six modules, and `migrations/0004_expense_claims.sql` creates
+> `expense_claim_status`, `expense_claims` and `expense_items` with their
+> constraints and indexes. All twelve published operations are served, and
+> `tests/claims_schema.rs`, `tests/claims_api.rs` and `tests/claims_flow.rs`
+> prove the constraints and the behaviour. There is no `src/job_applications/`
+> and no `src/ml/`, and no `migrations/0005` or `0006`. Those two are
+> **accepted product scope** — `JOB-R01`…`R09` and `ML-R01`…`R09` in
+> [`../project-truth.md`](../project-truth.md) §18 — with feature status
+> `Accepted`, which means *not built*.
 
 **What "every module" means from here.** §1–§7 describe every module that
 **exists**. From this section on, the phrase means "every module that exists

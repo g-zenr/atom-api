@@ -29,11 +29,12 @@ The three Phase 2 features were accepted in
 [`project-truth.md`](../project-truth.md) §18 with acceptance criteria.
 Reimbursements is `Implemented`: `migrations/0004_expense_claims.sql`,
 `src/reimbursements/` and all twelve published endpoints exist, and
-`tests/claims_schema.rs`, `tests/claims_api.rs` and `tests/openapi_contract.rs`
-are written against them. It is not `Verified` — no run of that suite is
-recorded, and no reviewer has read the chain that completed it. Job
-applications and local machine learning remain `Accepted`: neither has a
-migration, a module, an endpoint or a test.
+`tests/claims_schema.rs`, `tests/claims_api.rs`, `tests/claims_flow.rs` and
+`tests/openapi_contract.rs` are written against them. It is not `Verified`: no
+`code-reviewer` or `quality-gate` verdict exists for the chains that built it,
+and a passing suite is not a review. Job applications and local machine
+learning remain `Accepted`: neither has a migration, a module, an endpoint or a
+test.
 
 The status column summarises the feature as a whole. The per-requirement
 evidence behind it is in each feature's `status.md`; a feature can contain both

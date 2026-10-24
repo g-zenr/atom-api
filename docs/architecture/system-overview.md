@@ -32,13 +32,14 @@ Phase 1. The only background activity is the in-process task that prunes the
 expired refresh sessions. The process makes no outbound network call at run
 time: every byte it sends is a response to a request it received.
 
-**Phase 2 is planned and changes none of that.** It adds three modules —
+**Phase 2 is mostly planned and changes none of that.** It adds three modules —
 `reimbursements`, `job-applications` and `ml` — inside the same binary: no new
 process, no new service, no worker, no message broker and no second language
 runtime. The one addition that could have introduced a service, machine
 learning, runs **in this process**, on the CPU, from a local model file, and
-makes no outbound call to a hosted service at build time or at run time. Phase 2
-is `Accepted` and **not built**; the module map is in
+makes no outbound call to a hosted service at build time or at run time.
+Of Phase 2, `reimbursements` is `Implemented`; `job-applications` and `ml`
+remain `Accepted` and not built. The module map is in
 [`module-boundaries.md`](module-boundaries.md), and the data it adds is in
 [`data-architecture.md`](data-architecture.md).
 

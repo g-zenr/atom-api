@@ -152,7 +152,7 @@ is required.
 | `GET` | `/api/v1/openapi.json` | — | `200` | the document itself |
 | `GET` | `/api/v1/docs/` | — | `200` | the explorer |
 
-The first 27 rows are the operations the document describes and the two route
+The first 34 rows are the operations the document describes and the two route
 tables declare, and `tests/openapi_contract.rs` holds them together in both
 directions. The last two rows are the explorer and the document itself: they are
 served, but they are mounted by `swagger_ui` and are **not** operations in the
@@ -166,10 +166,10 @@ limited by client IP.
 The five claim operations are the whole of the reimbursement surface that
 answers today. `GET /api/v1/claims/{claim_id}` returns an `items` array, which is
 always empty for a claim this API created: the three item endpoints and the four
-lifecycle actions are specified in
-[`../features/reimbursements/api.md`](../features/reimbursements/api.md) and are
-not built, so a claim stays in `draft` with a total of `"0.0000"`.
-
+All twelve reimbursement operations answer. `GET /api/v1/claims/{claim_id}`
+returns the claim with its `items` array, and the three item endpoints and four
+lifecycle actions are served and published, so a claim can move from `draft` to
+`paid`. See [`../features/reimbursements/api.md`](../features/reimbursements/api.md).
 ## 4. The request pipeline
 
 Every request passes through the same layers, in this order:

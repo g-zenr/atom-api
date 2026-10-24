@@ -127,11 +127,14 @@ Five rules the statements follow:
    ([`ADR-0007`](../../decisions/ADR-0007-money-representation.md)). A money
    column selected without `::text` does not decode at all, so the mistake fails
    loudly instead of publishing a number.
-5. **Timestamps written by a transition or an item write use
+5. **The stamps a transition writes, the item update and the total recompute use
    `clock_timestamp()`, not `NOW()`.** `NOW()` is the transaction's start
    instant; for a transaction that waited on the claim row lock it can predate
    the `submitted_at` it is compared against, and
    `expense_claims_timestamp_order_chk` would then reject a correct approval.
+   An item **insert** sets neither timestamp itself, so those two come from the
+   column default; the order `CHECK` is unaffected because it reads the claim's
+   stamps, not the item's.
 
 `update_owned` needs its second statement only on the failure path, and so does
 `transition_owned`. That is a deliberate trade, recorded as a limitation in §10.

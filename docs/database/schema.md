@@ -35,7 +35,7 @@ users ──1:N──► refresh_sessions
 | `projects` | `migrations/0003_projects_and_tasks.sql` | One row per project. |
 | `tasks` | `migrations/0003_projects_and_tasks.sql` | One row per task. |
 | `expense_claims` | `migrations/0004_expense_claims.sql` | One row per reimbursement claim. Read and written by the five `R2` claim endpoints (§11.1). |
-| `expense_items` | `migrations/0004_expense_claims.sql` | One row per claim line item. Read by the claim detail response; no item endpoint until `R3` (§11.2). |
+| `expense_items` | `migrations/0004_expense_claims.sql` | One row per claim line item. Read and written by the three item endpoints; the claim detail response reads it (§11.2). |
 
 Two enum types are created by `migrations/0003_projects_and_tasks.sql`:
 `task_status` and `task_priority`. `migrations/0004_expense_claims.sql` adds a
@@ -378,11 +378,13 @@ written with that in mind, and the policy in
 >
 > `migrations/0004_expense_claims.sql` creates `expense_claim_status`,
 > `expense_claims` and `expense_items` with every constraint and index named in
-> §11.1 and §11.2. Chain `R2` reads and writes `expense_claims` — list, create,
-> read, update and delete — and reads `expense_items` for the claim detail
-> response, writing none of them. There is still no item endpoint (`R3`), no
-> lifecycle action (`R4`) and no route into §11.3–§11.6, and no request path can
-> change a claim's `status`, `currency` or `total_amount`.
+> §11.1 and §11.2. Chains `R2`-`R4` serve all twelve operations: claims are
+> listed, created, read, updated and deleted; items are added, changed and
+> deleted; and the four lifecycle actions change a claim's `status` and the
+> timestamps the lifecycle `CHECK` requires. `currency` and `total_amount` are
+> still changed by nothing a client sends: the first is in no `SET` clause, the
+> second is computed from `SUM(amount)` inside the item transaction. §11.3-§11.6
+> remain proposed.
 
 Six provisional assumptions underlie this section: **A1** (a claim has one
 currency and there is no FX), **A2** (a receipt is a reference), **A3**
