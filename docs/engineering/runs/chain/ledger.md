@@ -1,7 +1,7 @@
 # Phase 2 run — ledger
 
 > **Status:** In progress (run state)
-> **Last updated:** 2026-10-24 (D0 closed; D1 in progress)
+> **Last updated:** 2026-10-24 (D0, D1 and D2.S1 committed; review rows closing)
 > **Owner:** maintained by the orchestrator
 
 This file is the only source of truth for resuming the run. It is updated after
@@ -110,7 +110,7 @@ step deliberately, and the rows are renamed only between runs.
 | ---- | ---- | ----- | ------ | ----- |
 | D0 | Close Phase 1 | **done** | `906d6dc` | Contract `C-D0` (+ A-C-D0-1..10). **Closed 2026-10-24**: route tables and `API_PREFIX` from the earlier sessions; this session completed `TasksListQuery` + the single-extractor handlers, `nest(routes::API_PREFIX, …)`, the settings **value** comparison in `atom-docs` with three unit tests, the `config/README.md` `100`→`10` fix, `tests/openapi_contract.rs` (5 tests) and `tests/list_query.rs` (4 tests), then six green gates, a review pass and a gate pass. 191 tests. |
 | D1 | Product intake | **done (checkpoint PARKED: review outstanding)** | `ec41105` | Documents only. **Committed 2026-10-24**: `project-truth.md` §18 (18.1 reimbursements `REIMB-R01`…`R10`, 18.2 job applications, 18.3 local ML, 18.4 the provisional-status note), three feature directories with five documents each, `ADR-0007`/`0008`/`0009`, the proposed schema, `docs/database/seeding.md`, the money convention, the test matrix, `Q-11` answered and `Q-13` opened for `A1`–`A6`. The only code change is the checker's `FEATURES` list, 4 → 7. Nothing in it is `Implemented` or `Verified`. Rows 10 and 11 of its checkpoint did not run — see `## Checkpoints` and `## Parked`. |
-| D2.S1 | Seeder foundation | pending | — | `atom-seed` for users, notes, projects and tasks. Guards, determinism, `--reset`, tests, docs. No new dependency. |
+| D2.S1 | Seeder foundation | **done (checkpoint rows 10-11 outstanding)** | `5688de7` (+ `b635cc7`, `77a9b79`) | `atom-seed` for users, notes, projects and tasks: guards, determinism, `--reset`, 16 integration and 6 unit tests, docs. No new dependency. **Not pushed.** The two follow-ups were written after the checkpoint record and are not yet in it: `b635cc7` serialises the seeder suite with a PostgreSQL advisory lock and adds two assertions, `77a9b79` pins the 22-operation surface and asserts the canonical error code. |
 | D2.R1 | Reimbursements — schema and types | pending | — | |
 | D2.R2 | Claim CRUD | pending | — | |
 | D2.R3 | Items and the total invariant | pending | — | |
@@ -595,6 +595,59 @@ against the contract and the tree, kept:
 | `scripts/run-phase-2-overnight.ps1` | Six-line developer-tooling change by the overnight runner | Keep; PowerShell is developer tooling under O6 |
 | `docs/engineering/runs/phase-2/` → `docs/engineering/runs/chain/` | The run folder moved and its files were not yet re-tracked | Keep; the commit records the rename |
 | `docs/engineering/runs/phase-2/*` deletions | Consequence of the rename | Keep; the files exist under `runs/chain/` |
+
+**Phase-1 run preflight, 2026-10-24 (this session, brief `RUN PHASE=1`).** Every
+check was run again; nothing below is inherited from an earlier record.
+
+| Fact | Value |
+| ---- | ----- |
+| HEAD | `77a9b79`, branch `run/day-1`, working tree **clean** (no modified, no untracked path) |
+| Remote | `origin/develop` = `f27d100`. `run/day-1` is 5 commits ahead: `f88733c`, `5688de7`, `b1798c6`, `b635cc7`, `77a9b79` |
+| CI | `gh run list --limit 4` → CI `40056376303` and Container `40056376313` **success** on `f27d100` (`develop`). No run exists for the five local commits |
+| Writers | `Get-Process cargo,rustc,python,atom-api` → no output. No writer active; no `STOP-RUN` sentinel in the root |
+| Database | `psql -h 127.0.0.1 -U atom -d atom_test -c "select 1"` → `1`, exit 0 |
+| Disk | 31.7 GB free — above the 3 GB floor |
+| `gh` | authenticated as `g-zenr`, scopes `gist`, `project`, `read:org`, `repo`, `workflow` |
+| Docker | unchanged: the local daemon is unusable, so CI's Container job remains the only image evidence (`KI-006`) |
+
+Gates measured by the orchestrator on `77a9b79`, in the prompt's order, reading
+`$LASTEXITCODE` explicitly:
+
+| # | Command | Exit | Output |
+| - | ------- | ---- | ------ |
+| 1 | `cargo fmt --all -- --check` | **0** | no diff |
+| 2 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | **0** | `Finished dev profile` |
+| 3 | `cargo test --all-targets --locked` | **0** | **213 passed, 0 failed** in 10 targets — 111 lib, 3 `atom-docs`, 6 `atom-seed`, 29 `auth_api`, 2 `docs_route`, 4 `list_query`, 12 `notes_api`, 5 `openapi_contract`, 25 `projects_tasks_api`, 16 `seeder`, 0 `shutdown` (unix-only) |
+| 4 | `cargo check --no-default-features --all-targets --locked` | **0** | `Finished dev profile` |
+| 5 | `cargo run --quiet --bin atom-docs` | **0** | `atom-docs: OK (0 warning(s))` |
+| 6 | `cargo run --quiet --bin atom-docs -- --strict` | **0** | `atom-docs: OK (0 warning(s))` |
+
+**§0.3 ruling for `PHASE=1`.** Phase 0 is closed and green (`D0`, `906d6dc`,
+six gates re-measured today). The `PHASE=1` queue block — the product intake —
+is **already complete**: `ec41105` (documents) and `f88733c` (the review
+repairs), pushed to `develop` as `f27d100`, CI and Container green. The queue
+has also moved one chain further than the phase list: `D2.S1` (the seeder) is
+committed as `5688de7` with two follow-ups (`b635cc7`, `77a9b79`) that repair
+findings found after the commit, and none of the three has been pushed.
+
+Two obligations are therefore outstanding, and they are the whole of this
+session's intake scope:
+
+| Chain | Outstanding rows | What is missing |
+| ----- | ---------------- | --------------- |
+| `D1` | checkpoint row 11 | The named `quality-gate` verdict. Row 10 was satisfied by `architect` (FAIL → fixed) and `auth-security` (PASS WITH CONDITIONS), with `code-reviewer` named as not run |
+| `D2.S1` | checkpoint rows 10 and 11 | `code-reviewer` on the seeder diff and `quality-gate` on the evidence |
+
+The prompt's rule is that a phase completes only when every chain in its block
+has a checkpoint and a commit, and §4 forbids rolling forward from a checkpoint
+that is not `ADVANCE`. This session therefore runs in this order, and records
+the deviation from a literal "run only the `PHASE=1` block" rather than
+skipping the gate:
+
+1. Close the two review rows above, with the named agents.
+2. Repair what they find, re-run the gates.
+3. Roll forward into `PHASE=2` in queue order (`D2.R1`), which §4 authorises
+   once the checkpoints are clean and 90 minutes remain.
 
 ### D0 completion, 2026-10-24 (this session) — the real results
 
