@@ -465,7 +465,7 @@ blocks Phase 1 work that does not depend on the answer.
 | Rust/Axum modular monolith | Implemented | `src/`, `Cargo.toml` |
 | Typed configuration with start-up validation | Implemented | `src/config/` |
 | Central error contract | Implemented | `src/error.rs`, `src/api/extract.rs` |
-| SQLx migrations | Implemented | `migrations/0001..0003` |
+| SQLx migrations | Implemented | `migrations/0001..0004` |
 | User registration, normalization, uniqueness | Verified | `tests/auth_api.rs` |
 | Argon2id hashing and password policy | Verified | `src/auth/password.rs`, `src/users/service.rs` |
 | Access tokens, issuer/audience validation | Verified | `src/auth/token.rs`, `tests/auth_api.rs` |
@@ -482,7 +482,7 @@ blocks Phase 1 work that does not depend on the answer.
 | Documentation tree | Verified | `docs/` - `cargo run --bin atom-docs` reports no error and no warning |
 | CI pipeline | Implemented | `.github/workflows/ci.yml` - the three quality gates, a release build, the documentation check and the OpenCode configuration check |
 | Container image | Not started | `docker-compose.yml` is provided for local PostgreSQL only |
-| Reimbursement tracking | Schema created | accepted in 18.1; migration `0004_expense_claims.sql` and `src/reimbursements/{mod,models}.rs` exist, and nothing else does: no endpoint, no service, no recorded run. Asserted by `tests/claims_schema.rs`. |
+| Reimbursement tracking | Implemented (schema only) | accepted in §18.1; migration `0004_expense_claims.sql` and `src/reimbursements/{mod,models}.rs` exist and compile, and nothing else does: no endpoint, no service, no recorded API run. The constraints are asserted by `tests/claims_schema.rs`. The feature itself is `Accepted`, not `Verified`. |
 | Job application tracking | Not started | accepted in §18.2; no code, no migration, no test exists |
 | Local machine learning | Not started | accepted in §18.3; no code, no migration, no test exists |
 | Everything else in the roadmap | Not started | by design |

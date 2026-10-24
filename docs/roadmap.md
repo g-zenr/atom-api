@@ -26,7 +26,7 @@ The current status of the implementation is in
 | Column | Meaning |
 | ------ | ------- |
 | **Feature** | The name of the capability. |
-| **Status** | `Accepted` when the requirement is recorded in [`project-truth.md`](project-truth.md) — §4 for Phase 1, §18 for Phase 2 — and `Proposed` otherwise. |
+| **Status** | `Accepted` when the requirement is recorded in [`project-truth.md`](project-truth.md) — §4 for Phase 1, §18 for Phase 2; `Implemented` when the item exists and compiles, which today only the seeder does; `Proposed` otherwise. |
 | **Phase** | The delivery phase the item belongs to. The phases are defined in §2. |
 | **Depends on** | The capabilities the item needs. |
 | **Notes** | The constraint the item must not break, and the thing that makes it non-trivial. |
@@ -44,7 +44,7 @@ Two rules follow, and they are the reason the column exists:
 | Phase | Name | Status | What it delivers |
 | ----- | ---- | ------ | ---------------- |
 | 1 | The backend foundation | `In progress` | The modular monolith, authentication, notes, projects, tasks, the versioned API, the documentation and the test suite. Accepted in [`project-truth.md`](project-truth.md) §4. |
-| 2 | The personal-workspace layer | `Accepted` | Reimbursement tracking, job application tracking and local machine learning over the owner's notes, on the Phase 1 foundation. Accepted in [`project-truth.md`](project-truth.md) §18; not started. |
+| 2 | The personal-workspace layer | `Accepted` | Reimbursement tracking, job application tracking and local machine learning over the owner's notes, on the Phase 1 foundation. Accepted in [`project-truth.md`](project-truth.md) §18; only the reimbursements schema and the seeder exist, and no feature endpoint does. |
 | 3+ | Unassigned | — | Everything in §3 whose phase is "Later — unassigned". |
 
 ### 2.1 Phase 2 — the personal-workspace layer
@@ -73,9 +73,10 @@ Phase 2 also delivers a **database seeder** — one command that produces a
 deterministic, complete development dataset. The seeder is development
 **tooling**, not product behaviour: it is not a requirement in
 [`project-truth.md`](project-truth.md), its specification is
-[`database/seeding.md`](database/seeding.md), and it is `Proposed` until the
-owner adopts it. It is listed in §3 so that a reader does not mistake it for
-product scope.
+[`database/seeding.md`](database/seeding.md), and it is `Implemented` as
+tooling without being adopted as product scope. It is listed in §3 so that a
+reader does not mistake it for product scope, and its row records that the
+chain's review rows are outstanding.
 
 Three decisions belong to Phase 2 and are recorded as accepted ADRs:
 
@@ -105,7 +106,7 @@ accepted requirement. They therefore stay "Later — unassigned" rather than
 | Reimbursement tracking | `Accepted` | 2 | Projects (optional link) | Requirements are `REIMB-R01`…`R10` in [`project-truth.md`](project-truth.md) §18.1. Single owner, one currency per claim, no FX. A receipt is a reference, not an upload ([`ADR-0009`](decisions/ADR-0009-receipt-references.md)). |
 | Job application tracking | `Accepted` | 2 | Tasks (optional link) | Requirements are `JOB-R01`…`R09` in [`project-truth.md`](project-truth.md) §18.2. It tracks applications and events; it **does not** generate text and does not scrape a job board. |
 | Local machine learning | `Accepted` | 2 | Notes, job applications | Requirements are `ML-R01`…`R09` in [`project-truth.md`](project-truth.md) §18.3. Local and pure Rust ([`ADR-0008`](decisions/ADR-0008-local-pure-rust-ml.md)); no vector-database service; no outbound AI call. |
-| Database seeder (development tooling) | `Proposed` | 2 | The Phase 1 schema and every Phase 2 table | Development-only. Not product behaviour and not in [`project-truth.md`](project-truth.md); specified in [`database/seeding.md`](database/seeding.md). A feature that adds a table without adding it to the seeder is not complete. |
+| Database seeder (development tooling) | `Implemented` | 2 | The Phase 1 schema and every Phase 2 table | Development-only. Not product behaviour and not in [`project-truth.md`](project-truth.md); specified in [`database/seeding.md`](database/seeding.md). `src/bin/atom-seed.rs` exists with 18 passing integration tests and 6 unit tests; the chain's review rows (`D2.S1` rows 10–11) are outstanding. A feature that adds a table without adding it to the seeder is not complete. |
 | n8n workflow automation | `Proposed` | Later — unassigned | Projects, tasks, notes | An external integration, and **not Phase 2** (owner decision O7). It is a separate Node service that calls the API; the API never depends on it and it never sits inside the data path of a private record. It does not violate the Rust-only rule because it is not part of the API runtime. |
 | Web frontend | `Proposed` | Later — unassigned | The Phase 1 API | A separate codebase and a separate consumer of the API. The API is already CORS-enabled against an explicit origin allowlist for it. The refresh-token and CSRF questions are `Q-02` and `Q-05`. |
 | Mobile frontend | `Proposed` | Later — unassigned | The Phase 1 API | A separate codebase. The bearer-token model suits a mobile client without the cookie and CSRF obligations a browser brings. |

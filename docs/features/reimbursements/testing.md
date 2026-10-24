@@ -56,7 +56,7 @@ two cases to the existing seeder suite:
 
 | Test | What it proves |
 | ---- | -------------- |
-| `the_seeder_dev_profile_inserts_the_documented_claim_counts` | The `dev` profile inserts exactly 25 claims and 48 items, counted both from the binary's report and in the database, restricted to the two seeded accounts. The profile counts are 1 / 25 / 50 claims and 0 / 48 / 98 items. |
+| `the_seeder_dev_profile_inserts_the_documented_claim_counts` | The `dev` profile inserts exactly 25 claims and 48 items, counted **only** in the database and restricted to the two seeded accounts. The test discards the run's output, so the committed rows are the only witness — which is the stronger one, because a report can print the right numbers while the transaction rolls back. The profile counts are 1 / 25 / 50 claims and 0 / 48 / 98 items. |
 | `a_seeded_claim_total_equals_the_sum_of_its_items` | Every seeded claim's `total_amount` equals `SUM(amount)` of its items, read back in SQL. This is the one place the total invariant is asserted before the feature owns it. |
 
 The seeded rows are data, not feature behaviour: a claim that exists in the

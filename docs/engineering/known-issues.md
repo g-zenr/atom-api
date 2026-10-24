@@ -684,7 +684,7 @@ test `a_body_limit_above_the_reader_ceiling_is_refused`.
 | `KI-017` | The configuration accepted a session prune grace shorter than the expired-token window needs | Closed | Medium |
 | `KI-018` | The configured body limit stops at an independent 4 MiB backstop | Closed | Low |
 | `KI-019` | The shutdown drain has a test that has not run on a unix host | Closed | Low |
-| `KI-020` | The seeder's database-name guard refuses the repository's own default database | Open - mitigation in `S1` | Medium |
+| `KI-020` | The seeder's database-name guard refused the repository's own default database | Closed | Medium |
 | `KI-021` | The compose volume was mounted where PostgreSQL 18 no longer keeps its data | Closed | High |
 
 ### KI-019 — The shutdown drain had a test that had not run on a unix host

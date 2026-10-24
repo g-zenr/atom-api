@@ -40,10 +40,10 @@ parenthetical is not a promotion.
 | `REIMB-R10` Owner-scoped reads and writes | Not built (schema makes a cross-owner row impossible) | `user_id` on both tables, and the composite key `expense_items_claim_fk (claim_id, user_id)`. The `404` behaviour needs the repository (R2); the database cannot produce it. |
 | `REIMB-R11` Deletion in any status | Not built (the cascades exist) | Deleting a claim deletes its items; deleting the account deletes both. The `DELETE` endpoint and its `204`/`404` answers are R2. |
 
-`project-truth.md` §17 still records the area as **Not started** with the note
-"no code, no migration, no test exists". That row predates this chain and is
-now stale. `docs/project-truth.md` is not a file this agent owns, so the
-discrepancy is reported to the orchestrator rather than edited here.
+[`project-truth.md`](../../project-truth.md) §17 records this area as **Schema
+created**, naming migration `0004_expense_claims.sql`,
+`src/reimbursements/{mod,models}.rs` and `tests/claims_schema.rs`, which is what
+this document says too.
 
 ## 2. What is still missing to reach `Verified`
 

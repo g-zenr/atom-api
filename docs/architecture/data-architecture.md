@@ -370,7 +370,7 @@ a migration that has been applied.
 
 | Migration | Creates | Requirements |
 | --------- | ------- | ------------ |
-| `0004_expense_claims.sql` | `expense_claim_status`, `expense_claims`, `expense_items`, with their constraints and indexes | `REIMB-R01`.`R10` |
+| `0004_expense_claims.sql` | `expense_claim_status`, `expense_claims`, `expense_items`, with their constraints and indexes | `REIMB-R01`…`R10` |
 | `0005_job_applications.sql` | `job_application_status`, `application_event_kind`, `companies`, `job_applications`, `application_events`, with their constraints and indexes | `JOB-R01`…`R09` |
 | `0006_embeddings.sql` | `embeddings`, with its constraints and indexes | `ML-R01`…`R09` |
 

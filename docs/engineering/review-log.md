@@ -22,8 +22,30 @@ recorded.
 
 ## The entries so far
 
-Three reviews have been performed:
+Nine reviews have been performed:
 
+- `ATOM-REVIEW-20261024-006`, the quality-gate audit of the four committed
+  chains. It measured the gates itself (225 tests, all green) and returned
+  **FAIL** overall on documentation, with `D0` and `D1` passing. It also raised
+  three process findings against the run, all now resolved.
+- `ATOM-REVIEW-20261024-005`, the code review of the same four chains. It found
+  no correctness, security or SQL defect and no weakened test, and returned
+  **FAIL** on eight documentation contradictions, all repaired.
+- `ATOM-REVIEW-20261024-004`, the security review of the seeder specification
+  recorded in [`change-log.md`](change-log.md) as `ATOM-CHANGE-20261024-004`. It
+  returned **PASS WITH CONDITIONS** with six conditions, all of which became
+  contract amendments `A-C-S1-5`…`A-C-S1-10` before the implementation started.
+- `ATOM-REVIEW-20261024-003`, the architect review of the Phase 2 intake
+  recorded in [`change-log.md`](change-log.md) as `ATOM-CHANGE-20261024-003`. It
+  returned **FAIL** with eleven blocking documentation contradictions, all fixed
+  in `f88733c`.
+- `ATOM-REVIEW-20261024-002`, the quality-gate review of the contract work
+  recorded in [`change-log.md`](change-log.md) as `ATOM-CHANGE-20261024-002`. It
+  returned **FAIL** on the first pass and **PASS** after the six blocking or
+  required items were repaired.
+- `ATOM-REVIEW-20261024-001`, the code review of the same change. It returned
+  **PASS WITH FINDINGS**: nine non-blocking findings and four documentation
+  findings, all fixed or recorded with a reason.
 - `ATOM-REVIEW-20261022-003`, the review of the final remediation pass recorded
   in [`change-log.md`](change-log.md) as `ATOM-CHANGE-20261022-007`. It returned
   **FAIL** with one blocking defect: the shutdown grace was expressed in
@@ -140,6 +162,177 @@ happened.** The first real entry is below.
   the rules this log implements.
 
 ---
+
+### ATOM-REVIEW-20261024-003 — The Phase 2 intake, reviewed by the architect
+
+**Date:** 2026-10-24 (UTC)
+**Reviewer:** the `architect` agent, read-only
+**Change reviewed:** `ATOM-CHANGE-20261024-003` (chain `D1`, contract `C-D1`),
+the documents-only intake; repaired in `f88733c`
+**Verdict:** **FAIL** — eleven blocking findings, all documentation
+contradictions.
+**Outcome:** every finding was resolved in `f88733c`, and the six gates ran
+green at that commit.
+
+#### The findings, and what was done
+
+| # | The finding | Disposition |
+| - | ----------- | ----------- |
+| 1 | The job-applications documents contradicted themselves about whether the event timeline is append-only. | Resolved in `f88733c`. |
+| 2 | The job-applications documents gave two different orderings for companies. | Resolved in `f88733c`. |
+| 3 | The reimbursements lifecycle did not say which timestamps a reopen clears. | Resolved in `f88733c`. |
+| 4 | The stage-machine arithmetic in the job-applications documents did not add up. | Resolved in `f88733c`. |
+| 5 | The planned malformed-body test claimed a `422` that no request body can produce; only a `400` is reachable. | Resolved in `f88733c`; the current text in [`../features/reimbursements/testing.md`](../features/reimbursements/testing.md) §2.5 states the `400` only. |
+| 6 | The job-applications test plan had no case for deleting a company. | Resolved in `f88733c`. |
+| 7 | The reimbursements test plan had no case for a claim `PATCH`. | Resolved in `f88733c`; the case is `a_claim_can_be_partially_updated` in the same document. |
+| 8 | The `ml.backend` value set in the documents did not match the configuration contract. | Resolved in `f88733c`. |
+| 9 | The documentation checker's coverage of the three new feature directories was incomplete. | Resolved in `f88733c`. |
+| 10 | The intake had no change-log entry. | Resolved in `f88733c`; the entry is `ATOM-CHANGE-20261024-003`. |
+| 11 | The chain ledger and the tree disagreed about the state of the intake. | Resolved in `f88733c`. |
+
+Where the review showed that the contract itself was wrong, the contract was
+amended rather than the document bent to match it; the chain's checkpoint
+records that disposition.
+
+#### Re-review evidence
+
+The chain checkpoint records the six gates green at `f88733c`: `fmt` 0, `clippy
+-D warnings` 0, `test --all-targets` 0, `check --no-default-features` 0,
+`atom-docs` 0, `atom-docs --strict` 0. No test can prove that a documentation
+contradiction is gone; the evidence is the checker's exit code on the repaired
+tree and the repaired documents themselves. No reviewer re-read them (see
+Limitations).
+
+#### Limitations
+
+The reviewer was the `architect`, not the read-only `code-reviewer`, and
+`quality-gate` did not run on this chain. The review covered the intake
+documents; the chain's only code change was the checker's feature list. No
+second architect pass is recorded, so the repairs rest on the green gates and on
+the checkpoint, not on a re-review by the original reviewer.
+
+---
+
+### ATOM-REVIEW-20261024-004 — The seeder specification
+
+**Date:** 2026-10-24 (UTC)
+**Reviewer:** the `auth-security` agent, read-only
+**Change reviewed:** the seeder specification [`../database/seeding.md`](../database/seeding.md)
+and contract `C-S1` (chain `D2.S1`, before the implementation fan-out); recorded
+under `ATOM-CHANGE-20261024-004`
+**Verdict:** **PASS WITH CONDITIONS** — six conditions.
+**Outcome:** all six became contract amendments `A-C-S1-5`…`A-C-S1-10`, applied
+before `src/bin/atom-seed.rs` was written.
+
+#### The conditions, and what each became
+
+| # | Condition | Amendment | What it requires |
+| - | --------- | --------- | ---------------- |
+| 1 | `G1` was a substring test, so `prod` — which the loader maps to production — passed | `A-C-S1-5` | An allow-list: unset is allowed, and after the loader's own `trim().to_ascii_lowercase()` only `development`, `dev` and `local` are allowed. Every other value is refused. |
+| 2 | `G2` was a substring test, so `latest` and `production_test` passed while `atom_demo` was refused | `A-C-S1-6` | A whole-name allow-list (`atom_dev`, `atom_test`, `atom_local`, `atom_demo`, plus a `_dev` / `_test` / `_local` suffix), read through `PgConnectOptions::from_str(...).get_database()`, with `current_database()` checked after connecting and the name rendered with `{:?}`. |
+| 3 | `G3` ran only inside the transaction, after `sqlx::migrate!` had already applied pending DDL | `A-C-S1-7` | Two phases: a `G3` preflight before the migration step, then the authoritative `G3` count again inside the reset transaction, so a refused run writes nothing and needs no DDL rights. |
+| 4 | Redaction covered `sqlx::Error::Database` only; `Configuration` and `Io` can carry the connection string | `A-C-S1-8` | Every `sqlx::Error` variant and every `MigrateError` is redacted; `Database` prints `kind()` and `code()` only, `Io` a fixed sentence plus its inner message, the rest a fixed sentence. No `unwrap`/`expect` on a value derived from `DATABASE_URL`. |
+| 5 | The specification promised both "only the seeded rows" and that a developer's own account survives, and the predicate is `user_id` | `A-C-S1-9` | `--reset` deletes **every** row owned by the two seeded accounts, including rows written through the API while logged in as them; `--help` and the pre-reset output say so. |
+| 6 | `V4` asserted lower bounds, so a child table omitted from the delete list could silently re-attach to a re-inserted parent | `A-C-S1-10` | `V4` asserts the **exact** derived counts per profile, and the delete list must cover every user table that exists. |
+
+#### What the review could not verify
+
+It reviewed the specification, not an implementation: `src/bin/atom-seed.rs` did
+not exist when the review ran. Whether the binary follows the six amendments is
+therefore outside this record; the chain's checkpoint row 10 records that no
+reviewer has read the finished binary.
+
+#### Re-review evidence
+
+No re-review is recorded. The conditions were applied as contract amendments
+before the implementation started, which is where their effect is evidenced:
+`A-C-S1-5`…`A-C-S1-10` in the chain ledger's contract block, and the tests the
+amendments name in [`../../tests/seeder.rs`](../../tests/seeder.rs).
+
+---
+
+### ATOM-REVIEW-20261024-005 - The four committed chains, read end to end
+
+**Date:** 2026-10-24 (UTC)
+**Reviewer:** the `code-reviewer` agent, read-only
+**Change reviewed:** `775dc57..908166b` — chains `D0`, `D1`, `D2.S1`, `D2.R1`
+**Verdict:** **FAIL on documentation.** No correctness, security or SQL defect was
+found in `atom-seed`, `0004`, `src/reimbursements/` or the D0 regression surface,
+and no test had been weakened.
+**Outcome after the follow-up:** every blocking finding repaired; the code was
+not changed by the repair.
+
+#### What the reviewer confirmed was correct
+
+`0004` matches `docs/database/schema.md` §11.1/§11.2 column for column and
+constraint for constraint, including `expense_claims_id_user_id_unique_idx`,
+which is the index the composite key needs. `ON DELETE` choices match the
+accepted requirements. Money is a `String` everywhere with no `f32`/`f64` and no
+arithmetic in Rust; the total is set by one `UPDATE ... COALESCE(SUM(...))`. The
+seeder's `G1`–`G4` implement `A-C-S1-5`–`A-C-S1-10`, the id derivation is
+reimplemented independently in the tests, `--reset` is FK-safe and id-scoped, and
+the profile arithmetic was checked by hand. `tests/claims_schema.rs` asserts
+SQLSTATE **and** the constraint name, each rejection paired with an accepted
+control. The D0 surface is unchanged and its two-way contract test cannot agree
+with itself by being stale.
+
+#### The blocking findings, and their disposition
+
+| # | Finding | Disposition |
+| - | ------- | ----------- |
+| 1 | `seeding.md` said the binary, its `[[bin]]`, its tests and `0004` did not exist | Status to `Implemented`; the denial block replaced with what is true |
+| 2 | `seeding.md` still described a setup gap that `KI-020` had closed | Replaced with the closed state; the two-option table deleted |
+| 3 | `database/README.md` said no Phase 2 table had a migration or a model | Table extended; paragraph corrected to "two of six" |
+| 4 | `data-architecture.md`'s banner denied the migration it lists | Banner corrected |
+| 5 | `reimbursements/status.md` called a correct §17 row stale | Paragraph replaced |
+| 6 | `implementation-status.md`: three migrations, 191 tests, no seeder row | Corrected to four, 225, with seeder and schema rows added |
+| 7 | `seeding.md` §7.3 attributed to `V3` checks it does not run | Rewritten to the one query it runs |
+| 8 | `seeding.md` claimed a test proves the `G3` preflight ordering | Corrected to the residual gap; the test cannot distinguish it |
+
+#### What the review could not verify
+
+It is read-only, so it ran no gate; the recorded exit codes were reconciled
+arithmetically against the test functions present, not independently confirmed.
+`sqlx` decoding of `CHAR(3)` into `String` is untested because R1 ships no
+repository. D0's own hunks are outside the review range; it read the resulting
+files.
+
+---
+
+### ATOM-REVIEW-20261024-006 - The evidence behind the four chains
+
+**Date:** 2026-10-24 (UTC)
+**Reviewer:** the `quality-gate` agent, read-only
+**Change reviewed:** `775dc57..908166b`
+**Verdict:** **FAIL** overall - `D0` and `D1` `PASS`; `D2.S1` and `D2.R1` `FAIL`
+on documentation, not on code.
+**Outcome:** the documentation repairs above were committed and the gates re-run.
+
+#### What the gate measured, and what it could not
+
+It executed `fmt` 0, `clippy` 0, `test --all-targets` 0 (**225**), and
+`check --no-default-features` 0, all matching the ledger. It could **not** run
+`cargo run --bin atom-docs` or `--strict`, because its shell allow-list denies
+`cargo run`; those two gates are therefore recorded as **not run by the gate**
+rather than as passes, and were run by the orchestrator instead.
+
+It could not reproduce any break-and-restore proof either, because the role
+denies writes. It said so plainly instead of accepting the claims, and
+corroborated what it could statically: exactly one `"/api/v1"` literal, 22
+operations, the `100`/`10` drift covered by an executed unit test, and the
+constraint names asserted by passing tests.
+
+#### The process findings it raised against the run itself
+
+| Finding | Disposition |
+| ------- | ----------- |
+| The run rolled forward into `D2.R1` while `D1` rows 10-11 were `Fail`, contrary to the ledger's own instruction | Recorded, not hidden: the checkpoints state it |
+| `D1` row 10 said `Pass with the reviewer named` for a criterion naming `code-reviewer`, which did not run | Row changed to `Fail`, with the two reviewers that did run named |
+| The ledger's `Resume` cited an `ATOM-REVIEW-20261024-005` entry that did not exist | This entry and `-006` created |
+
+Its own summary of the smallest path to `PASS` was three items - commit coherent
+documentation, add the missing review entries, re-run and record the gates - and
+all three are done.
 
 ### ATOM-REVIEW-20261024-001 - The route table, the document and the setting values
 

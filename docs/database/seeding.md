@@ -1,6 +1,6 @@
 # The database seeder
 
-> **Status:** Proposed (development tooling — the `atom-seed` binary does not exist yet)
+> **Status:** Implemented
 > **Last updated:** 2026-10-24
 > **Owner:** maintained by the `database` agent
 
@@ -12,15 +12,22 @@ This document is the specification the seeder is built against. It describes
 the command, the profiles, the safety guards, determinism, idempotency, the
 reset, the post-insert verification, the credentials and the tests.
 
-**Nothing in this document is `Implemented` or `Verified`.** No
-`[[bin]] name = "atom-seed"` stanza exists in [`../../Cargo.toml`](../../Cargo.toml),
-`src/bin/` holds only `atom-docs.rs`, and `tests/` holds no `seeder.rs`.
+**The binary, the tests and this specification all exist.** `[[bin]] name =
+"atom-seed"` is declared in [`../../Cargo.toml`](../../Cargo.toml), the source
+is [`../../src/bin/atom-seed.rs`](../../src/bin/atom-seed.rs), and
+[`../../tests/seeder.rs`](../../tests/seeder.rs) drives it with 18 tests. The
+status is `Implemented`, not `Verified`: rows 10 and 11 of the `D2.S1`
+checkpoint — `code-reviewer` on the seeder diff and `quality-gate` on the
+evidence — have not been closed (the table in
+[`../engineering/runs/chain/ledger.md`](../engineering/runs/chain/ledger.md)
+names them).
 
 The seeder is **development tooling, not product behaviour**. It is not a
 requirement in [`../project-truth.md`](../project-truth.md), and
 [`../roadmap.md`](../roadmap.md) lists it as `Proposed` until the owner adopts
-it. `Proposed` describes adoption, not the state of the work: the binary is
-not built, and this specification is what the `S1` chain implements.
+it. `Proposed` describes adoption of the tool, not the state of the work: the
+binary is built and covered by its own tests, and this specification is what
+the chains implemented.
 
 > **The seeder is development-only.** It writes credentials that are published
 > in this document, and `--reset` deletes **every row owned by the two seeded
@@ -46,7 +53,7 @@ binary's; without it, `cargo run` consumes `--profile` itself.
 | `--allow-non-empty` | Admit a database that holds accounts outside the seeded set. See §3.3. | off |
 | `--help` | Print usage and exit `0`. | — |
 
-- The parser is hand-written over `std::env::args`, because the contract
+- The parser is hand-written over `std::env::args_os`, because the contract
   forbids a new dependency (`C-S1` in
   [`../engineering/runs/chain/ledger.md`](../engineering/runs/chain/ledger.md)).
   There is no `clap`.
@@ -134,13 +141,16 @@ not per account.
   inherits the owner of its project; an item inherits the owner of its claim;
   an event inherits the owner of its application.
 - **Which chain seeds what.** The `S1` chain seeds the four Phase 1 entities:
-  `users`, `notes`, `projects`, `tasks`. The claims and applications counts are
-  the contract that the later chains must meet when they add those tables:
-  `S2` (claims, with `R6`), `S3` (companies and applications), `S4`
-  (embeddings, behind `--with-embeddings`), `S5` (the CI smoke run).
-- **`S1` must not name a table that does not exist.** `migrations/` ends at
-  `0003`; an `INSERT` into `expense_claims` would fail to prepare. The seeder
-  grows by one entity per chain, in the same change that adds the table.
+  `users`, `notes`, `projects`, `tasks`; `R1` extends the seeder with
+  `expense_claims` and `expense_items`. The applications counts are the
+  contract that the later chains must meet when they add those tables: `S3`
+  (companies and applications), `S4` (embeddings, behind `--with-embeddings`),
+  `S5` (the CI smoke run).
+- **The seeder must not name a table that does not exist.** `migrations/` ends
+  at `0004_expense_claims.sql`; `companies`, `job_applications`,
+  `application_events` and `embeddings` are not there yet, so an `INSERT` into
+  one of them would fail to prepare. The seeder grows by one entity per chain,
+  in the same change that adds the table.
 - **Coverage.** `dev` and `demo` contain enough claims to cover all five claim
   statuses and enough applications to cover all seven stages. `minimal` seeds
   one of each, so full coverage there is arithmetically impossible; its single
@@ -271,9 +281,10 @@ what that means for the credentials.
 
 **The development setup.** `docker-compose.yml` creates `atom`
 (`POSTGRES_DB: atom`), which is **not** on the allow-list; the intended
-development name is `atom_dev`, which is. A fresh volume gets it from the init
-script once follow-up A below lands. On an existing volume, where the init
-script has already run, create it once:
+development name is `atom_dev`, which is.
+`scripts/create-test-database.sh` creates `atom_dev` next to `atom_test` on a
+fresh volume, and `.env.example` points `DATABASE_URL` at `atom_dev`. On an
+existing volume, where the init script has already run, create it once:
 
 ```bash
 docker compose exec postgres createdb -U atom atom_dev
@@ -290,22 +301,10 @@ cargo run --bin atom-seed -- --profile dev --reset
 `createdb` is no longer a way around the guard — `atom_dev` is on the list. It
 is only how the database is created when the init script did not run.
 
-**Remaining setup gap.** A-C-S1-6 deliberately excludes `atom`, so the default
-`docker-compose.yml` / `.env.example` pairing still fails `G2`. One of two
-changes closes it, and neither may be made unilaterally by `S1`:
-
-| Option | What changes | Exact locations |
-| ------ | ------------ | --------------- |
-| A. The compose init creates `atom_dev` next to `atom_test`. | A development default only; no rule changes. | `scripts/create-test-database.sh`: add a second `psql … SELECT 'CREATE DATABASE atom_dev OWNER …' \gexec` block after line 18, in the same form as lines 15–18, and widen the header comment. The script is mounted by `docker-compose.yml` line 32, which already exists and needs no edit. `.env.example` line 66 (`DATABASE_URL=postgres://atom:atom@127.0.0.1:5432/atom`) becomes `.../atom_dev`; `docker-compose.yml` line 24 (`POSTGRES_DB: atom`) is left as it is. |
-| B. Add `atom` to the allow-list. | A contract change, recorded before `S1` starts. | §3.2 (the rule), §9 (the guard test) and §10 (the worked example) of this document; and the allow-list in `A-C-S1-6` in [`../engineering/runs/chain/ledger.md`](../engineering/runs/chain/ledger.md). This is a new amendment; `S1` does not make it. |
-
-The line numbers above are the ones in the tree at the time of writing; the
-section and row references are the stable part. Option A changes a development
-default and no contract; option B changes the contract and is the owner's call.
-Option A also makes `atom_dev` the API's development database, because the API
-and the seeder read the same `DATABASE_URL` — that is the intended pairing. The
-init script runs only when the data directory is first created, so an existing
-volume still needs the `createdb` above.
+The gap was closed by making the setup provide a name the guard accepts —
+`.env.example` (line 67) points `DATABASE_URL` at `atom_dev` and
+`scripts/create-test-database.sh` creates it — not by weakening `A-C-S1-6`,
+which still excludes `atom`; `KI-020` is closed on that basis.
 
 ### 3.3 `G3` — the foreign-account guard
 
@@ -465,7 +464,8 @@ clock:
   leaves it `NULL`.
 - A claim's `submitted_at` is `created_at + 1 day`; `decided_at` is
   `created_at + 2 days`; `paid_at` is `created_at + 3 days`. Each is set
-  exactly when the status requires it (§7.3), so the row-local CHECK holds.
+  exactly when the status requires it, so
+  `expense_claims_lifecycle_timestamps_chk` holds.
 - An item's `incurred_on` is `(claim.created_at − 3 days)::date`.
 - A non-`wishlist` application's `applied_on` is `(created_at − 1 day)::date`;
   a `wishlist` application has no `applied_on`.
@@ -512,11 +512,14 @@ ON CONFLICT (id) DO NOTHING;
 
   ```text
   atom-seed: profile dev
-    users            inserted 2    skipped 0
-    notes            inserted 200  skipped 0
-    projects         inserted 8    skipped 0
-    tasks            inserted 60   skipped 0
-  atom-seed: verification passed; 270 rows inserted, 0 skipped
+    users      inserted 2     skipped 0
+    notes      inserted 200   skipped 0
+    projects   inserted 8     skipped 0
+    tasks      inserted 60    skipped 0
+    claims     inserted 25    skipped 0
+    items      inserted 48    skipped 0
+  atom-seed: verification passed (6 checks); 343 rows inserted, 0 skipped
+  atom-seed: accounts owner@atom.local and other@atom.local
   ```
 
 - A second run on the same database reports `inserted 0` and every row as
@@ -549,16 +552,17 @@ atom-seed: reset: deleting every row owned by the two seeded accounts
 API while logged in as them
 ```
 
-The delete order is the foreign-key order. `S1` executes only the rows for
-tables that exist in `0001`–`0003`; the others are the contract for the chain
-that adds the table.
+The delete order is the foreign-key order. The run executes a table's
+statement only when the table exists: today every row below is executed except
+the ones for `companies`, `job_applications`, `application_events` and
+`embeddings`, which are the contract for the chain that adds the table.
 
 | # | Table | Predicate | Exists today |
 | - | ----- | --------- | ------------ |
 | 1 | `embeddings` | `user_id = ANY($1)` | no — `0006` |
 | 2 | `application_events` | `user_id = ANY($1)` | no — `0005` |
-| 3 | `expense_items` | `user_id = ANY($1)` | no — `0004` |
-| 4 | `expense_claims` | `user_id = ANY($1)` | no — `0004` |
+| 3 | `expense_items` | `user_id = ANY($1)` | yes — `0004` |
+| 4 | `expense_claims` | `user_id = ANY($1)` | yes — `0004` |
 | 5 | `job_applications` | `user_id = ANY($1)` | no — `0005` |
 | 6 | `companies` | `user_id = ANY($1)` | no — `0005` |
 | 7 | `refresh_sessions` | `user_id = ANY($1)` | yes |
@@ -627,9 +631,10 @@ For every seeded claim, in SQL:
 ```sql
 SELECT COUNT(*)
 FROM expense_claims c
-WHERE c.user_id = ANY($1::uuid[])
+WHERE c.id = ANY($1::uuid[])
   AND c.total_amount <> COALESCE(
-      (SELECT SUM(i.amount) FROM expense_items i WHERE i.claim_id = c.id),
+      (SELECT SUM(i.amount) FROM expense_items i
+       WHERE i.claim_id = c.id AND i.user_id = c.user_id),
       0
   );
 ```
@@ -638,8 +643,9 @@ The expected count is `0`. A claim with no items must carry `0.0000`
 (`REIMB-R01`, `REIMB-R03`), which the `COALESCE` covers.
 
 The seeder never adds money in Rust. After the items are inserted, one
-statement sets each total from `SUM(amount)` grouped by claim, restricted to the
-claims this run inserted, and `V1` re-reads every seeded claim. This keeps every
+statement sets each total from the sum of that claim's items — a correlated
+`UPDATE ... SET total_amount = (SELECT SUM(...))` — restricted to the claims
+this run inserted, and `V1` re-reads every seeded claim. This keeps every
 money value exact and needs neither a decimal crate nor a `f64`. A skipped claim
 keeps its stored total: if it no longer matches its items, `V1` fails and
 `--reset` is the remedy, which is what keeps the "never updates an existing row"
@@ -659,25 +665,36 @@ rule in §5 true.
 Every expected count is `0`. Checks for a table that does not exist yet are
 added by the chain that creates it.
 
-### 7.3 `V3` — status and timestamps agree
+### 7.3 `V3` — task completion agrees with the status
 
-- Every seeded task satisfies `(status = 'done') = (completed_at IS NOT NULL)`.
-  The `0003` CHECK already makes the opposite unrepresentable; `V3` proves the
-  seeder's own distribution obeys it, and it is what the `G8` test asserts.
-- Every seeded claim satisfies the lifecycle rule of §11.1 of
-  [`schema.md`](schema.md): `draft` has three
-  `NULL` timestamps, `submitted` has `submitted_at`, `approved` and `rejected`
-  add `decided_at`, `paid` adds `paid_at`.
-- A `done` task exists, an `open` task exists and an `in_progress` task exists
-  in every profile with at least three tasks.
-- For `dev` and `demo`, every claim status and every application stage appears
-  at least once. `minimal` is exempt for the reason in §2.
+`V3` runs exactly one query, over the tasks this run seeded:
+
+```sql
+SELECT COUNT(*) FROM tasks
+WHERE id = ANY($1) AND ((status = 'done') <> (completed_at IS NOT NULL));
+```
+
+The expected count is `0`. The `0003` CHECK
+(`tasks_completion_consistency_chk`) already makes the opposite
+unrepresentable; `V3` proves the seeder's own distribution obeys it, and
+`every_seeded_task_has_a_consistent_completion_timestamp` in
+[`../../tests/seeder.rs`](../../tests/seeder.rs) asserts the same rule (`G8`).
+
+`V3` checks nothing else. It does not read `expense_claims`, and it does not
+assert that any status appears at all. The claim lifecycle is enforced when
+each row is written by `expense_claims_lifecycle_timestamps_chk` in
+[`../../migrations/0004_expense_claims.sql`](../../migrations/0004_expense_claims.sql),
+and `a_seeded_claim_total_equals_the_sum_of_its_items` in
+[`../../tests/seeder.rs`](../../tests/seeder.rs) asserts that the constraint is
+present on the table and that the `dev` profile stores all five statuses, so
+every arm of the constraint has data behind it.
 
 ### 7.4 `V4` — the counts match the profile, including the derived ones
 
 Every entity the profile fixes is counted **restricted to the seeded set**:
-`users` by id, `notes`, `projects`, `tasks` via their projects, and later the
-other owned tables by `user_id`. The counts must equal the §2 table.
+`users` by id, `notes`, `projects`, `tasks` via their projects, and
+`expense_claims` and `expense_items` by `user_id`; the remaining owned tables
+join this list as their chains add them. The counts must equal the §2 table.
 
 Derived entities are asserted **exactly**, from the same formula that inserts
 them (A-C-S1-10), never as a lower bound:
@@ -708,7 +725,7 @@ the row may be older than the binary, and this is the check that notices when
 the published credential no longer logs in. A developer who changed the seeded
 password through the API sees `V5` fail and uses `--reset`.
 
-### 7.6 `V6` — the delete list covers every user table
+### 7.6 `V6` — every user table is named in the seeder's list
 
 The seeder holds a `const` list of the user tables it handles: the tables it
 inserts into and the tables `--reset` deletes from, including
@@ -728,12 +745,21 @@ the run and names the table (A-C-S1-10). A `to_regclass` loop over the list is
 an equivalent implementation; the comparison above is the specified one because
 it also catches a table the list has never heard of.
 
-**Why this is a definition-of-done check.** A chain that adds a table and does
-not add it to the list, the inserts and the delete order is incomplete, even if
-every other test passes: the table's rows are not seeded, and `--reset` leaves
-them behind. With deterministic ids the stale children re-attach to the
-re-inserted parents (§7.4), so the defect is silent until someone reads the
-data. This check turns that silence into a failed run.
+**What `V6` guarantees, exactly.** One direction only: every base table in
+`public` must be named by `SEEDED_TABLES`. It is a completeness check on the
+constant, not on the run, and it does not compare the constant with the
+`--reset` statement list or with the insert list. A table added to the constant
+and nowhere else therefore still passes: the run would neither insert its rows
+nor delete them, and `V6` would say nothing. That is a residual gap in the
+check, recorded here rather than papered over; keeping the two lists in step is
+a review obligation, not something the seeder verifies.
+
+**Why the check still matters.** A chain that adds a table and forgets the
+constant outright fails the run, which is the common omission. With
+deterministic ids a stale child on a table missing from the delete order
+re-attaches to the re-inserted parent (§7.4), so the defect is silent until
+someone reads the data; `V6` turns the "not named at all" case into a failed
+run, and the "named but not deleted" case is caught by nothing.
 
 ### 7.7 Failure
 
@@ -815,7 +841,7 @@ check, and it belongs to the hardening chain, not to the seeder.
 
 ## 9. Tests
 
-`tests/seeder.rs` is new. Every test drives the real binary through
+`tests/seeder.rs` exists. Every test drives the real binary through
 `env!("CARGO_BIN_EXE_atom-seed")`, because the guards, the argument parser and
 the output are properties of the process, not of a library function.
 
@@ -825,7 +851,7 @@ the output are properties of the process, not of a library function.
 | `the_seeder_refuses_a_database_whose_name_is_not_a_development_database` | `G2` (A-C-S1-6): a name that is neither `atom_dev`/`atom_test`/`atom_local`/`atom_demo` nor ends in `_dev`/`_test`/`_local` exits non-zero, and the refusal renders it as a Rust string literal. The test points at a name that does not exist, proving the name check runs before the connection. |
 | `the_seeder_refuses_a_database_that_holds_foreign_rows` | `G3`: one account outside the seeded set refuses the run. |
 | `an_override_flag_admits_a_database_that_holds_foreign_rows` | `G3`'s flag: the run succeeds and the foreign account still exists afterwards. |
-| `the_dev_profile_inserts_the_documented_counts` | `G9`: the counts of §2, measured in the database. |
+| `the_dev_profile_inserts_the_documented_counts` | `G9`: the `users`, `notes`, `projects` and `tasks` counts of §2, measured in the database, and that each seeded account owns rows of its own. |
 | `a_second_run_skips_every_existing_row` | `G6`: `ON CONFLICT (id) DO NOTHING`, reported as skipped. |
 | `a_reset_run_reproduces_the_same_ids_and_timestamps` | `G5`: two `--reset` runs produce equal ids, `created_at` and `updated_at`. |
 | `the_seeder_never_prints_the_connection_string_or_a_hash` | `G4`: stdout and stderr contain neither the URL value, the password nor the hash read back from `users`. |
@@ -833,6 +859,12 @@ the output are properties of the process, not of a library function.
 | `a_constraint_violation_is_reported_by_sqlstate_and_constraint_only` | `G4` (A-C-S1-8): a deterministic unique violation prints the SQLSTATE `23505` and the `UniqueViolation` kind, and neither the row value nor the driver `DETAIL`. "Constraint only" in the name means the violation kind, not the constraint's name or its row. The test inserts a foreign account with the email `owner@atom.local` under a different id, runs with `--allow-non-empty`, and expects the `users_email_unique_idx` violation when the seeded row is inserted. |
 | `seeded_tasks_belong_to_projects_of_the_same_owner` | `G7`: the task/project join of §7.2. |
 | `every_seeded_task_has_a_consistent_completion_timestamp` | `G8`: the completion rule of §7.3. |
+| `the_help_text_states_the_blast_radius_without_a_url_or_a_hash` | A-C-S1-9 and `G4`: `--help` succeeds with no `DATABASE_URL` and no `APP_ENV`, documents all four flags, states what `--reset` deletes, and prints no URL, password or hash. |
+| `an_unknown_flag_is_a_usage_error_that_names_the_flag` | §1: an unknown flag exits non-zero with `atom-seed: usage error:`, names the flag, and is not reported as a guard refusal. |
+| `the_seeded_accounts_are_the_published_development_credentials` | §8 and `V5`: exactly the two documented emails, display names and `is_active`; the published password verifies against each stored PHC hash. |
+| `a_reset_deletes_rows_owned_by_the_seeded_accounts` | A-C-S1-9: a note written for the seeded owner after the first run is gone after `--reset`, and the documented `minimal` counts are intact. |
+| `the_seeder_dev_profile_inserts_the_documented_claim_counts` | §2 and §7.4 for claims: `dev` inserts 25 claims and 48 items, on the derived ids, with claim 0 the only itemless draft. |
+| `a_seeded_claim_total_equals_the_sum_of_its_items` | `V1` and §7.3: every seeded claim's `total_amount` equals the sum of its items, compared by PostgreSQL in `numeric`; all 25 are present, `expense_claims_lifecycle_timestamps_chk` exists, and `dev` stores all five statuses. |
 
 Unit tests in `src/bin/atom-seed.rs` cover the three pieces that are pure
 functions:
@@ -871,8 +903,12 @@ functions:
   `ON CONFLICT (id) DO NOTHING` then reports the rows as skipped.
 - The `G3` test creates exactly one foreign account of its own before the run,
   rather than depending on whatever the shared database happens to contain. It
-  also asserts that `_sqlx_migrations` is unchanged by the refusal, which is
-  what proves the preflight runs before the migration step (A-C-S1-7).
+  also asserts that `_sqlx_migrations` is unchanged by the refusal. That
+  assertion does **not** prove the preflight runs before the migration step:
+  the test applies the migrations with `migrated_pool()` before it reads
+  `_sqlx_migrations`, so the before-and-after comparison is identical by
+  construction. The ordering is implemented in the binary (A-C-S1-7); no test
+  distinguishes it, and that is a residual gap rather than a proven property.
 - The two `G4` tests (`a_connect_failure_prints_no_part_of_the_url` and
   `a_constraint_violation_is_reported_by_sqlstate_and_constraint_only`) assert
   the absence of substrings and the presence of the SQLSTATE; they parse no
@@ -937,7 +973,7 @@ implements the amended rule.
 | `G8` | task completion consistency | §7.3 |
 | `G9` (A-C-S1-10) | counts match the profile, derived ones exactly | §7.4 |
 | A-C-S1-9 | `--reset` blast radius | §1 and §6 |
-| A-C-S1-10 | delete-list completeness | §7.6 |
+| A-C-S1-10 | every user table is in the seeded-table list (§7.6 states the residual gap) | §7.6 |
 
 The plan's profiles and the credential policy are in
 [`../engineering/runs/chain/plan.md`](../engineering/runs/chain/plan.md) §8.
@@ -967,9 +1003,10 @@ implementable, and it does not change the contract.
   the database. It takes no advisory lock. Two concurrent runs are not
   supported.
 - **The schema.** The seeder only writes tables that exist. Adding a table
-  without extending the seeder is an incomplete chain, and `V6` (§7.6) fails
-  the run until the table is in the list, the inserts and the delete order;
-  [`../roadmap.md`](../roadmap.md) says the same.
+  without extending the seeder is an incomplete chain. `V6` (§7.6) fails the
+  run while the table is missing from `SEEDED_TABLES`; it does not check the
+  inserts or the delete order, so a table named in the constant and nowhere
+  else still passes. [`../roadmap.md`](../roadmap.md) states the rule.
 
 ---
 

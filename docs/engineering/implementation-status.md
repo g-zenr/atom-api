@@ -4,8 +4,8 @@
 > **Last updated:** 2026-10-24
 > **Owner:** maintained by the `docs` agent
 
-The current verified state of every part of ATOM Phase 1: what exists, what
-status it carries, and the evidence behind that status. The requirements live
+The current verified state of every part of ATOM: what exists, what status it
+carries, and the evidence behind that status. The requirements live
 in [`../project-truth.md`](../project-truth.md); this document compares them
 with the repository.
 
@@ -41,7 +41,7 @@ A feature is never `Verified` because the code exists or compiles.
 | Client-facing message catalogue | `Implemented` | [`../../config/messages.toml`](../../config/messages.toml), [`../../src/config/messages.rs`](../../src/config/messages.rs) — every string that reaches a client through the error envelope. The stable codes live in the `code` module in [`../../src/error.rs`](../../src/error.rs); the messages for a database failure and for an unexpected failure stay in the error type. | 2026-10-22 |
 | Shared text validators | `Verified` | [`../../src/helpers/validation.rs`](../../src/helpers/validation.rs) — 4 unit tests. `required_text` trims and rejects an empty value; `bounded_text` keeps the value verbatim. | 2026-10-22 |
 | Central error contract with a stable error code | `Verified` | [`../../src/error.rs`](../../src/error.rs) — 5 unit tests | 2026-10-22 |
-| SQLx migrations, append-only | `Implemented` | [`../../migrations/`](../../migrations/) — three migrations, applied by the harness and at start-up | 2026-10-22 |
+| SQLx migrations, append-only | `Implemented` | [`../../migrations/`](../../migrations/) — four migrations (`0001`–`0004`), applied by the harness and at start-up | 2026-10-22 |
 | Structured logging with request correlation | `Implemented` | [`../../src/telemetry.rs`](../../src/telemetry.rs), [`../../src/api/mod.rs`](../../src/api/mod.rs) | 2026-10-22 |
 | Liveness and readiness endpoints | `Verified` | [`../../src/health.rs`](../../src/health.rs), exercised by an operator run | 2026-10-21 |
 | Versioned REST API under `/api/v1` | `Verified` | [`../../src/api/routes.rs`](../../src/api/routes.rs), exercised by the integration suite | 2026-10-22 |
@@ -62,30 +62,34 @@ A feature is never `Verified` because the code exists or compiles.
 | Pagination convention | `Verified` | [`../../src/pagination.rs`](../../src/pagination.rs) — 5 unit tests; the pagination case in [`../../tests/notes_api.rs`](../../tests/notes_api.rs) | 2026-10-22 |
 | Contract tests against the OpenAPI document | `Verified` | [`../../tests/openapi_contract.rs`](../../tests/openapi_contract.rs) - `the_route_table_and_the_document_describe_the_same_operations` (the tables and the document agree in both directions), `every_route_in_the_table_is_served_by_the_router`, `the_version_prefix_is_declared_once`, `each_list_endpoint_publishes_its_filter_and_pagination_parameters_once` and `each_list_handler_extracts_the_query_string_once`. What is asserted is the operation set, the methods, the version prefix and the list parameter sets; response bodies and schemas are not snapshotted. | 2026-10-24 |
 | The disposable test database guard | `Verified` | [`../../tests/common/mod.rs`](../../tests/common/mod.rs) refuses to start unless the database name contains `test` | 2026-10-22 |
+| Development database seeder (`atom-seed`) | `Verified` | [`../../src/bin/atom-seed.rs`](../../src/bin/atom-seed.rs) and [`../../tests/seeder.rs`](../../tests/seeder.rs) — 18 integration tests and 6 unit tests in the binary, passing in the 225-test run recorded under `ATOM-CHANGE-20261024-005`. Development tooling, not product behaviour: the chain's review rows (`D2.S1` rows 10–11) are outstanding. | 2026-10-24 |
+| Reimbursements schema and row types (no endpoint) | `Implemented` | [`../../migrations/0004_expense_claims.sql`](../../migrations/0004_expense_claims.sql), [`../../src/reimbursements/`](../../src/reimbursements/) (`mod.rs` and `models.rs` only) — 10 cases in [`../../tests/claims_schema.rs`](../../tests/claims_schema.rs) prove the constraints they name, but there is no handler, service, repository, DTO or route, so `/api/v1/openapi.json` is unchanged. The **feature** stays `Accepted` and is not `Verified`: no request can exercise it. | 2026-10-24 |
 | CI pipeline | `Implemented` | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) - formatting, linting, the test suite, a release build, the documentation check and the OpenCode configuration check. | 2026-10-22 |
 | Container image | `Implemented` | [`../../Dockerfile`](../../Dockerfile) builds a two-stage image: pinned base images, `--locked`, no toolchain in the runtime stage, unprivileged UID 10001, no secret inside. [`../../.github/workflows/container.yml`](../../.github/workflows/container.yml) builds and verifies it on every relevant change. **Verified** in run [`40011694239`](https://github.com/g-zenr/atom-api/actions/runs/40011694239): `Config.User=10001:10001`, `uid=10001(atom)`, no `cargo` or `rustc` in the runtime stage, no missing shared library, and the binary exits 1 with `required environment variable DATABASE_URL is missing or empty`, which is the evidence that nothing was baked in. | 2026-10-24 |
 | Compile-time SQLx verification | `Proposed` | Queries are checked at run time. The workflow is documented, not enabled. | — |
 | Edge rate limiting | `Proposed` | The requirement in [`../project-truth.md`](../project-truth.md) §9.10 applies to a production deployment. | — |
-| Everything in the roadmap | `Proposed` | By design. See [`../roadmap.md`](../roadmap.md). | — |
+| The rest of the roadmap | `Proposed` | By design, apart from the seeder and the reimbursements schema above. See [`../roadmap.md`](../roadmap.md). | — |
 
 The last full run of the test suite on a Windows host was on 2026-10-24, during
-chain `D0`: **191 tests pass** (111 unit, 3 `atom-docs`, 29 authentication,
+chain `D2.R1`: **225 tests pass** — 117 unit, 3 `atom-docs`, 29 authentication,
 2 explorer, 12 notes, 4 `list_query`, 5 `openapi_contract`, 25 projects and
-tasks, 0 shutdown), 0 failed, `cargo test --all-targets --locked` exit 0. The
-unix-only shutdown tests do not run on Windows, so the same tree is **193** on
-CI's `ubuntu` runner. The run covers the current tree, after the audit
-remediation recorded in
-[`change-log.md`](change-log.md) under `ATOM-CHANGE-20261022-003` and the
-contract work under `ATOM-CHANGE-20261024-002`: the
+tasks, 10 `claims_schema`, 18 `seeder`, 0 shutdown — 0 failed,
+`cargo test --all-targets` exit 0, recorded in
+[`change-log.md`](change-log.md) under `ATOM-CHANGE-20261024-005`. The
+unix-only shutdown tests do not run on Windows, so the same tree is **227** on
+CI's `ubuntu` runner. The run covers the current tree, after the contract work
+under `ATOM-CHANGE-20261024-002`, the seeder under `ATOM-CHANGE-20261024-004`
+and the reimbursements schema under `ATOM-CHANGE-20261024-005`: the
 configuration module contributes 50 unit tests in
 [`../../src/config/tests.rs`](../../src/config/tests.rs), the shared validators
 four in [`../../src/helpers/validation.rs`](../../src/helpers/validation.rs),
-and the pagination convention five in
-[`../../src/pagination.rs`](../../src/pagination.rs). That is why the
+the pagination convention five in
+[`../../src/pagination.rs`](../../src/pagination.rs), and the seeder binary six
+in [`../../src/bin/atom-seed.rs`](../../src/bin/atom-seed.rs). That is why the
 configuration row above is `Verified` and not `Implemented`.
 
-The checks that were run, and their real output, are recorded in
-[`change-log.md`](change-log.md) under `ATOM-CHANGE-20261022-003`. The earlier
+The checks that were run for the current tree, and their real output, are recorded
+in [`change-log.md`](change-log.md) under `ATOM-CHANGE-20261024-005`. The earlier
 failure of the formatting and lint gates at the end of 2026-10-21 — on a file
 that another agent was editing concurrently — is recorded in
 [`change-log.md`](change-log.md) under `ATOM-CHANGE-20261021-001` (status

@@ -219,7 +219,7 @@ module that writes money.
 | Invariants | Every statement carries the caller's `user_id`, and an item statement carries `claim_id` **and** `user_id`. `total_amount` is recomputed from `SUM(amount)` in the same transaction as every item write. A claim has one currency for its whole life. Item writes are refused unless the claim is `draft`, and every status change goes through `ensure_transition`. Money is a `String` with four decimals and never an `f32`/`f64`. A receipt is stored text that is never fetched. |
 | Error handling | `422` with a named field for a broken validation rule, `404` for a claim, item or project that is absent or foreign, `409` for a transition the lifecycle does not allow and for an item write on a non-draft claim — the table is in the feature document §5. |
 | Security boundary | The caller's claims only. A claim or item of another account is `404`, never `403`, and an item id is meaningful only inside its claim, because the path resolves the pair. |
-| Verification the implementing change must provide | Unit tests for `ensure_transition` (every allowed and every forbidden edge) and for the money constructor; integration tests for cross-account `404` on every verb, for the total after each item write, and for the `ON DELETE SET NULL` behaviour when a project is deleted. |
+| Verification the implementing change must provide | Unit tests for `ensure_transition` (every allowed and every forbidden edge) and for the money validator (`validate_money`, not a type — see the note under *The planned cross-cutting addition: `money`*); integration tests for cross-account `404` on every verb, for the total after each item write, and for the `ON DELETE SET NULL` behaviour when a project is deleted. |
 | Limitations already known | The total is a stored column, not a view; the submit precondition is a service rule, because a `CHECK` cannot count another table's rows; deleting a claim is permanent. The feature document §10 lists the rest. |
 
 ### `job-applications` (planned)
@@ -327,6 +327,42 @@ a second feature needs it:
 | One `Money` newtype per feature | Two parsers for one published contract, so ADR-0007's four decimals would have two homes and could drift. The contract test would then test the wrong half. |
 | `helpers::money` | `helpers` is the **text** validators; a typed decimal with a wire format is not a text rule, and its errors are typed rejections rather than field-length violations. |
 | A new single-file module, `src/money.rs` | **Chosen.** It has the shape of [`pagination`](#74-pagination--the-list-convention): one convention, one type, no table, no handler, no configuration. It depends on nothing inside the crate except `error`, and it is the only place that knows the four-decimal rule. |
+
+#### `R2` narrows this plan (2026-10-24, design only — not built)
+
+The table above is the plan for a **typed** money value. Reading the claim CRUD
+design against it showed that the first chain to need money does not need a type
+at all, so the plan is narrowed here rather than built:
+
+- **Claim CRUD (`R2`) handles money in one direction only.** Every money field
+  it publishes is a `String` selected with `::text`, and no request body it
+  accepts carries money, because `total_amount` is server-owned. There is
+  therefore no money input to validate, and `R2` adds no type and no validator.
+- **The four-decimal rule, when an input exists, is a text validator in
+  `helpers::validation`, not a type.** The first caller is `R3`'s item `amount`.
+  The rule is a character-level check that returns the string unchanged and
+  reports a `FieldViolation` naming the field — the same shape as
+  `required_text` and `validate_search`, in the module that already owns
+  field-level text rules. This is **not** the `helpers::money` row the table
+  above rejects: that row rejects putting a *typed decimal* in `helpers`, and
+  what is proposed here has no type, no parsing and no arithmetic.
+- **A `Money` newtype adds nothing here.** The JSON extractor reports a number
+  where a string is expected as one violation for the field `body`, so a
+  `Deserialize` impl cannot name the field better than `String` does; and money
+  has no Rust arithmetic to encapsulate, because the sum is `SUM` in SQL
+  ([`../decisions/ADR-0007-money-representation.md`](../decisions/ADR-0007-money-representation.md)).
+- **`src/money.rs` is not reversed, it is deferred.** If a later requirement
+  needs a *typed* money value — a comparison or an arithmetic in Rust — the
+  choice above stands and this subsection is superseded by that change.
+
+The consequence for the two tables in this section: the `money` entries in the
+`May depend on` rows of `reimbursements` and `job-applications` are superseded
+for the validation half. The rule lives in `helpers`, and a `money` module
+exists only if the deferred case above materialises. The full argument, the
+rejected alternatives and the input rule are in
+[`reimbursements-crud-design.md`](reimbursements-crud-design.md) §4, which is
+the design for `R2`; the feature document's §2.3 sentence is corrected in the
+same change.
 
 This is a cross-feature structure question, and [`../README.md`](../README.md) §1
 gives it to this directory (rank 2), not to `features/` (rank 3, "not

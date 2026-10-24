@@ -99,7 +99,7 @@ on this chain; that is recorded as rows 10-11 of its checkpoint.
 
 **Date:** 2026-10-24 (UTC)
 **Type:** Feature (development tooling)
-**Author:** The ATOM engineering team - the orchestrator with the ust-backend, 	est-engineer, database, uth-security and devops subagents.
+**Author:** The ATOM engineering team - the orchestrator with the `rust-backend`, `test-engineer`, `database`, `auth-security` and `devops` subagents.
 **Status:** Complete - **chain D2.S1, review rows outstanding**
 
 #### Summary
@@ -153,6 +153,29 @@ No independent review has read the seeder diff: code-reviewer and
 quality-gate did not run on this chain. The container image was not started,
 because this machine has no usable daemon (KI-006); docker compose config
 validates the file and KI-021 records the limitation.
+
+#### Correction (2026-10-24) — the author line was corrupted
+
+The `**Author:**` line was written with escape sequences that were interpreted
+rather than kept literal: `\r`, `\t` and `\a` became control characters, so the
+line read "…with the" followed by a carriage return and `ust-backend,`, a tab
+and `est-engineer, database,`, a bell character and `uth-security…` — parts of
+three agent names were missing. The line was repaired in place to name the
+agents properly: `rust-backend`, `test-engineer`, `database`, `auth-security`
+and `devops`. A corrupted attribution cannot be read at all, which is why this
+one line was rewritten; nothing else in the entry was.
+
+#### Correction (2026-10-24) — the seeder test count and the check count
+
+This entry records `tests/seeder.rs` as **16** tests and **five** post-insert
+checks. Those were the counts at this entry's own commit, `5688de7`; they are
+not the counts of the tree. Chain `D2.R1` (`ATOM-CHANGE-20261024-005`) added the
+two claim cases, so the file holds **18** tests, and `verify()` in
+`src/bin/atom-seed.rs` runs **six** checks, printing `verification passed (6
+checks)`. The original sentences stay as written, because this log is
+append-only; a reader must take the figures in this correction as current and
+the ones in the entry as the state at `5688de7`.
+
 ### ATOM-CHANGE-20261024-003 - The Phase 2 product intake
 
 **Date:** 2026-10-24 (UTC)

@@ -40,15 +40,19 @@ out-of-contract value impossible to persist. The reasoning is recorded in
 | `notes` | `migrations/0002_notes.sql` | `users` | Personal notes, with a generated full-text search column. |
 | `projects` | `migrations/0003_projects_and_tasks.sql` | `users` | The container for tasks. |
 | `tasks` | `migrations/0003_projects_and_tasks.sql` | `projects` | The units of work inside a project. |
+| `expense_claims` | `migrations/0004_expense_claims.sql` | `users` | A reimbursement claim: its status, lifecycle timestamps and computed total. |
+| `expense_items` | `migrations/0004_expense_claims.sql` | `users` | The line items of a claim; `total_amount` is their sum. |
 
 The full definition of each table is in [`schema.md`](schema.md).
 
-The Phase 1 tables above are the only tables that exist. Phase 2 proposes six
-more — `expense_claims`, `expense_items`, `companies`, `job_applications`,
-`application_events` and `embeddings` — and **none of them has a migration or a
-Rust model**. They are marked `Proposed` in [`schema.md`](schema.md) §11 and
-must not be treated as scope. The development seeder that fills the Phase 1
-tables is specified in [`seeding.md`](seeding.md).
+Phase 2 proposes six more tables. Two of them now exist:
+`expense_claims` and `expense_items` have
+`migrations/0004_expense_claims.sql` and a Rust model in
+`src/reimbursements/models.rs`. The other four — `companies`,
+`job_applications`, `application_events` and `embeddings` — have neither a
+migration nor a Rust model, are marked `Proposed` in [`schema.md`](schema.md)
+§11, and must not be treated as scope. The development seeder that fills the
+existing tables is implemented and specified in [`seeding.md`](seeding.md).
 
 ## 3. The migration workflow at a glance
 
