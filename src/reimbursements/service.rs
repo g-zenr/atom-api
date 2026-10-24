@@ -278,6 +278,12 @@ impl ClaimService {
     /// The claim's new total is not part of this response — the published
     /// contract says the `ItemResponse` is the whole body, and the total is read
     /// with the claim.
+    ///
+    /// An amount that would push the claim's total past what `NUMERIC(19,4)`
+    /// can store is a `422` naming `amount`: the repository's guard refuses the
+    /// total and rolls the whole write back, so nothing is inserted and the
+    /// stored total is unchanged. Each item may carry fifteen integer digits
+    /// on its own, so this is reachable with two legal values.
     pub async fn create_item(
         &self,
         owner: Uuid,
@@ -322,6 +328,10 @@ impl ClaimService {
     /// Every field is optional. `category` and `receipt_url` are tri-states: an
     /// omitted key leaves the column untouched, an explicit `null` or an empty
     /// category clears it.
+    ///
+    /// A new amount that would push the claim's total past `NUMERIC(19,4)` is a
+    /// `422` naming `amount`, and the patch is rolled back as a whole: the item
+    /// keeps its previous amount and the claim keeps its previous total.
     pub async fn update_item(
         &self,
         owner: Uuid,
@@ -462,18 +472,36 @@ impl ClaimService {
 
     /// Translates one item-write outcome, using only catalogue messages.
     fn item_result<T>(&self, outcome: ItemWrite<T>) -> AppResult<T> {
-        match outcome {
-            ItemWrite::Applied(value) => Ok(value),
-            ItemWrite::ClaimNotFound => Err(AppError::NotFound(
-                self.messages.resources.claim_not_found.clone(),
-            )),
-            ItemWrite::ClaimNotDraft => Err(AppError::Conflict(
-                self.messages.conflicts.claim_not_editable.clone(),
-            )),
-            ItemWrite::ItemNotFound => Err(AppError::NotFound(
-                self.messages.resources.item_not_found.clone(),
-            )),
-        }
+        item_refusal(outcome, &self.messages)
+    }
+}
+
+/// Translates one item-write outcome into the response the contract publishes.
+///
+/// A free function rather than a method: the translation reads nothing but the
+/// catalogue, so the unit test can prove it without a pool and without a Tokio
+/// runtime. The service's [`ClaimService::item_result`] is the only caller.
+fn item_refusal<T>(outcome: ItemWrite<T>, messages: &Messages) -> AppResult<T> {
+    match outcome {
+        ItemWrite::Applied(value) => Ok(value),
+        ItemWrite::ClaimNotFound => Err(AppError::NotFound(
+            messages.resources.claim_not_found.clone(),
+        )),
+        ItemWrite::ClaimNotDraft => Err(AppError::Conflict(
+            messages.conflicts.claim_not_editable.clone(),
+        )),
+        // The repository rolled the write back, so the claim still holds its
+        // previous items and total. The request was well formed and the field
+        // is the one to change, which is a `422` naming `amount` rather than
+        // the column's `22003`.
+        ItemWrite::TotalExceedsMaximum => Err(field_error(
+            "amount",
+            messages.validation.claim_total_exceeds_maximum.clone(),
+            messages,
+        )),
+        ItemWrite::ItemNotFound => Err(AppError::NotFound(
+            messages.resources.item_not_found.clone(),
+        )),
     }
 }
 
@@ -555,18 +583,44 @@ pub fn validate_item_description(description: &str, messages: &Messages) -> AppR
     )
 }
 
-/// Normalises a category: trimmed, lower-cased, and `None` when it is empty.
+/// Normalises a category: trimmed, ASCII-folded, and `None` when it is empty.
 ///
 /// `expense_items_category_chk` requires the stored value to equal its own
 /// `LOWER(BTRIM(...))` and to be 1 to 64 characters, so the normalisation is
 /// what makes a well-formed client value storable. An empty value — or one of
 /// spaces — is the published "store `null`" case, not an error.
+///
+/// # Why the fold is ASCII-only
+///
+/// The constraint's `LOWER()` is not Unicode lower-casing. The two disagree for
+/// code points outside ASCII — `U+0130` (`İ`) is the clearest example: Rust's
+/// `to_lowercase` maps it to `i` plus a combining dot, while `LOWER()` may
+/// leave it unchanged — so a value this function folded and the column then
+/// re-checked could fail the `CHECK` and reach the client as a `500` for a body
+/// the service had already accepted.
+///
+/// The published category examples are lower-case ASCII tokens, so this
+/// function folds only `A`–`Z`, which is the range both implementations agree
+/// on, and refuses a category that carries a non-ASCII character with a `422`
+/// naming `category` instead of passing it to the database. That narrows the
+/// accepted input, never the stored rule: every value that reaches the column
+/// is one the column accepts.
 pub fn normalize_category(category: &str, messages: &Messages) -> AppResult<Option<String>> {
-    let normalised = category.trim().to_lowercase();
+    let trimmed = category.trim();
 
-    if normalised.is_empty() {
+    if trimmed.is_empty() {
         return Ok(None);
     }
+
+    if !trimmed.is_ascii() {
+        return Err(field_error(
+            "category",
+            messages.validation.category_not_ascii.clone(),
+            messages,
+        ));
+    }
+
+    let normalised = trimmed.to_ascii_lowercase();
 
     if char_len(&normalised) > MAX_ITEM_CATEGORY_LENGTH {
         return Err(field_error(
@@ -591,6 +645,14 @@ pub fn normalize_category(category: &str, messages: &Messages) -> AppResult<Opti
 /// path or a `javascript:`/`file:`/`data:` scheme has no meaning a client could
 /// follow. The scheme comparison is case-insensitive, matching the column's
 /// `~*`.
+///
+/// A scheme is not an absolute URL on its own. `expense_items_receipt_url_chk`
+/// accepts `"https:///"`, because that string does match `^https?://`, while
+/// the published rule is "an absolute `http`/`https` URL" and an empty
+/// authority is not absolute. The service therefore requires a non-empty
+/// authority: the character after `://` must be neither `/`, `?`, `#` nor
+/// whitespace. The column is unchanged, so this check can only narrow what is
+/// stored — it never lets through a value the column would refuse.
 pub fn validate_receipt_url(url: &str, messages: &Messages) -> AppResult<String> {
     let trimmed = url.trim();
     let lowercase = trimmed.to_ascii_lowercase();
@@ -603,7 +665,14 @@ pub fn validate_receipt_url(url: &str, messages: &Messages) -> AppResult<String>
         ""
     };
 
-    if rest.is_empty() || char_len(trimmed) > MAX_RECEIPT_URL_LENGTH {
+    // An empty `rest` yields `None`, which is also a refusal: `"https://"` has
+    // no authority either.
+    let has_authority = rest
+        .chars()
+        .next()
+        .is_some_and(|first| !first.is_whitespace() && !matches!(first, '/' | '?' | '#'));
+
+    if !has_authority || char_len(trimmed) > MAX_RECEIPT_URL_LENGTH {
         return Err(field_error(
             "receipt_url",
             messages.validation.receipt_url_invalid.clone(),
@@ -707,6 +776,30 @@ mod tests {
         // A single bound is always valid.
         assert!(validate_submission_range(Some(from), None, &messages).is_ok());
         assert!(validate_submission_range(None, Some(to), &messages).is_ok());
+    }
+
+    /// A total that `NUMERIC(19,4)` cannot hold is a `422` naming `amount`.
+    ///
+    /// The repository's own guard is what refuses it, in SQL, and this test
+    /// pins the translation: the outcome must never reach the client as the
+    /// column's `22003`, which [`crate::error::AppError::Database`] would turn
+    /// into a `500`. Each item may carry fifteen integer digits, so two legal
+    /// amounts already overrun the total's range.
+    #[test]
+    fn a_total_beyond_the_column_is_a_422_naming_the_amount() {
+        let messages = test_messages();
+
+        let error = item_refusal(ItemWrite::<()>::TotalExceedsMaximum, &messages)
+            .expect_err("a total beyond the column must be refused");
+
+        let body = error.body();
+        assert_eq!(error.status(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body.error.code, code::VALIDATION_FAILED);
+        assert_eq!(body.error.details[0].field, "amount");
+        assert_eq!(
+            body.error.details[0].message,
+            messages.validation.claim_total_exceeds_maximum
+        );
     }
 
     #[test]
@@ -848,6 +941,7 @@ mod tests {
 
         for accepted in [
             "https://receipts.example.test/2026/10/20-train.pdf",
+            "https://receipts.example/1.pdf",
             "http://example.test/a",
             "HTTPS://EXAMPLE.TEST/A",
         ] {
@@ -867,6 +961,13 @@ mod tests {
             "https://",
             "",
             "   ",
+            // A scheme with an empty authority is not an absolute URL, even
+            // though `expense_items_receipt_url_chk` accepts it.
+            "https:///",
+            "http:///receipts/1.pdf",
+            "https://?claim=7",
+            "https://#receipt",
+            "https:// /receipts/1.pdf",
         ] {
             let error = validate_receipt_url(refused, &messages)
                 .expect_err("a receipt must be an absolute http or https URL");
@@ -894,6 +995,10 @@ mod tests {
             normalize_category("  Travel  ", &messages).unwrap(),
             Some("travel".to_string())
         );
+        assert_eq!(
+            normalize_category("MEALS", &messages).unwrap(),
+            Some("meals".to_string())
+        );
         assert_eq!(normalize_category("   ", &messages).unwrap(), None);
         assert_eq!(normalize_category("", &messages).unwrap(), None);
 
@@ -906,5 +1011,40 @@ mod tests {
             normalize_category(&"x".repeat(MAX_ITEM_CATEGORY_LENGTH), &messages).is_ok(),
             "a category at the bound must be accepted"
         );
+    }
+
+    /// The fold is ASCII-only, because `LOWER()` in the column and Rust's
+    /// Unicode `to_lowercase` disagree outside ASCII: `U+0130` (`İ`) folded in
+    /// Rust is not the `LOWER()` value the `CHECK` compares against, so such a
+    /// value would become a `23514` and a `500` instead of a `422`.
+    #[test]
+    fn a_non_ascii_category_is_refused_before_it_reaches_the_database() {
+        let messages = test_messages();
+
+        for refused in [
+            "\u{0130}stanbul",
+            "café",
+            "Ä",
+            "trävel",
+            "travel\u{0130}",
+            "ｆｕｌｌｗｉｄｔｈ",
+        ] {
+            let error = normalize_category(refused, &messages)
+                .expect_err("a non-ASCII category must be refused");
+            let body = error.body();
+            assert_eq!(error.status(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(
+                body.error.details[0].field, "category",
+                "{refused:?} must be reported on `category`"
+            );
+            assert_eq!(
+                body.error.details[0].message, messages.validation.category_not_ascii,
+                "{refused:?} must carry the ASCII-only message"
+            );
+        }
+
+        // A blank value is still the published "store null" case, not an
+        // error, and it is checked before the ASCII rule.
+        assert_eq!(normalize_category("   ", &messages).unwrap(), None);
     }
 }

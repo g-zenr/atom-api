@@ -135,6 +135,10 @@ pub struct ValidationMessages {
     pub date_range_order: String,
     /// A money value is not a four-decimal string.
     pub money_scale: String,
+    /// The item would push its claim's total past `NUMERIC(19,4)`.
+    pub claim_total_exceeds_maximum: String,
+    /// The category carries a character outside ASCII.
+    pub category_not_ascii: String,
     /// A receipt reference is not an absolute `http` or `https` URL.
     pub receipt_url_invalid: String,
     /// A claim with no items cannot be submitted.

@@ -284,7 +284,7 @@ const DELETE_ITEM: &str =
     "DELETE FROM expense_items WHERE id = $1 AND claim_id = $2 AND user_id = $3";
 
 /// Recomputes a claim's stored total from its items, in the caller's
-/// transaction.
+/// transaction, and refuses a sum the column cannot hold.
 ///
 /// `SUM` over no rows is `NULL`, hence the `COALESCE`: a claim whose last item
 /// was deleted stores `0`, which renders `"0.0000"`. The total is never
@@ -293,13 +293,37 @@ const DELETE_ITEM: &str =
 /// The statement is deliberately unconditional about status: it runs only
 /// inside the service's transaction, after the claim row was locked and the
 /// `draft` guard passed.
+///
+/// # The range guard
+///
+/// `total_amount` is `NUMERIC(19,4)`: fifteen integer digits and four
+/// fractional, so nothing above `999999999999999.9999` fits. Each item is
+/// bounded to that same magnitude on input (`validate_money`), and two of them
+/// already sum to `1999999999999999.9998`, which the column would refuse with
+/// `22003` — a `500` for a request the published contract allows. The guard is
+/// therefore part of this statement rather than a second, weaker copy in Rust:
+///
+/// * `SUM(NUMERIC(19,4))` is unbounded `numeric`, so the sum is computed and
+///   compared *exactly*; only the assignment needs the range, and it is the
+///   assignment the guard protects;
+/// * the `FROM (SELECT …)` computes the sum once and lets the guard read the
+///   same value the `SET` writes, evaluated on the same snapshot — including
+///   the row the caller just inserted or updated, because it is in this
+///   transaction — so no writer can slip a row in between the check and the
+///   write. The claim row is already locked `FOR UPDATE` by the caller;
+/// * a zero-row result is the refusal. Nothing is written, the caller rolls
+///   the transaction back, and the item write that produced the sum goes with
+///   it.
 const RECOMPUTE_TOTAL: &str = r#"
     UPDATE expense_claims
-    SET total_amount = COALESCE(
-            (SELECT SUM(amount) FROM expense_items WHERE claim_id = $1 AND user_id = $2),
-            0),
-        updated_at = clock_timestamp()
-    WHERE id = $1 AND user_id = $2
+    SET total_amount = sums.total,
+        updated_at   = clock_timestamp()
+    FROM (SELECT COALESCE(SUM(amount), 0) AS total
+          FROM expense_items
+          WHERE claim_id = $1 AND user_id = $2) AS sums
+    WHERE id = $1
+      AND user_id = $2
+      AND sums.total <= 999999999999999.9999
 "#;
 
 /// Counts a claim's items, for the submit precondition on the error path.
@@ -438,6 +462,11 @@ pub enum ItemWrite<T> {
     /// The claim belongs to the caller but is not a draft, so the write was
     /// refused and rolled back.
     ClaimNotDraft,
+    /// The write would have made the claim's total larger than `NUMERIC(19,4)`
+    /// can store, so it was rolled back and no total was written. The caller's
+    /// `amount` is what has to change, which is why the service reports a
+    /// `422` naming that field rather than the column's `22003`.
+    TotalExceedsMaximum,
     /// The item does not exist under that claim of the caller.
     ItemNotFound,
 }
@@ -678,11 +707,14 @@ impl ClaimRepository {
     /// 1. lock the claim row and read its status (`404` if absent or foreign,
     ///    `409` if not a draft);
     /// 2. insert the item;
-    /// 3. recompute `total_amount` from `SUM(amount)`.
+    /// 3. recompute `total_amount` from `SUM(amount)`, guarded by the
+    ///    `NUMERIC(19,4)` range.
     ///
     /// Steps 2 and 3 therefore cannot diverge: either both commit or neither
     /// does, and the lock keeps a second writer from computing a stale sum in
-    /// between.
+    /// between. When the sum does not fit the column, step 3 writes nothing and
+    /// the whole transaction is rolled back, so the claim keeps the total and
+    /// the item set it had. See [`RECOMPUTE_TOTAL`].
     pub async fn insert_item(
         &self,
         claim_id: Uuid,
@@ -707,7 +739,11 @@ impl ClaimRepository {
             .fetch_one(&mut *transaction)
             .await?;
 
-        recompute_total(&mut transaction, claim_id, owner).await?;
+        if !recompute_total(&mut transaction, claim_id, owner).await? {
+            transaction.rollback().await?;
+            return Ok(ItemWrite::TotalExceedsMaximum);
+        }
+
         transaction.commit().await?;
 
         Ok(ItemWrite::Applied(inserted))
@@ -716,9 +752,12 @@ impl ClaimRepository {
     /// Applies a partial update to one item of a draft claim and recomputes the
     /// total.
     ///
-    /// The same three steps, the same transaction and the same lock as
-    /// [`Self::insert_item`]. A zero-row `UPDATE` means the item does not exist
-    /// **under that claim** of the caller, which is the item's `404`.
+    /// The same three steps, the same transaction, the same lock and the same
+    /// range guard as [`Self::insert_item`]. A zero-row `UPDATE` means the item
+    /// does not exist **under that claim** of the caller, which is the item's
+    /// `404`; a total that does not fit `NUMERIC(19,4)` rolls the whole patch
+    /// back, so the stored amount and the stored total are the ones from before
+    /// the request.
     pub async fn update_item(
         &self,
         claim_id: Uuid,
@@ -750,7 +789,11 @@ impl ClaimRepository {
             return Ok(ItemWrite::ItemNotFound);
         };
 
-        recompute_total(&mut transaction, claim_id, owner).await?;
+        if !recompute_total(&mut transaction, claim_id, owner).await? {
+            transaction.rollback().await?;
+            return Ok(ItemWrite::TotalExceedsMaximum);
+        }
+
         transaction.commit().await?;
 
         Ok(ItemWrite::Applied(updated))
@@ -758,9 +801,11 @@ impl ClaimRepository {
 
     /// Deletes one item of a draft claim and recomputes the total.
     ///
-    /// The same transaction and lock as [`Self::insert_item`]. The recompute
-    /// turns `SUM` over no rows into `0`, so a claim whose last item was
-    /// removed stores `"0.0000"` rather than a stale total.
+    /// The same transaction, lock and range guard as [`Self::insert_item`]. The
+    /// recompute turns `SUM` over no rows into `0`, so a claim whose last item
+    /// was removed stores `"0.0000"` rather than a stale total. A delete can
+    /// only lower the sum, so the guard cannot refuse here; it is applied
+    /// uniformly so that no item write has a second, weaker path to the total.
     pub async fn delete_item(
         &self,
         claim_id: Uuid,
@@ -784,7 +829,11 @@ impl ClaimRepository {
             return Ok(ItemWrite::ItemNotFound);
         }
 
-        recompute_total(&mut transaction, claim_id, owner).await?;
+        if !recompute_total(&mut transaction, claim_id, owner).await? {
+            transaction.rollback().await?;
+            return Ok(ItemWrite::TotalExceedsMaximum);
+        }
+
         transaction.commit().await?;
 
         Ok(ItemWrite::Applied(()))
@@ -866,16 +915,21 @@ async fn lock_draft_claim<T>(
 }
 
 /// Recomputes a claim's total inside the caller's transaction.
+///
+/// `Ok(false)` means [`RECOMPUTE_TOTAL`]'s range guard refused the new sum: it
+/// is larger than `NUMERIC(19,4)` can store, so no total was written and the
+/// caller must roll the transaction back. The refusal is reported as a `422`
+/// on the field that caused it, not as the column's `22003`.
 async fn recompute_total(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     claim_id: Uuid,
     owner: Uuid,
-) -> AppResult<()> {
-    sqlx::query(RECOMPUTE_TOTAL)
+) -> AppResult<bool> {
+    let result = sqlx::query(RECOMPUTE_TOTAL)
         .bind(claim_id)
         .bind(owner)
         .execute(&mut **transaction)
         .await?;
 
-    Ok(())
+    Ok(result.rows_affected() > 0)
 }

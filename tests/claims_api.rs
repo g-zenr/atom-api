@@ -3,7 +3,8 @@
 //! `C-R2` publishes five operations under `/api/v1/claims`: list, create, read,
 //! patch and delete. `C-R3`/`C-R4` publish seven more: the three item writes and
 //! the four lifecycle actions. This file holds the 55 acceptance tests those
-//! chains name, grouped the way the design document
+//! chains name - plus the regression test for `REIMB-R11`, that a claim is
+//! deletable in every status - grouped the way the design document
 //! (`docs/architecture/reimbursements-crud-design.md` §12) and
 //! [`docs/features/reimbursements/api.md`] §7-§14 group them: CRUD, ownership,
 //! money on the wire, `422` validation, `400`/`413` malformed, listing and
@@ -494,6 +495,123 @@ async fn a_claim_can_be_created_read_and_deleted() {
     let response = list_claims(&app, &user.access_token, "").await;
     let page = response.expect_status(StatusCode::OK);
     assert_pagination(&page, 0, 20, 0);
+}
+
+/// `REIMB-R11`: a claim can be deleted in every status, not only in `draft`.
+///
+/// The five states are reached through the published lifecycle actions, so a
+/// `status = 'draft'` guard on the delete would fail this test from the second
+/// iteration on: the delete would answer `409` where §7 of the API document
+/// publishes `204`. The `204` is not the evidence - what follows it is. The
+/// claim reads `404`, the item table holds no row for it, its item is no
+/// longer addressable, the caller's listing is empty, and the other account's
+/// claim in the same status still carries its own item.
+#[tokio::test]
+async fn a_claim_can_be_deleted_in_any_status() {
+    let state = test_state().await;
+    let db = state.db.clone();
+    let app = app(state);
+    let user = register_user(&app, "claim-delete-any").await;
+    let other = register_user(&app, "claim-delete-any-other").await;
+
+    for status in ["draft", "submitted", "approved", "rejected", "paid"] {
+        // Both accounts get a claim in the same status, built by the same
+        // public operations: one to delete, one to watch.
+        let claim_id = claim_in_status(&app, &user.access_token, "deletable", status).await;
+        let other_claim_id = claim_in_status(&app, &other.access_token, "untouched", status).await;
+
+        let detail = detail_of(&app, &user.access_token, &claim_id).await;
+        assert_eq!(detail["status"], status);
+        assert_eq!(
+            detail["items"].as_array().map(Vec::len),
+            Some(1),
+            "the fixture must carry one item, so the cascade has something to remove: {detail}"
+        );
+        let item_id = item_id_of(&detail["items"][0]);
+
+        let kept = detail_of(&app, &other.access_token, &other_claim_id).await;
+        assert_eq!(kept["status"], status);
+        let kept_item_id = item_id_of(&kept["items"][0]);
+
+        // DELETE: the published answer is `204` with no body, in this status.
+        let body = delete_claim(&app, &user.access_token, &claim_id)
+            .await
+            .expect_status(StatusCode::NO_CONTENT);
+        assert!(
+            body.is_null(),
+            "a 204 must carry no body; the {status} delete carried {body}"
+        );
+
+        // READ: the claim is gone, rather than hidden or soft-deleted.
+        let body = get_claim(&app, &user.access_token, &claim_id)
+            .await
+            .expect_status(StatusCode::NOT_FOUND);
+        assert_error(&body, "not_found");
+
+        // ITEMS: the cascade ran. A claim row removed with its items left
+        // behind would still have answered the `404` above.
+        let remaining: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM expense_items WHERE claim_id = $1")
+                .bind(
+                    Uuid::parse_str(&claim_id)
+                        .unwrap_or_else(|error| panic!("`{claim_id}` must be a UUID: {error}")),
+                )
+                .fetch_one(&db)
+                .await
+                .expect("the item count must be readable");
+        assert_eq!(
+            remaining, 0,
+            "deleting a {status} claim must delete its items, but {remaining} survived"
+        );
+
+        // The item is no longer addressable under the deleted claim either.
+        let response = delete_item(&app, &user.access_token, &claim_id, &item_id).await;
+        let body = response.expect_status(StatusCode::NOT_FOUND);
+        assert_error(&body, "not_found");
+
+        // LISTING: neither the full page nor the filtered one carries it, and
+        // the account is empty again, because this test created and deleted
+        // every claim it owns.
+        let filtered = format!("?status={status}");
+        for query in ["", filtered.as_str()] {
+            let page = list_claims(&app, &user.access_token, query)
+                .await
+                .expect_status(StatusCode::OK);
+            assert!(
+                !ids(&page).contains(&claim_id),
+                "a deleted {status} claim still appears in `{query}`: {page}"
+            );
+            assert_pagination(&page, 0, 20, 0);
+        }
+
+        // ISOLATION: the other account's claim - same status, same shape - is
+        // untouched, with its own item and total.
+        let response = get_claim(&app, &other.access_token, &other_claim_id).await;
+        let intact = response.expect_status(StatusCode::OK);
+        assert_eq!(intact["status"], status);
+        assert_eq!(intact["title"], "untouched");
+        assert_eq!(
+            intact["items"].as_array().map(Vec::len),
+            Some(1),
+            "the other account's item must survive this delete: {intact}"
+        );
+        assert_eq!(
+            item_id_of(&intact["items"][0]),
+            kept_item_id,
+            "the other account's item must be the same row after the delete: {intact}"
+        );
+        assert_eq!(
+            assert_money(&intact["total_amount"], "total_amount"),
+            "10.0000",
+            "the other account's total must not be recomputed by this delete"
+        );
+
+        // The fixture's survivor leaves the stage, so the next iteration
+        // starts from an empty pair of accounts.
+        delete_claim(&app, &other.access_token, &other_claim_id)
+            .await
+            .expect_status(StatusCode::NO_CONTENT);
+    }
 }
 
 #[tokio::test]

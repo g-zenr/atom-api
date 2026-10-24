@@ -127,6 +127,22 @@ date_range_order = "must not be later than submitted_to"
 # `"12.5000"` on the way back out (ADR-0007).
 money_scale = "must be a decimal string with at most fifteen integer digits and exactly four decimal places"
 
+# The item would push its claim's total past what the column can hold.
+#
+# A claim's total is `NUMERIC(19,4)` too, and each item may carry fifteen
+# integer digits, so two items at their own maximum sum to more than the type
+# can store. The refusal names `amount`, because that is the field a client can
+# change; the bound is the same magnitude `money_scale` states.
+claim_total_exceeds_maximum = "must keep the claim total at or below 999999999999999.9999"
+
+# The category carries a character outside ASCII.
+#
+# The column re-checks its own `LOWER(BTRIM(...))`, and Unicode lower-casing in
+# the service and `LOWER()` in the database do not agree for every code point,
+# so only the ASCII range is normalised here and the rest is refused before the
+# value can reach the database as a `23514`.
+category_not_ascii = "must contain only ASCII characters"
+
 # The receipt is a reference, not an upload, and the scheme is part of the
 # contract: only `http` and `https` are accepted.
 receipt_url_invalid = "must be an absolute http or https URL of at most 2048 characters"
