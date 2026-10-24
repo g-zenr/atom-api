@@ -1443,7 +1443,7 @@ visible to a frontend rather than only to this repository.
 
 ## Resume
 
-**State at the end of this session.** HEAD `58f9532`, branch `run/day-1`.
+**State at the end of this session.** HEAD `44b97cb`, branch `run/day-1`.
 **483 tests pass on Windows** (485 on CI, where the two unix-only `shutdown`
 tests run), all six gates are `0`, and `migrations/` ends at `0006`. The working
 tree carries one uncommitted change: the two
