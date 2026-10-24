@@ -123,7 +123,7 @@ instead (§3), and the absence of an end-to-end case is in §6.
 | Case | Rule it protects |
 | ---- | ---------------- |
 | `the_ml_routes_are_in_the_openapi_document` | The three `(method, path)` pairs are operations with a `200`, the seven schemas are published, and only `POST` is declared on the search path. |
-| `post_notes_search_is_not_shadowed_by_the_note_read` | `GET /notes/search` is the note read and answers `400` because `search` is not a UUID; `POST /notes/search` without a credential answers `401`, which proves the operation is mounted rather than a `404` fallback. |
+| `post_notes_search_is_not_shadowed_by_the_note_read` | `GET /notes/search` is the note read and answers `405` because `search` is not a UUID; `POST /notes/search` without a credential answers `401`, which proves the operation is mounted rather than a `404` fallback. |
 | `the_search_endpoint_publishes_pagination_once` | The search publishes exactly `limit` and `offset` on the query string, once each, and its body schema holds only `query` and `mode`. |
 | `the_score_is_a_number` | A score is a JSON number and never a string; lexical mode publishes `null`; `SearchHit.score` is a number in the document. |
 | `a_hybrid_score_is_the_cosine_of_the_planted_vectors` | Two vectors planted at known cosines (`0.8`, `0.6`) are published as `0.8` and `0.6` to four decimals. A re-rank using anything but the dot product fails. |

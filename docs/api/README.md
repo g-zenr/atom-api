@@ -12,6 +12,7 @@ features themselves.
 | -------- | -------- |
 | [`conventions.md`](conventions.md) | Versioning, resource naming, HTTP methods and status codes, the pagination convention, timestamps, identifiers, PATCH semantics, content types, the body size limit, CORS, and the health endpoints. |
 | [`error-contract.md`](error-contract.md) | The single error envelope, every error code with its HTTP status, the field-level validation detail format, and the rule that internal details are never exposed. |
+| [`frontend-handover.md`](frontend-handover.md) | The client-facing guide for a frontend engineer: the auth flow and what to do on a `401`, the error envelope and the `400`/`422` split, pagination, money, the per-feature list filters, the two stage machines, ML degradation, versioning and a generated client, and the five behaviours that surprise a new client. |
 
 The per-feature endpoint references are:
 
@@ -23,7 +24,7 @@ The per-feature endpoint references are:
 | Tasks | [`../features/tasks/api.md`](../features/tasks/api.md) | 5 |
 | Reimbursements | [`../features/reimbursements/api.md`](../features/reimbursements/api.md) | all 12 it specifies |
 | Job applications | [`../features/job-applications/api.md`](../features/job-applications/api.md) | 14 |
-| Machine learning | [`../features/ml/api.md`](../features/ml/api.md) | 3 specified, **none published yet** |
+| Machine learning | [`../features/ml/api.md`](../features/ml/api.md) | 3 specified, all 3 published |
 
 **The document describes 51 operations**: 49 under `/api/v1` and the two health
 probes outside it. The reimbursement feature contributes twelve of them - five
