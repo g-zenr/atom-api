@@ -27,6 +27,14 @@ path = "src/bin/atom-docs.rs"
 name = "atom-seed"
 path = "src/bin/atom-seed.rs"
 
+# D4.M1 spike: measures a local Burn `flex` forward pass on this machine.
+# A throwaway measurement tool, not a product binary. It requires the `ml`
+# feature, so a build without it skips the binary entirely.
+[[bin]]
+name = "atom-ml-spike"
+path = "src/bin/atom-ml-spike.rs"
+required-features = ["ml"]
+
 [features]
 # The API explorer and the OpenAPI document served over HTTP.
 #
@@ -37,8 +45,13 @@ path = "src/bin/atom-seed.rs"
 #
 # The feature is on by default so that a plain `cargo build`, `cargo test` and
 # `cargo run` keep the explorer.
-default = ["docs"]
+default = ["docs", "ml"]
 docs = ["dep:utoipa-swagger-ui"]
+# Local machine learning: Burn on the pure-Rust `flex` CPU backend.
+# ADR-0008 §7.3 — on by default so a plain build has it, and switchable off so
+# `cargo check --no-default-features` still builds the API without the model
+# stack.
+ml = ["dep:burn"]
 
 [dependencies]
 # --- HTTP stack ---
@@ -109,6 +122,16 @@ utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
 utoipa-swagger-ui = { version = "9", features = [
     "axum",
     "vendored",
+], optional = true }
+
+# --- Local machine learning (feature `ml`) ---
+# ADR-0008: Burn v0.22 on the `flex` CPU backend, pure Rust, no GPU and no
+# second runtime. `std` and `flex` are the whole surface the spike needs;
+# default features would pull `bm`/`fusion`/`train`, which no request uses.
+# Optional: see the `ml` feature.
+burn = { version = "0.22", default-features = false, features = [
+    "std",
+    "flex",
 ], optional = true }
 
 [dev-dependencies]

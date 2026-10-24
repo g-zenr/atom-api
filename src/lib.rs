@@ -28,6 +28,8 @@ pub mod error;
 pub mod health;
 pub mod helpers;
 pub mod job_applications;
+#[cfg(feature = "ml")]
+pub mod ml;
 pub mod notes;
 pub mod pagination;
 pub mod projects;

@@ -42,6 +42,70 @@ define the target state. The requirements live in
 
 ## Entries
 
+### ATOM-CHANGE-20261024-010 - The local ML spike: Burn on flex, measured
+
+**Date:** 2026-10-24 (UTC)
+**Type:** Spike (measurement)
+**Author:** The ATOM engineering team - the orchestrator with the `rust-backend` subagent.
+**Status:** Complete - **chain `D4.M1`, spike PASSES**
+
+#### Summary
+
+`burn` 0.22 is now an optional dependency behind a new `ml` feature, and
+`src/bin/atom-ml-spike.rs` measures a real forward pass on this machine. The
+numbers decide whether an endpoint may depend on local inference, which is what
+the plan requires before `M3`.
+
+#### The measurements
+
+| Measurement | Value |
+| ----------- | ----- |
+| Weights | **real** `all-MiniLM-L6-v2` SafeTensors, vocab 30522, dim 384 - not synthetic |
+| Model construction | **422 ms** |
+| First inference | **1.69 ms** |
+| Steady state, 1 text | 1.15 ms mean (0.99 min, 3.07 max, 200 repeats) |
+| Steady state, 10 texts | 1.85 ms mean (40 repeats) |
+| Steady state, 100 texts | **2.98 ms** mean (10 repeats) |
+| Peak RSS | **93.8 MiB**, unchanged between construction and the end of the run |
+| Determinism | identical input twice gives an identical vector; different input differs |
+| `Disabled` path | error `ml_disabled`, no panic, no file read |
+| `Deterministic` path | 0 ms to construct, dim 384, unit norm, stable, no file required |
+
+Against the plan's own budget the answer is unambiguous: a 100-text re-rank costs
+**3 ms**, and `ml.timeout_seconds` defaults to 2 s. The margin is roughly three
+orders of magnitude.
+
+#### Two caveats that must travel with those numbers
+
+1. **The model file exists only in this machine's Hugging Face cache.** CI has no
+   such file and must never download one, which is why the tests and the seeder
+   use `Deterministic` and why a missing file must select `Disabled` rather than
+   fail start-up.
+2. **The output L2 norm was 0.059, not ~1.0.** MiniLM is normally used with a
+   final normalisation the spike did not apply. That is a `M3` concern: cosine
+   similarity is scale-invariant so ranking is unaffected, but a stored vector
+   that later gains normalisation would change. Record it rather than discover
+   it after the schema is populated.
+
+#### Cost, recorded because it is real
+
+The dependency adds about 11 GB of build artifacts on this machine. `ml` is on by
+default so a plain `cargo test` exercises the same path a deployment would;
+`cargo check --no-default-features` still passes with burn absent, which is the
+property `ADR-0008` required.
+
+#### Checks and results
+
+`fmt` 0, `clippy` 0, `test --all-targets` 0 (**387**), `check
+--no-default-features` 0, `atom-docs` 0, `atom-docs --strict` 0. The spike itself
+exits 0 and prints the table above.
+
+#### What is not verified
+
+The spike measures **throughput and memory**, not **embedding quality**. Whether
+these vectors retrieve the right notes is `M6`'s 15-query evaluation, and no
+number here speaks to it.
+
 ### ATOM-CHANGE-20261024-009 - Job application tracking: schema, endpoints, stage machine and flow
 
 **Date:** 2026-10-24 (UTC)
