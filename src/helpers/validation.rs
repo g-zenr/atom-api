@@ -128,6 +128,13 @@ pub const MONEY_MAX_INTEGER_DIGITS: usize = 15;
 /// round trip the decision promises: the client would send one string and read
 /// back another.
 ///
+/// This is a **per-value** rule and deliberately not the whole money rule: a
+/// claim's `total_amount` is `NUMERIC(19,4)` too, and two items at this bound
+/// sum to `1999999999999999.9998`, which the total column cannot hold. The
+/// total's range is therefore enforced where the total is written, in
+/// `RECOMPUTE_TOTAL` (`crate::reimbursements::repository`), on the same
+/// snapshot as the `SUM` — not by a second comparison here.
+///
 /// # Errors
 ///
 /// Returns [`AppError`] with a field violation when the value is not in the

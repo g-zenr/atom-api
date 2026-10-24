@@ -907,6 +907,14 @@ if every table-level constraint still passes.
    serialization or logging on the money path. The largest representable
    magnitude is `"999999999999999.9999"`; a larger value overflows the type and
    must be rejected by the service as `422` before the statement runs.
+   **The sum is bounded too, not only each value.** Two items each at the
+   maximum are individually legal and together exceed the column, so
+   `RECOMPUTE_TOTAL` in `src/reimbursements/repository.rs` carries
+   `AND sums.total <= 999999999999999.9999` in the same statement that writes
+   the total. A Rust comparison of two decimal strings would be a second,
+   weaker copy of the rule and could be raced; the guard belongs beside the
+   `SUM` it constrains. The item write that produced the sum is rolled back
+   with the refusal.
 
    > **The settled answer (ADR-0007).** `sqlx` is built with `runtime-tokio`,
    > `tls-rustls`, `postgres`, `macros`, `migrate`, `uuid` and `chrono` — not

@@ -123,10 +123,10 @@ The claim as the **listing** returns it: no items.
 | `claim_id` | UUID string | The claim it belongs to. |
 | `description` | string | 1–500 characters. |
 | `amount` | money string | `>= 0`, four decimals, in the claim's currency. |
-| `incurred_on` | date string | `YYYY-MM-DD`. |
+| `amount` | money string | `>= 0`, four decimals, in the claim's currency. An item that would push the claim's **total** above `999999999999999.9999` is refused, and the item write is rolled back with it. |
 | `category` | string or `null` | Trimmed and lower-cased; 1–64 characters; `null` when absent. |
-| `receipt_url` | string or `null` | Absolute `http`/`https`, at most 2048 characters. |
-| `created_at`, `updated_at` | timestamp | RFC 3339 UTC. |
+| `category` | string or `null` | Trimmed and ASCII-lower-cased; 1-64 characters; `null` when absent. A non-ASCII value is `422` because the column's `LOWER()` and Rust's Unicode case folding disagree outside ASCII. |
+| `receipt_url` | string or `null` | Absolute `http`/`https` with a non-empty authority, at most 2048 characters. `https:///` is `422`. Never fetched. |
 
 `ItemResponse` carries no `currency`: the currency is the claim's.
 
@@ -175,7 +175,7 @@ client-selectable sort in Phase 2.
 | `incurred_on` | `YYYY-MM-DD`, a real date | `422` |
 | `category` | 0–64 characters; an empty value is stored as `null` | `422` |
 | `receipt_url` | absolute `http`/`https`, 1–2048 characters | `422` |
-| `search` | 0–200 characters | `422` |
+| `receipt_url` | absolute `http`/`https` with a host, 1-2048 characters | `422` |
 
 ### 2.8 Status and code summary
 
@@ -363,10 +363,10 @@ Adds a line item to a **draft** claim and recomputes the total.
 | Field | Type | Required | Rules |
 | ----- | ---- | -------- | ----- |
 | `description` | string | yes | Trimmed, 1–500 characters. |
-| `amount` | money string | yes | Four decimals, `>= 0`, at most 15 integer digits. |
+| `amount` | money string | yes | Four decimals, `>= 0`, at most 15 integer digits. The claim total must stay at or below `999999999999999.9999`; an item that would exceed it is `422` naming `amount`. |
 | `incurred_on` | date string | yes | `YYYY-MM-DD`, a real date. |
-| `category` | string | no | Trimmed and lower-cased; 1–64 characters. |
-| `receipt_url` | string | no | Absolute `http`/`https`, at most 2048 characters. Never fetched. |
+| `category` | string | no | Trimmed and ASCII-lower-cased; 1-64 characters; a non-ASCII value is `422`. |
+| `receipt_url` | string | no | Absolute `http`/`https` with a non-empty authority, at most 2048 characters. Never fetched. |
 
 ### Response — `201 Created`
 
@@ -410,7 +410,7 @@ Every field is optional. An omitted field is left untouched.
 | `description` | string | Trimmed, 1–500 characters. |
 | `amount` | money string | Four decimals, `>= 0`. |
 | `incurred_on` | date string | `YYYY-MM-DD`. |
-| `category` | string or `null` | Trimmed and lower-cased; 1–64 characters; `null` clears it. |
+| `category` | string or `null` | Trimmed and ASCII-lower-cased; 1-64 characters; `null` clears it; a non-ASCII value is `422`. |
 | `receipt_url` | string or `null` | Valid URL; `null` clears it. |
 
 ### Response — `200 OK`

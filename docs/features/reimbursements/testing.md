@@ -488,3 +488,18 @@ the code.
   only one today — asks the database whether that effect happened and skips with
   a printed reason when it did not, rather than failing on a machine where the
   seeder has not run. A skip is recorded as a skip, never counted as coverage.
+
+### The boundaries the review added
+
+Three rules were narrowed or tightened after an independent review, and each has
+a unit test in `src/reimbursements/service.rs`:
+
+| Test | Rule |
+| ---- | ---- |
+| `a_total_beyond_the_column_is_a_422_naming_the_amount` | Two individually legal maximum items overflow the total; the second is `422` naming `amount` and the item write is rolled back, rather than a `500` from SQLSTATE `22003` |
+| `a_non_ascii_category_is_refused_before_it_reaches_the_database` | `LOWER()` in PostgreSQL and Rust's Unicode case folding disagree outside ASCII, so a non-ASCII category is `422` rather than a constraint violation |
+| the receipt cases | A reference needs a non-empty authority: `https:///` is `422` |
+
+`a_claim_can_be_deleted_in_any_status` (`tests/claims_api.rs`) closes the one
+acceptance criterion that had no test: `REIMB-R11` says a claim is deletable in
+any status, and a `status = 'draft'` guard would now fail it.
