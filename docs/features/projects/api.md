@@ -254,6 +254,11 @@ curl -i -X DELETE http://127.0.0.1:3000/api/v1/projects/3c5a91e7-0d64-4b28-8f10-
 The five operations are registered in `src/api/routes.rs` and appear in the
 generated document at `/api/v1/openapi.json` with the `ProjectResponse`,
 `ProjectPage`, `CreateProjectRequest` and `UpdateProjectRequest` schemas.
-The `bearer` security scheme is applied to all five. The list operation
-declares the `ProjectQuery` filter and the shared `PaginationQuery`
-separately, so `limit` and `offset` appear exactly once in the document.
+The `bearer` security scheme is applied to all five.
+
+The handler takes **one** `Query<ProjectsListQuery>` extractor over the whole
+query string. That type splits into the projects filter (`ProjectQuery`) and
+the shared `PaginationQuery`, so the string is parsed once, and the published
+parameter set is `limit`, `offset` and `search`, each declared exactly once.
+The convention is explained once in
+[`conventions.md`](../../api/conventions.md) §5 and is not repeated here.

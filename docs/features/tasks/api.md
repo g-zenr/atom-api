@@ -286,6 +286,12 @@ The five operations are registered in `src/api/routes.rs` and appear in the
 generated document at `/api/v1/openapi.json` with the `TaskResponse`,
 `TaskPage`, `CreateTaskRequest` and `UpdateTaskRequest` schemas, and with
 `TaskStatus` and `TaskPriority` as named schemas. The `bearer` security
-scheme is applied to all five. The list operation declares the `TaskQuery`
-filters and the shared `PaginationQuery` separately, so `limit` and `offset`
-appear exactly once in the document.
+scheme is applied to all five.
+
+The handler takes **one** `Query<TasksListQuery>` extractor over the whole
+query string. That type splits into the tasks filters (`TaskQuery`) and the
+shared `PaginationQuery`, so the string is parsed once, and the published
+parameter set is `limit`, `offset`, `status` and `priority`, plus the
+`project_id` path parameter — each declared exactly once. The convention is
+explained once in [`conventions.md`](../../api/conventions.md) §5 and is not
+repeated here.

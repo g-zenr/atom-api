@@ -66,9 +66,13 @@ docker compose up -d postgres
 Without Docker, using a local PostgreSQL server:
 
 ```bash
-createdb atom
+createdb atom_dev
 createdb atom_test
 ```
+
+`atom_dev` is the development database the API and the seeder use; `atom_test`
+is the disposable database the integration suite uses; the seeder refuses
+`atom` by design.
 
 ### 2. Configuration
 
@@ -81,7 +85,7 @@ At minimum, set:
 
 ```dotenv
 APP_ENV=development
-DATABASE_URL=postgres://atom:atom@127.0.0.1:5432/atom
+DATABASE_URL=postgres://atom:atom@127.0.0.1:5432/atom_dev
 TEST_DATABASE_URL=postgres://atom:atom@127.0.0.1:5432/atom_test
 APP_JWT_SECRET=<at least 32 random bytes>
 ```

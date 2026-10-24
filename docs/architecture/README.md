@@ -1,7 +1,7 @@
 # ATOM — architecture
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-24
 > **Owner:** maintained by the `architect` agent
 
 This directory describes **the ATOM Phase 1 backend as it is built**. It is the
@@ -18,7 +18,7 @@ the accepted decisions in [`../decisions/`](../decisions/README.md).
 | Document | Contents |
 | -------- | -------- |
 | [`system-overview.md`](system-overview.md) | What the system is, the runtime shape, the components, the deployment topology, the stack and the known limitations. |
-| [`module-boundaries.md`](module-boundaries.md) | Every module: responsibility, public interface, dependencies, data ownership, invariants, security boundary, tests and limitations. |
+| [`module-boundaries.md`](module-boundaries.md) | Every module that exists, plus the three planned Phase 2 modules: responsibility, public interface, dependencies, data ownership, invariants, security boundary, tests and limitations. |
 | [`request-lifecycle.md`](request-lifecycle.md) | From socket to SQL and back: middleware order, extractor order, the handler → service → repository path, error mapping and the correlation id. |
 | [`data-architecture.md`](data-architecture.md) | The persistence model, the ownership model, the search design, the index strategy, the migration/model relationship and the transaction boundaries. |
 | [`security-architecture.md`](security-architecture.md) | Trust boundaries, the authentication boundary, the authorization model, secret handling, rate limiting and error disclosure. |
@@ -30,6 +30,14 @@ contract is described in [`../api/`](../api/README.md), the schema in
 [`../database/schema.md`](../database/schema.md), the security controls in
 [`../security/threat-model.md`](../security/threat-model.md) and the per-feature
 behaviour in [`../features/`](../features/README.md).
+
+**Planned Phase 2 material is marked, and the marking is not decorative.**
+`module-boundaries.md`, `data-architecture.md`, `system-overview.md` and
+`deployment.md` each carry one passage that describes the accepted Phase 2
+modules, tables or settings. Every such passage opens by naming what does not
+exist, and nothing in it is `Implemented` or `Verified`. The rule in §4 below —
+a section that covers something that does not exist says so plainly — is the
+rule those passages follow.
 
 ## 2. When to write an architecture document
 

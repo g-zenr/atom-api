@@ -1,7 +1,7 @@
 # ATOM — deployment
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-24
 > **Owner:** maintained by the `architect` agent
 
 How the ATOM API is configured, started, observed and run in production —
@@ -248,6 +248,77 @@ error: environment variable APP_JWT_SECRET has invalid value <16 bytes>: expecte
 The process exits with a non-zero status and never binds a port in a
 partially configured state.
 
+## Phase 2 settings (planned, not yet present)
+
+> **None of the settings in this section exists.** They are not in `config/`,
+> not in [`.env.example`](../../.env.example), not in `src/config/settings.rs`
+> and not in the tables of §1.3. A configuration file that contains one is
+> refused at start-up, because every settings structure uses
+> `deny_unknown_fields`. The list is here so that the operator reference is
+> complete *in plan*, and so that the implementing change has one place that
+> fixes the names and the defaults.
+
+*The heading is unnumbered on purpose:* the section sits between §1.5 and §2
+without renumbering either, because §1.3, §5.1 and §6.2 are cited by number from
+other documents.
+
+Phase 2 adds **no new process, no new service, no new secret and no credential
+for a third party**. Its one configuration surface is local machine learning
+([`../features/ml/architecture.md`](../features/ml/architecture.md),
+[`../decisions/ADR-0008-local-pure-rust-ml.md`](../decisions/ADR-0008-local-pure-rust-ml.md)),
+which is six settings:
+
+- **`ml.enabled`** — `false` by default. When it is `false` the embedder is
+  `Disabled`, semantic and hybrid requests degrade to lexical results, and no
+  model file is read.
+- **`ml.backend`** — `flex` by default, and the only two values it accepts are
+  `flex` and `deterministic`. `flex` is the Burn v0.22 CPU backend that runs the
+  model; `deterministic` selects the hash-based embedder that every test uses.
+  `wgpu`, `cuda` and `tch` are not options, and neither is an external model
+  server ([`../../AGENTS.md`](../../AGENTS.md) §4.12).
+- **`ml.model_path`** — empty by default. The path to a local SafeTensors file
+  holding the weights.
+- **`ml.dimension`** — the vector length the loaded model produces. It is a
+  property of the model rather than a tuning knob — the plan's working value is
+  `384` — and the validation must refuse a value that disagrees with what the
+  embedder reports.
+- **`ml.timeout_seconds`** — a positive budget for one inference, two seconds in
+  the plan, and never larger than the request timeout.
+- **`ml.candidate_limit`** — a positive cap on the lexical candidate set a
+  hybrid search re-ranks, 200 in the plan, and never smaller than
+  `api.pagination.max_limit`, because a candidate set smaller than one page
+  would make page two impossible.
+
+Four properties of the plan are worth stating here, because they are operational
+rather than internal:
+
+- **The weights are a local file.** A SafeTensors file is placed on the host by
+  the operator. It is not in the repository, not baked into the image and not
+  downloaded by the build or at run time; there is no outbound call to any
+  hosted service, at build time or at run time.
+- **A missing model file does not stop the process.** It selects the `Disabled`
+  embedder, and every semantic or hybrid request answers `200` with lexical
+  results and names the mode that was applied — the deliberate difference from
+  every rule in §1.4, where a bad setting is a start-up failure. A model is an
+  optional artifact, so its absence is a supported state, not a misconfiguration
+  (`ML-R02`, `ML-R06`).
+- **Adding one of the six means all seven places in one change**, as
+  [`../../AGENTS.md`](../../AGENTS.md) §4.11 requires: the file in `config/`, the
+  typed structure, the loader, the validation, `.env.example`, the reference
+  tables (this document and [`../../config/README.md`](../../config/README.md))
+  and the tests. A key that lands in only some of them is either a start-up
+  error or an undocumented setting, and both are defects.
+- **The documentation checker does not cover these keys, and must not be made to
+  pretend that it does.** `check_settings_reference` in
+  [`../../src/bin/atom-docs.rs`](../../src/bin/atom-docs.rs) compares the keys in
+  `config/` with the two reference tables, and it only recognises a row whose
+  first cell is a backticked dotted key beginning `app.`, `api.`, `auth.` or
+  `database.`. That is why the list above is a list and not a table: a `ml.` row
+  would be invisible to the checker and would read like a setting an operator
+  could set today. `SETTINGS_FILES` is likewise a fixed list of the four
+  existing files. **Both must be extended in the same change that adds the
+  settings** — until then `ml.*` is checked by nothing.
+
 ## 2. Secrets
 
 | Rule | Where it is enforced |
@@ -289,15 +360,22 @@ docker compose down                # stop, keep the data
 docker compose down -v             # stop and delete the data
 ```
 
-The compose file creates the `atom` database and, through
-`scripts/create-test-database.sh`, the disposable `atom_test` database that
-the integration suite needs. The credentials match `.env.example` and are for
-local development only.
+The compose file creates the `atom` database from `POSTGRES_DB` and, through
+`scripts/create-test-database.sh`, the development database `atom_dev` and the
+disposable `atom_test` database that the integration suite needs. The
+credentials match `.env.example` and are for local development only.
+
+`atom_dev` is the **development** database — `DATABASE_URL` in `.env.example`
+points at it, and it is the name the API and the seeder use — while `atom_test`
+is **disposable** and used by the integration suite, whose harness refuses any
+database name that does not contain `test`; the seeder refuses `atom`
+deliberately, so the local setup provides a name the guard already accepts
+instead of loosening the guard.
 
 Without Docker:
 
 ```bash
-createdb atom
+createdb atom_dev
 createdb atom_test
 ```
 

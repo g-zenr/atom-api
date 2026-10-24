@@ -1,7 +1,7 @@
 # ATOM testing strategy
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-24
 > **Owner:** maintained by the `docs` agent
 
 This document describes how the ATOM backend is tested: the layers, what each
@@ -115,21 +115,21 @@ CI was the first execution. `KI-019` records that history and is closed.
 
 ### 1.3 Contract
 
-The contract layer is thin today, and that is a deliberate trade-off rather
-than an oversight.
-
 - The OpenAPI document is **generated from the handlers** with `utoipa`, and the
-  Swagger UI serves that generated document. A route that does not exist
-  therefore cannot appear in the document, and a document cannot describe a
-  route that does not exist. The OpenAPI annotation lives next to the handler
-  it describes.
+  Swagger UI serves that generated document. The OpenAPI annotation lives next
+  to the handler it describes.
+- The generated document and the router are declared independently, so they are
+  held together by assertion. `tests/openapi_contract.rs` compares the route
+  table in `src/api/routes.rs` with the operations in the document **in both
+  directions**: a route the document does not describe fails, and an operation
+  the router does not serve fails. It also pins the published query parameter
+  set of each list operation.
 - The request and response shapes are additionally checked by the integration
   suite, which asserts on the real JSON body: field names, field types, the
   error envelope, the pagination block and the absence of secret material.
-- There is **no dedicated contract test file**, and no test that asserts the
-  *content* of the OpenAPI document — for example that every documented path
-  answers, or that every documented status code is reachable. This is listed as
-  a gap in §6.
+- What is still **not** asserted is behaviour behind the document — for example
+  that every documented status code is reachable. The document says what the
+  operations are, not that each branch was exercised.
 
 ### 1.4 Security
 
@@ -137,7 +137,7 @@ There is no separate security test file. The security cases live inside the
 integration files, next to the behaviour they protect, so that a reviewer
 sees them in context.
 
-Ten of the fifty-six integration tests are dedicated security cases:
+Ten of the sixty-eight integration tests are dedicated security cases:
 
 | Test | File |
 | ---- | ---- |
@@ -343,6 +343,11 @@ suite as it stands.
 2. **No contract test of the OpenAPI document.** Nothing asserts that the
    generated document lists every route, that a documented status code is
    reachable, or that the document can be parsed as OpenAPI.
+   *Partly covered since 2026-10-24:* `tests/openapi_contract.rs` asserts that
+   the route table and the document describe the same operations in both
+   directions, that every route is mounted, and that each list operation
+   publishes its parameter set exactly once. The reachability of every
+   documented status code is still not asserted.
 3. **No test of the login timing equalisation.** The dummy verification exists
    and uses the configured cost parameters; nothing measures that the two
    paths take a comparable time.
@@ -373,3 +378,102 @@ suite as it stands.
    name, and `a_search_term_over_the_bound_is_refused` in
    [`../../tests/notes_api.rs`](../../tests/notes_api.rs) asserts the `422`
    at HTTP level.
+
+## 7. The Phase 2 test matrix
+
+Phase 2 adds three features — reimbursements, job applications and local
+machine learning — plus a database seeder and the hardening of the existing
+API. This section says which layer proves which property, so that a gap is
+visible before the code is written.
+
+**This is a target, not a record.** Nothing in this section has been run. The
+evidence for a Phase 2 feature is the recorded run in its `status.md`, and
+until that exists the feature is `Accepted`, not `Verified`.
+
+### 7.1 Which layer proves what
+
+| Property | Proved by | Why not another layer |
+| -------- | --------- | --------------------- |
+| **Schema** — the migration applies from empty, the constraints exist, the cascade and `SET NULL` behave | Integration, against a real PostgreSQL | A unit test cannot run a `CHECK`; a mock cannot cascade. |
+| **Money** — the four-decimal string, the exact sum, no float | Unit (the format) **and** integration (the round trip and the sum) | The unit test proves the parser; only the database proves that `SUM(numeric)` is exact through the whole path. |
+| **Transitions** — every allowed and every forbidden edge | Unit (the table) **and** integration (one case per edge) | A unit test proves the table; the integration test proves that the handler and the service actually call it. |
+| **Ownership** — a foreign row is `404` for every verb | Integration | The predicate is SQL; a unit test cannot exercise it. |
+| **Contract** — every path and method in the document, the parameter sets, the schema types | Contract, against `/api/v1/openapi.json` | The document is generated from the handlers; only a comparison catches drift. |
+| **Degradation** — ML off and model missing return lexical results with `200` | Integration, with two configurations | A unit test can prove the selection function; only the request path proves the response shape and the status. |
+| **Seeder** — the guards, determinism, the money and ownership invariants | Integration, driving the binary | The seeder is not reachable through the router. |
+
+### 7.2 The layers in the Phase 2 suite
+
+| Layer | Phase 2 responsibility | Where |
+| ----- | ---------------------- | ----- |
+| Unit | The transition tables, the money format, the URL validators, the embedder selection and the similarity function, the configuration defaults and validation | `src/reimbursements/`, `src/job_applications/`, `src/ml/`, `src/config/tests.rs` |
+| Integration | Every endpoint: happy path, `401`, `404` for another owner, `400` malformed id and body, `422` validation, every documented error code, the lists, the flow tests | `tests/claims_api.rs`, `tests/job_applications_api.rs`, `tests/ml_api.rs` |
+| Contract | The route table against the document, the published parameter sets, the money and score schema types | `tests/openapi_contract.rs` |
+| Process | The seeder's guards and determinism | `tests/seeder.rs` |
+| Manual | The real model's retrieval quality and cost | Recorded in `docs/features/ml/status.md` |
+
+The Phase 1 layers and the isolation rules in §2 are unchanged. A Phase 2
+test uses the same harness, the same production-safety guard and the same
+unique-data-per-test rule.
+
+### 7.3 The size target
+
+| Metric | Before Phase 2 | Target | Note |
+| ------ | -------------- | ------ | ---- |
+| Integration tests | 68 on Windows, 70 on a unix host | at least **218** | The Phase 2 target is **at least 150 new integration tests**. |
+| Unit tests | 111 | at least 150 | The new modules bring their own unit tests; the target is a floor, not a ceiling. |
+| Whole suite | **179** on Windows, **181** on a unix host | **roughly 330** | 179 + 150 = 329. The two `shutdown` tests remain unix-only, so the platform difference stays. |
+
+The old figure of 177 in
+[`plan.md`](../engineering/runs/chain/plan.md) §4 is stale; the measured
+baseline in
+[`ledger.md`](../engineering/runs/chain/ledger.md) is 179 on Windows.
+
+An indicative allocation, not a quota:
+
+| Area | New integration tests |
+| ---- | --------------------- |
+| Reimbursements | about 45 |
+| Job applications | about 50 |
+| Local machine learning | about 30 |
+| The seeder | about 15 |
+| Contract and hardening | about 20 |
+
+### 7.4 The rule: a test that cannot fail is not evidence
+
+A test is evidence only if it fails when the rule it protects is removed. The
+implementing change must show that, for every rule that matters, by making the
+rule wrong on purpose and watching the test fail. The three cheap ways to make
+a test worthless, and the answer to each:
+
+| Anti-pattern | Example | The answer |
+| ------------ | ------- | ---------- |
+| **Asserting only the status** | `assert_eq!(response.status(), 200)` on a search that must return the right note | Assert the body field that carries the rule: the note id, the score's presence, the degraded reason. |
+| **A test that passes on an empty result** | "hybrid returns at most 200 items" on a corpus of 3 | Build a corpus larger than the bound, then assert the bound. |
+| **A test that cannot reach the branch** | A `404` cross-account test with a token for the same account | Register two accounts and use the other one's token, as the Phase 1 tests do. |
+
+Two further rules apply to this phase specifically:
+
+1. **A degradation test asserts all four fields** — `requested_mode`, `mode`,
+   `degraded`, `degraded_reason`. Any one alone can pass by accident.
+2. **A money test compares the string**, never a parsed number. A test that
+   parses `"0.3000"` into `0.3` and compares it to `0.3` proves nothing about
+   the representation.
+
+### 7.5 The gates for a Phase 2 change
+
+A Phase 2 feature is not complete until all of these pass and are recorded:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-targets
+cargo check --no-default-features --all-targets
+cargo run --bin atom-docs
+cargo run --bin atom-docs -- --strict
+```
+
+The first three are the Phase 1 gates of
+[`verification-policy.md`](verification-policy.md). The fourth proves that the
+base build still compiles without the optional features, and the last two
+prove that the documentation tree is consistent.

@@ -1,7 +1,7 @@
 # ATOM — data architecture
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-24
 > **Owner:** maintained by the `architect` agent
 
 How the data is shaped, owned, searched and indexed, and how the migrations
@@ -342,6 +342,152 @@ would no longer be a bound at all.
 
 The defect that broke this property, and its resolution, are recorded as
 `KI-015` in [`../engineering/known-issues.md`](../engineering/known-issues.md).
+
+---
+
+## Phase 2 data (planned)
+
+> **Planned. None of the tables below exists.** `migrations/` ends at `0003`, no
+> Rust model in `src/` names them, and no endpoint reads or writes them. They
+> are the schema implied by the **accepted** Phase 2 requirements
+> ([`../project-truth.md`](../project-truth.md) §18), and they are described
+> column by column in [`../database/schema.md`](../database/schema.md) §11 —
+> which is the authority for the physical definition. This section records only
+> what the *data architecture* has to say about them: how the conventions of §1
+> carry over, and where Phase 2 departs from them.
+
+*The heading is unnumbered on purpose:* §7 is cited by number from
+[`../project-truth.md`](../project-truth.md) §12, so renumbering it would
+repoint that reference.
+
+### The migrations, and the number of tables
+
+Three migrations, one per feature, in this order. The numbers are fixed by
+[`../database/schema.md`](../database/schema.md) §11.8 and the append-only rule
+of §5 above applies unchanged: each lands with its Rust models, its repository
+statements, its DTOs and its seeder extension in the same change, and none edits
+a migration that has been applied.
+
+| Migration | Creates | Requirements |
+| --------- | ------- | ------------ |
+| `0004_reimbursements.sql` | `expense_claim_status`, `expense_claims`, `expense_items`, with their constraints and indexes | `REIMB-R01`…`R10` |
+| `0005_job_applications.sql` | `job_application_status`, `application_event_kind`, `companies`, `job_applications`, `application_events`, with their constraints and indexes | `JOB-R01`…`R09` |
+| `0006_embeddings.sql` | `embeddings`, with its constraints and indexes | `ML-R01`…`R09` |
+
+Six tables and three enum types. No migration creates a PostgreSQL extension:
+`REAL[]` is a built-in type, and the reason the `vector` extension is not used is
+recorded in [`../decisions/ADR-0008-local-pure-rust-ml.md`](../decisions/ADR-0008-local-pure-rust-ml.md).
+
+### The conventions that do not change
+
+- **Primary keys** are still application-generated `UUID`s; **timestamps** are
+  still `TIMESTAMPTZ`, with two `DATE` columns for calendar days
+  (`expense_items.incurred_on`, `job_applications.applied_on`) because a day is
+  not an instant. **Length limits** are still mirrored by a `CHECK`. **Deletion**
+  is still explicit in the schema, through an `ON DELETE` behaviour on every
+  foreign key.
+- **Uniqueness is still enforced by the database**, never by a check-then-insert:
+  `(user_id, lower(name))` on `companies` and
+  `(user_id, source_type, source_id, model_id)` on `embeddings` are the two new
+  examples.
+- **Controlled state is still refused by the database**: the claim status, the
+  application stage and the event kind are native enum types, so an
+  out-of-contract value cannot be persisted. The *transition* between two legal
+  values stays a service rule, because a `CHECK` sees one row and cannot see the
+  previous state.
+
+### The ownership model, unchanged
+
+Every Phase 2 table carries `user_id`, and every statement carries it as a bound
+parameter — the rule of [`../decisions/ADR-0005-ownership-enforced-in-sql.md`](../decisions/ADR-0005-ownership-enforced-in-sql.md)
+and of §2 above. The difference from Phase 1 is narrow and deliberate: Phase 1
+has exactly one table without the column — `tasks` — and **no Phase 2 table
+does**. `expense_items` and `application_events` are children, and they carry the
+owner themselves, so the child's predicate needs no join and a cross-owner child
+row is made unrepresentable by a composite foreign key rather than by a service
+check.
+
+Two links the database cannot constrain on the caller's side, and what replaces
+the constraint:
+
+| Link | Why SQL cannot prove it | What does |
+| ---- | ----------------------- | --------- |
+| `expense_claims.project_id` | The column is nullable with `ON DELETE SET NULL`, so it is not part of a composite key to the project's owner | One owner-scoped read of `projects` before the write; a foreign id is `404` |
+| `job_applications.next_action_task_id` | `tasks` has no `user_id`, so there is nothing to reference | The same read through the `tasks → projects` join of §2.1; a foreign id is `404` |
+
+An inaccessible row is still `404`, never `403`. That is unchanged, and it is
+the reason the two links above are verified by the service rather than surfaced
+as a constraint violation.
+
+### The polymorphic `embeddings.source_id`
+
+`embeddings.source_id` points at either a note or an application, chosen by
+`source_type`, so it can carry **no foreign key** — PostgreSQL cannot reference
+two tables from one column. The trade-off and its price are recorded in
+[`../decisions/ADR-0008-local-pure-rust-ml.md`](../decisions/ADR-0008-local-pure-rust-ml.md)
+and in [`../database/schema.md`](../database/schema.md) §11.6; the consequence
+for this document is one **cleanup rule that has no equivalent in Phase 1**:
+
+- **The delete that removes a source removes its embeddings in the same
+  transaction.** A note delete and an application delete therefore become
+  multi-statement transactions (below).
+- **The reindex is the backstop.** `POST /api/v1/ml/reindex` deletes the caller's
+  embeddings whose source no longer exists, so a delete path that forgot the
+  rule leaves a leak of storage rather than a leak of data — the row is
+  unreachable through any owner-scoped query.
+- **The read side never relies on the row existing.** Every embedding read
+  filters `user_id` and `source_type` first, so a stale `source_id` cannot
+  return another account's note.
+- **The write is in the same transaction as the source row**, so an embedding
+  cannot be inserted for a source whose insert rolled back.
+
+The module edge this creates — `notes` and `job_applications` calling one SQL
+function in `ml`, and nothing calling `MlService` — is fixed in
+[`module-boundaries.md`](module-boundaries.md).
+
+### The money rule
+
+Four columns carry money: `expense_claims.total_amount`, `expense_items.amount`,
+`job_applications.salary_min` and `job_applications.salary_max`. All four are
+`NUMERIC(19,4)`, and the wire form is a **string** with exactly four decimal
+places. The decision, and the reasons no floating-point type may appear on the
+path, are in [`../decisions/ADR-0007-money-representation.md`](../decisions/ADR-0007-money-representation.md).
+
+Three consequences for the persistence layer, plus one constraint the
+implementing change has to satisfy before `0004` is written:
+
+1. **Money crosses the repository boundary as a `String`**, selected with an
+   explicit `::text` cast. No `numeric` reaches Rust as anything else.
+2. **The arithmetic happens in PostgreSQL** — `SUM(amount)` for the claim total,
+   `CHECK (salary_min <= salary_max)` for the range — never in Rust.
+3. **The type that parses and renders it is shared by both features**, so the
+   four decimals have one home. Its placement is decided in
+   [`module-boundaries.md`](module-boundaries.md) under the `money` module.
+4. **`sqlx` has no enabled feature that can decode `NUMERIC` today** — no
+   `rust_decimal`, no `bigdecimal`
+   ([`../database/schema.md`](../database/schema.md) §11.8, item 1). `0004` must
+   either add one (a dependency change with its recorded reason) or keep the
+   `::text` cast on every money read. What it must not do is decode through
+   `f64`.
+
+### The first explicit transactions in a request path
+
+§7 above records that **Phase 1 has no explicit transaction in the request
+path**, and that statement stays true for Phase 1. Phase 2 introduces the first
+ones, because four operations have an invariant that spans two statements:
+
+| Operation | Statements that must commit together |
+| --------- | ------------------------------------ |
+| Insert, update or delete a line item | The item write and the `total_amount` recomputation (`REIMB-R03`) |
+| Submit, decide or pay a claim | The status change and the lifecycle timestamps |
+| Change an application's stage | `SELECT … FOR UPDATE`, `ensure_transition`, and the `UPDATE` |
+| Delete a note or an application | The delete and the embeddings it owns |
+
+The pattern is the same in all four: one service method opens the transaction,
+the repository functions take the caller's connection or transaction, and a
+refused rule rolls the whole thing back. A reindex is the deliberate exception —
+it is per-row and idempotent, so one transaction per row rather than one for the
+run, because an interrupted run is simply run again.
 
 ## 8. Related documents
 

@@ -328,10 +328,16 @@ async fn a_malformed_list_parameter_is_a_bad_request() {
     let user = register_user(&app, "list-query-bad").await;
     let project_id = create_project(&app, &user, "Malformed query").await;
 
+    // The whole string is deserialized once, so each kind of malformed value
+    // must take the same single rejection path: a number that is not a number,
+    // a flag that is not a boolean, and an enum variant that does not exist.
     let queries = [
         "/api/v1/notes?limit=not-a-number".to_string(),
+        "/api/v1/notes?archived=not-a-boolean".to_string(),
         "/api/v1/projects?limit=not-a-number".to_string(),
         format!("/api/v1/projects/{project_id}/tasks?limit=not-a-number"),
+        format!("/api/v1/projects/{project_id}/tasks?status=not-a-status"),
+        format!("/api/v1/projects/{project_id}/tasks?priority=not-a-priority"),
     ];
 
     for uri in queries {
@@ -351,6 +357,20 @@ async fn a_malformed_list_parameter_is_a_bad_request() {
                 .as_str()
                 .is_some_and(|message| !message.is_empty()),
             "the error envelope must carry a message for {uri}: {body}"
+        );
+
+        // The shape is the contract, not only the status: one top-level
+        // `error` member, and no `details`, because a query string that cannot
+        // be parsed is not a field-level validation failure.
+        assert!(
+            body.as_object()
+                .is_some_and(|top| top.len() == 1 && top.contains_key("error")),
+            "the body of {uri} must carry exactly one top-level member named 'error': {body}"
+        );
+        assert!(
+            body["error"].get("details").is_none(),
+            "a malformed query parameter of {uri} is not a field-level validation failure and \
+             must carry no 'details': {body}"
         );
     }
 }

@@ -41,7 +41,7 @@ docker compose up -d postgres
 or, with a local server:
 
 ```bash
-createdb atom
+createdb atom_dev
 createdb atom_test
 ```
 

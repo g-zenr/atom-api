@@ -63,6 +63,15 @@ but not served, are both failures. The explorer routes are outside the
 comparison because they are not part of the described API: they serve the
 document, they are not in it.
 
+A new endpoint is therefore added in **one change**: the handler, its
+`#[utoipa::path(...)]` attribute and its table entry together, with the
+contract test as the gate. The case the gate cannot see is a handler mounted in
+`api_routes()` that is **also** missing from `ApiDoc`'s `paths(...)` list —
+Axum exposes no route introspection, so an unregistered handler appears in
+neither the tables nor the document. Registering it in `ApiDoc` without adding
+a table entry does fail the test; it is the pair of omissions that is a review
+responsibility.
+
 ## 2. Resource naming
 
 - Paths use **plural nouns**: `/notes`, `/projects`, `/tasks`,

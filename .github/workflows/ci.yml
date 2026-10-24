@@ -53,7 +53,7 @@ jobs:
           --health-retries 10
 
     env:
-      DATABASE_URL: postgres://atom:atom@127.0.0.1:5432/atom
+      DATABASE_URL: postgres://atom:atom@127.0.0.1:5432/atom_dev
       TEST_DATABASE_URL: postgres://atom:atom@127.0.0.1:5432/atom_test
       APP_JWT_SECRET: ci-only-signing-secret-of-at-least-32-bytes
 
@@ -79,21 +79,38 @@ jobs:
       - name: Fetch the dependencies
         run: cargo fetch --locked
 
-      - name: Create the disposable test database
+      - name: Create the local databases
         # The official PostgreSQL image creates one database per service
-        # container. The integration suite needs a second, disposable one, and
-        # the harness refuses to run unless its name contains "test".
+        # container. The gates need two more: `atom_test`, a disposable name
+        # the harness accepts because it contains "test", and `atom_dev`, the
+        # development name the API and the seeder use because the seeder
+        # refuses a database named `atom`. The job's `DATABASE_URL` points at
+        # `atom_dev`; the harness overwrites `database.url` from
+        # `TEST_DATABASE_URL`, so the two names must not be confused.
+        #
+        # The loop waits out the window in which the service container is
+        # still starting, and a database that already exists counts as done,
+        # so the step is safe to re-run.
         run: |
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if PGPASSWORD=atom psql -h 127.0.0.1 -U atom -d atom -c \
-              "CREATE DATABASE atom_test OWNER atom" 2>/dev/null; then
-              echo "atom_test created"
-              exit 0
-            fi
-            sleep 3
-          done
-          echo "could not create the test database" >&2
-          exit 1
+          create_database() {
+            for attempt in 1 2 3 4 5 6 7 8 9 10; do
+              if PGPASSWORD=atom psql -h 127.0.0.1 -U atom -d atom -v ON_ERROR_STOP=1 \
+                -c "CREATE DATABASE $1 OWNER atom" >/dev/null 2>&1; then
+                echo "$1 created"
+                return 0
+              fi
+              if PGPASSWORD=atom psql -h 127.0.0.1 -U atom -d atom -tAc \
+                "SELECT 1 FROM pg_database WHERE datname = '$1'" 2>/dev/null | grep -qx 1; then
+                echo "$1 already exists"
+                return 0
+              fi
+              sleep 3
+            done
+            echo "could not create $1" >&2
+            return 1
+          }
+          create_database atom_test
+          create_database atom_dev
 
       - name: Check the formatting
         run: cargo fmt --all -- --check

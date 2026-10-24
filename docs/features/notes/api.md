@@ -265,6 +265,11 @@ curl -i -X DELETE http://127.0.0.1:3000/api/v1/notes/1f9c6d2e-8f31-4a0b-9d55-2c7
 The five operations are registered in `src/api/routes.rs` and appear in the
 generated document at `/api/v1/openapi.json` with the `NoteResponse`,
 `NotePage`, `CreateNoteRequest` and `UpdateNoteRequest` schemas. The `bearer`
-security scheme is applied to all five. The list operation declares the
-`NoteQuery` filters and the shared `PaginationQuery` separately, so `limit` and
-`offset` appear exactly once in the document.
+security scheme is applied to all five.
+
+The handler takes **one** `Query<NotesListQuery>` extractor over the whole
+query string. That type splits into the notes filter (`NoteQuery`) and the
+shared `PaginationQuery`, so the string is parsed once, and the published
+parameter set is `limit`, `offset`, `search` and `archived`, each declared
+exactly once. The convention is explained once in
+[`conventions.md`](../../api/conventions.md) §5 and is not repeated here.

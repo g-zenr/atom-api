@@ -80,7 +80,10 @@ Every feature meets all of the following, or it is not done:
 - **Seeder**: every table the feature adds is seeded in the same chain.
 - **Gates**: `fmt`, `clippy -D warnings`, `test`, `check --no-default-features`,
   `atom-docs`, `atom-docs --strict`.
-- **Volume**: at least 150 new tests; the suite grows from 177 to roughly 330.
+- **Volume**: at least 150 new tests. Measured base: **179** on 2026-10-24 before
+  the close-out, **191** after chain `D0` (12 new). The target is therefore
+  roughly **340** at the end of Phase 2; the number is a floor for planning, not
+  an acceptance criterion in itself.
 - **Review**: `code-reviewer` on the diff and `quality-gate` on the evidence
   before anything is marked `Verified`.
 
@@ -96,8 +99,9 @@ three letters), `total_amount NUMERIC(19,4)`, `status` (`draft`, `submitted`,
 `submitted_at`, `decided_at`, `paid_at`, `created_at`, `updated_at`.
 
 `expense_items`: `id`, `user_id`, `claim_id` (`ON DELETE CASCADE`), description,
-`amount NUMERIC(19,4)` (`>= 0`), `incurred_on`, `category`, `created_at`,
-`updated_at`.
+`amount NUMERIC(19,4)` (`>= 0`), `incurred_on`, `category`, `receipt_url`
+(nullable; ADR-0009 puts the receipt on the line item, not the claim),
+`created_at`, `updated_at`.
 
 Invariants:
 
@@ -125,9 +129,12 @@ Invariants:
 `occurred_at`, `summary`, `details`, `created_at`.
 
 Stage machine: `wishlist → applied → screening → interview → offer`;
-`rejected` and `withdrawn` are reachable from any non-terminal stage; `offer` is
-terminal. A company and an application always share an owner; a foreign key that
-crosses owners is rejected by the service and the tests.
+`rejected` and `withdrawn` are reachable from any non-terminal stage; `offer`,
+`rejected` and `withdrawn` are terminal. A company and an application always
+share an owner; a foreign key that crosses owners is rejected by the service and
+the tests. The accepted statement of this machine is
+[`project-truth.md`](../../../project-truth.md) §18.2 `JOB-R04`; where this sketch
+and §18.2 differ, §18.2 wins.
 
 ### 5.3 Embeddings
 
@@ -251,8 +258,8 @@ claims cover every status; applications cover every stage.
 
 The seeder refuses to run unless all of these hold:
 
-1. `APP_ENV` is not `production`.
-2. The database name contains `dev`, `local` or `test`.
+1. `APP_ENV` is unset, or one of `development`, `dev`, `local`. Every other value is refused (`A-C-S1-5`).
+2. The database name is `atom_dev`, `atom_test`, `atom_local` or `atom_demo`, or ends in `_dev`, `_test` or `_local`, read through the driver's own URL parser (`A-C-S1-6`).
 3. The database contains no user outside the seeded id set, unless
    `--allow-non-empty` is passed. This stops a real development database from
    being wiped by a typo.
@@ -267,7 +274,7 @@ then inserts. It never truncates a table it does not own.
 - Every id is derived from a fixed namespace and a counter. No `rand`, no clock,
   no `uuid::new_v4()`. Re-running `--reset` reproduces the same ids and counts.
 - Timestamps are derived from a fixed base date, not `now()`, so a re-run is
-  byte-identical and screenshots are stable.
+  identical in ids and timestamps, so screenshots are stable. It is not literally byte-identical: the Argon2 salt of `users.password_hash` is fresh on every run, which is the one documented exception.
 - Without `--reset`, inserts use `ON CONFLICT (id) DO NOTHING` and the run
   reports how many rows were inserted and how many were skipped.
 
@@ -290,10 +297,11 @@ unnecessarily slow.
 
 ### Tests
 
-`tests/seeder.rs`: the production guard, the database-name guard, the
-foreign-rows guard, profile counts, idempotency, determinism across two runs,
-the money invariant, the ownership invariant, and the absence of the connection
-string in the output.
+`tests/seeder.rs`: the production guard (`A-C-S1-5`), the database-name guard
+(`A-C-S1-6`), the two-phase foreign-rows guard (`A-C-S1-7`), the redaction tests
+(`A-C-S1-8`) and the ten tests locked in `C-S1` — twelve integration tests in
+total, listed in
+[`../../database/seeding.md`](../../../database/seeding.md) §9.
 
 ### Documentation
 

@@ -39,7 +39,7 @@ The document describes the API as it is built. Its `info.version` is the crate
 version from `Cargo.toml` (`0.1.0`), and its `info.title` is the configured
 `api.title` (`ATOM API` by default).
 
-### The document and the routes cannot drift
+### The route table and the document agree by construction
 
 The document's content is asserted, not merely generated. `tests/openapi_contract.rs`
 compares the route table in `src/api/routes.rs` with the operations in the
@@ -63,6 +63,14 @@ Two consequences for a contributor: adding an operation means adding it to the
 table **and** to the `#[utoipa::path(...)]` annotations, and moving the API to
 another version prefix means changing `API_PREFIX` and nothing else in the
 mounting layer. Both are held by a test, so neither is a matter of remembering.
+
+**One case no test covers.** Axum exposes no route introspection, so a route
+added to `api_routes()` whose handler is **also** absent from `ApiDoc`'s
+`paths(...)` list is in neither side of the comparison, and the test has
+nothing to fail on. If the handler is registered in `ApiDoc` instead, the
+document gains the operation and the agreement test fails; it is the pair of
+omissions that is invisible. That case is caught by review, not by the suite: a
+new endpoint lands with its table entry in the same change.
 
 ## 2. How to regenerate and serve it
 

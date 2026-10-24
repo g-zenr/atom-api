@@ -1,7 +1,7 @@
 # ATOM known issues
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-24
 > **Owner:** maintained by the `docs` agent
 
 Confirmed defects, limitations and gaps: things that are known to be wrong, to
@@ -684,6 +684,8 @@ test `a_body_limit_above_the_reader_ceiling_is_refused`.
 | `KI-017` | The configuration accepted a session prune grace shorter than the expired-token window needs | Closed | Medium |
 | `KI-018` | The configured body limit stops at an independent 4 MiB backstop | Closed | Low |
 | `KI-019` | The shutdown drain has a test that has not run on a unix host | Closed | Low |
+| `KI-020` | The seeder's database-name guard refuses the repository's own default database | Open - mitigation in `S1` | Medium |
+| `KI-021` | The compose volume was mounted where PostgreSQL 18 no longer keeps its data | Closed | High |
 
 ### KI-019 — The shutdown drain had a test that had not run on a unix host
 
@@ -721,3 +723,144 @@ behaviour is `Verified`.
 **Related.** [`../../tests/shutdown.rs`](../../tests/shutdown.rs),
 [`../testing/strategy.md`](../testing/strategy.md) §1.4,
 `ATOM-REVIEW-20261022-003`.
+
+---
+
+### KI-020 - The seeder's database-name guard refuses the repository's own default database
+
+**Status:** Open - **planned mitigation in the `S1` chain** - **Severity:** Medium - **Recorded:** 2026-10-24
+
+**Description.** The locked seeder contract `C-S1` guard `G2` refuses to run
+unless the database name is a development database. The rule as originally
+locked was a substring test for `dev`, `local` or `test`. Two independent
+reviews found it wrong in both directions:
+
+- it admits names that are not development databases - `contest`, `latest`,
+  `mytest`, `devops`, `production_test` - so a restored staging or production
+  dump renamed for convenience would pass;
+- it refuses the repository's own default database. `docker-compose.yml` creates
+  `POSTGRES_DB: atom` and `.env.example` points `DATABASE_URL` at `.../atom`,
+  so the documented local setup cannot run the seeder at all.
+
+There is a second, unrelated defect in the same guard: `G1` was a substring test
+for `production`, but `Environment::parse` in
+[`../../src/config/mod.rs`](../../src/config/mod.rs) also maps `prod` to
+production, so the documented production alias passed the guard.
+
+**Impact.** A developer following the quickstart cannot seed; a developer who
+renames a database to contain `test` to get past the guard weakens the only
+client-side protection the tool has. Neither outcome is acceptable, and the
+second teaches the wrong habit.
+
+**Workaround until `S1` lands.** Create a database whose name the guard accepts
+(`createdb atom_dev`) and point `DATABASE_URL` at it. The specification in
+[`../database/seeding.md`](../database/seeding.md) documents this.
+
+**Planned mitigation.** Contract amendments `A-C-S1-5` and `A-C-S1-6` in
+[`runs/chain/ledger.md`](runs/chain/ledger.md) replace both substring tests with
+allow-lists that match the code: `G1` allows only the values
+`Environment::parse` calls development, and `G2` becomes a whole-name allow-list
+(`atom_dev`, `atom_test`, `atom_local`, `atom_demo`, plus a `_dev`/`_test`/
+`_local` suffix rule) read through the driver's own URL parser, with a
+`current_database()` cross-check after connecting.
+
+**Residual risk that no guard closes.** No client-side check can tell a
+development database from a production database that someone named `atom_dev`.
+The guards are typo-catchers. The real boundary is that a database holding the
+seeded accounts - which are working credentials with a published password - must
+never be reachable by an untrusted client. That is recorded in
+[`../../security/threat-model.md`](../security/threat-model.md) as part of the
+`T-05` residual.
+
+**Related.** [`../database/seeding.md`](../database/seeding.md),
+[`runs/chain/ledger.md`](runs/chain/ledger.md) `C-S1`,
+[`../../security/secure-development.md`](../security/secure-development.md).
+
+---
+
+### KI-021 — The compose volume was mounted where PostgreSQL 18 no longer keeps its data
+
+**Status:** Closed · **Severity:** High · **Closed:** 2026-10-24
+
+**Description.** [`../../docker-compose.yml`](../../docker-compose.yml) mounted the
+named volume `atom-postgres-data` at `/var/lib/postgresql/data`. That is the path
+every PostgreSQL image before 18 used, and it is no longer where the data lives.
+The generated `Dockerfile` for `18/alpine3.23` in `docker-library/postgres` sets:
+
+```text
+ENV PGDATA /var/lib/postgresql/18/docker
+VOLUME /var/lib/postgresql
+```
+
+On start-up `docker-entrypoint.sh` therefore looks for `PG_VERSION` under the new
+location and then scans the old ones. When it finds no database directory but
+does find a mount at the old path, it records
+`/var/lib/postgresql/data (unused mount/volume)` as an old database and calls
+`docker_error_old_databases`, which exits 1:
+
+```text
+Error: in 18+, these Docker images are configured to store database data in a
+       format which is compatible with "pg_ctlcluster" (specifically, using
+       major-version-specific directory names).  This better reflects how
+       PostgreSQL itself works, and how upgrades are to be performed.
+...
+       The suggested container configuration for 18+ is to place a single mount
+       at /var/lib/postgresql which will then place PostgreSQL data in a
+       subdirectory, allowing usage of "pg_upgrade --link" without mount point
+       boundary issues.
+```
+
+**Impact.** On a **fresh** volume the container never initialises, because the
+check runs before `initdb`. The init script mounted in
+`/docker-entrypoint-initdb.d/` therefore never runs, so neither `atom_test` nor
+`atom_dev` would exist — and neither would the image's own `POSTGRES_DB`.
+`docker compose up -d postgres` would leave a developer with a container that
+exits instead of a database. Nobody had noticed, because `KI-006` records that
+this machine has the Docker CLI but no usable daemon (`docker info` answers
+`500`), so the container had never been started here.
+
+**Fix.** The mount now targets `/var/lib/postgresql`, the directory the image
+declares as its volume; PostgreSQL creates `18/docker` beneath it itself. That is
+also what makes the init script run exactly once: the entrypoint processes
+`/docker-entrypoint-initdb.d/` only when the data directory is empty, and a mount
+at the declared volume root is no longer mistaken for pre-18 data.
+
+**Evidence.** `docker compose config` exits 0 and renders the corrected target:
+
+```yaml
+    volumes:
+      - type: volume
+        source: atom-postgres-data
+        target: /var/lib/postgresql
+        volume: {}
+```
+
+The init script was run twice against the local PostgreSQL 18 with scratch names
+(`TEST_DB=atom_test_ki021`, `DEV_DB=atom_dev_ki021`, `POSTGRES_USER=atom`,
+`POSTGRES_DB=atom`, so the role and the bootstrap database match the compose
+file). The first run created both databases, the second was a no-op, and both
+runs exited 0:
+
+```text
+--- run 1 ---
+CREATE DATABASE
+CREATE DATABASE
+exit=0
+--- run 2 ---
+exit=0
+--- databases after both runs ---
+atom_dev_ki021|atom
+atom_test_ki021|atom
+```
+
+**What is not verified.** The container was never started. `docker compose up`
+was not run: this machine has no usable daemon (`KI-006`), so there is nothing to
+start it with. The PostgreSQL 18 behaviour above is read from the generated
+`Dockerfile` and `docker-entrypoint.sh` of `docker-library/postgres`
+`18/alpine3.23`, not observed in a running container. Confirming the first start
+needs a machine with a working Docker daemon, and that confirmation is still
+outstanding.
+
+**Related.** [`../../docker-compose.yml`](../../docker-compose.yml),
+[`../../scripts/create-test-database.sh`](../../scripts/create-test-database.sh),
+`KI-006`, `KI-020`.

@@ -1,11 +1,13 @@
 # ATOM — module boundaries
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-24
 > **Owner:** maintained by the `architect` agent
 
 What each module owns, what it may depend on, and which invariant it is
-responsible for. The layering rule that this document enforces is fixed by
+responsible for. §1–§7 describe the modules that **exist**; the last section
+describes the three **planned** Phase 2 modules and says so throughout.
+The layering rule that this document enforces is fixed by
 [`../../AGENTS.md`](../../AGENTS.md) §2:
 
 | Layer | Responsibility |
@@ -137,6 +139,196 @@ Source: `src/tasks/handlers.rs`, `src/tasks/service.rs`,
 | Security boundary | Ownership is inherited through the project join. A task reached through a project the caller does not own is `404`, never `403`. The list endpoint additionally probes the project when the result set is empty, so that "no such project" and "no tasks" are distinguishable without disclosing another account's project. |
 | Testing approach | `tests/projects_tasks_api.rs` covers task creation and listing inside a project, the completion timestamp, filtering by status and priority, the refusal to reach a task through another account's project, the refusal to create a task in another account's project, the cascade on project deletion and the rejection of an unknown status. Unit tests in `src/tasks/service.rs` and `src/tasks/models.rs` cover the title and description rules and the wire names of the enum variants. |
 | Known limitations | The ordering key is a `DOUBLE PRECISION` fraction and there is **no reordering endpoint**: a client sets `position` explicitly. A new task is placed at `MAX(position) + 1000` when no position is given. The open question Q6 covers the ordering semantics. |
+
+---
+
+## Phase 2 modules (planned — no code exists)
+
+> **Planned. No code exists for anything in this section.** There is no
+> `src/reimbursements/`, no `src/job_applications/`, no `src/ml/`, no
+> `migrations/0004`…`0006` and no test that names them. The three modules are
+> **accepted product scope** — `REIMB-R01`…`R10`, `JOB-R01`…`R09` and
+> `ML-R01`…`R09` in [`../project-truth.md`](../project-truth.md) §18 — and their
+> feature status is `Accepted`, which means *not built*. Nothing here is
+> `Implemented` or `Verified`.
+
+**What "every module" means from here.** §1–§7 describe every module that
+**exists**. From this section on, the phrase means "every module that exists
+plus the three planned ones listed here"; a module that appears in neither place
+is not covered by this document.
+
+The heading is unnumbered on purpose: `§7` and `§8` are cited by number from
+[`../decisions/ADR-0006-configuration-source-of-truth.md`](../decisions/ADR-0006-configuration-source-of-truth.md)
+§7.1 and from other documents, so inserting a number here would quietly repoint
+those references.
+
+**Where the detail lives.** The routes, the request and response shapes, the SQL
+sketches, the error tables and the limitations are in
+[`../features/reimbursements/architecture.md`](../features/reimbursements/architecture.md),
+[`../features/job-applications/architecture.md`](../features/job-applications/architecture.md)
+and [`../features/ml/architecture.md`](../features/ml/architecture.md); the
+tables are in [`../database/schema.md`](../database/schema.md) §11. This section
+answers the one question those documents leave to the module map: **where the
+three sit in the crate, and what each may depend on.**
+
+```text
+users ──┬──► reimbursements ──(optional, SET NULL)──► projects
+        │
+        ├──► job-applications ──(optional, SET NULL)──► tasks
+        │         └──► companies, application events
+        │
+        └──► ml ──reads──► notes
+                 └─reads──► job-applications
+```
+
+| Module | Status | Planned source | Owns in the database | May depend on |
+| ------ | ------ | -------------- | -------------------- | ------------- |
+| `reimbursements` | `Accepted`, planned | `src/reimbursements/` | `expense_claims`, `expense_items` | `error`, `pagination`, `helpers`, `money`, `config`, `api`, `projects` (read-only) |
+| `job-applications` | `Accepted`, planned | `src/job_applications/` | `companies`, `job_applications`, `application_events` | `error`, `pagination`, `helpers`, `money`, `config`, `api`, `tasks` (read-only, through `projects`) |
+| `ml` | `Accepted`, planned | `src/ml/` | `embeddings` | `error`, `pagination`, `helpers`, `config`, `notes` (repository), `job_applications` (repository), `burn` |
+
+**The arrow into `ml` is one-way.** No module may depend on `ml`: no module
+calls `MlService`, holds an `Arc<dyn Embedder>`, imports the embedder files or
+constructs a model. The single exception is the repository-level delete described
+below, and it is one SQL function wide.
+
+The requirements rest on the provisional assumptions **A1–A6** in
+[`../project-truth.md`](../project-truth.md) §18.4, which the owner has not
+confirmed (owner decision O1). This section depends on **A2** (a receipt is a
+reference), **A4** (inference is local) and **A6** (money is `NUMERIC(19,4)`); a
+revision of one changes this plan, not the requirement.
+
+### `reimbursements` (planned)
+
+Expense claims: a claim with one currency, a lifecycle from `draft` to `paid`,
+and the line items whose amounts sum to its total. It owns the only stored
+aggregate in the API — `expense_claims.total_amount` — and it is the first
+module that writes money.
+
+| Aspect | Description |
+| ------ | ----------- |
+| Public interface | `ClaimService` with `create`, `list`, `get`, `update`, `delete`, `add_item`, `update_item`, `delete_item`, `submit`, `decide` and `pay`; `ClaimRepository` and `ItemRepository` with the statements the feature document lists; the lifecycle guard `ensure_transition`; the DTOs `ClaimResponse`, `ClaimDetailResponse`, `ClaimPage`, `ItemResponse`, the create and update requests, the query type and the length limits. A handler reaches it as `state.reimbursements` — the field `AppState` will carry, following the Phase 1 idiom `state.notes`, `state.projects`, `state.tasks`. |
+| Internal layering | The five layers, in the five files the feature document names: `handlers.rs`, `service.rs`, `repository.rs`, `models.rs` (`ExpenseClaim`, `ExpenseItem`), `dto.rs`. The handler extracts and serialises; the service validates, runs the lifecycle guard and coordinates the transaction; the repository holds every statement. No handler touches SQL. |
+| May depend on | `error`, `pagination`, `helpers`, `money`, `config` (the message catalogue), `api::extract`, `api::middleware`. It reads the `projects` table for one thing only: to prove that the optional `project_id` belongs to the caller before the insert or the update. |
+| Must not depend on | `notes`, `tasks`, `job_applications`, `ml`. It writes no table other than its own two, and it must not depend on `projects`' service or handlers — the ownership read is a statement, not a call into another feature. |
+| Data ownership | `expense_claims` and `expense_items`. Both carry `user_id`; `expense_items` carries `FOREIGN KEY (claim_id, user_id) REFERENCES expense_claims (id, user_id)`, so an item whose owner differs from its claim's owner cannot be stored. `project_id` is nullable with `ON DELETE SET NULL`. The physical definition is in [`../database/schema.md`](../database/schema.md) §11.1–§11.2. |
+| Invariants | Every statement carries the caller's `user_id`, and an item statement carries `claim_id` **and** `user_id`. `total_amount` is recomputed from `SUM(amount)` in the same transaction as every item write. A claim has one currency for its whole life. Item writes are refused unless the claim is `draft`, and every status change goes through `ensure_transition`. Money is a `String` with four decimals and never an `f32`/`f64`. A receipt is stored text that is never fetched. |
+| Error handling | `422` with a named field for a broken validation rule, `404` for a claim, item or project that is absent or foreign, `409` for a transition the lifecycle does not allow and for an item write on a non-draft claim — the table is in the feature document §5. |
+| Security boundary | The caller's claims only. A claim or item of another account is `404`, never `403`, and an item id is meaningful only inside its claim, because the path resolves the pair. |
+| Verification the implementing change must provide | Unit tests for `ensure_transition` (every allowed and every forbidden edge) and for the money constructor; integration tests for cross-account `404` on every verb, for the total after each item write, and for the `ON DELETE SET NULL` behaviour when a project is deleted. |
+| Limitations already known | The total is a stored column, not a view; the submit precondition is a service rule, because a `CHECK` cannot count another table's rows; deleting a claim is permanent. The feature document §10 lists the rest. |
+
+### `job-applications` (planned)
+
+Companies, the applications the owner is pursuing at them, and the dated events
+in one application's timeline. A company name is unique per owner; an
+application moves through seven stages; a company that still has an application
+cannot be deleted.
+
+| Aspect | Description |
+| ------ | ----------- |
+| Public interface | `JobService` with `create_company`, `list_companies`, `get_company`, `update_company`, `delete_company`, `create_application`, `list_applications`, `get_application`, `update_application`, `delete_application`, `list_events`, `create_event`, `update_event` and `delete_event`; the repository statements the feature document lists, plus `update_company_owned`, `update_application_owned` and `delete_application_owned`, which it does not name and which the implementing change adds in the Phase 1 `*_owned` style; the stage guard `ensure_transition`; the DTOs `CompanyResponse`, `CompanyPage`, `ApplicationResponse`, `ApplicationDetailResponse`, `ApplicationPage`, `EventResponse`, `EventPage`, the create and update requests and the query types. A handler reaches it as `state.job_applications`. |
+| Internal layering | The five layers, in the five files the feature document names: `handlers.rs`, `service.rs`, `repository.rs`, `models.rs` (`Company`, `JobApplication`, `ApplicationEvent`), `dto.rs`. |
+| May depend on | `error`, `pagination`, `helpers`, `money`, `config` (the message catalogue), `api::extract`, `api::middleware`. It reads `tasks` to prove that an optional next-action task belongs to the caller, and that read necessarily joins `projects`, because `tasks` carries no `user_id` (see [`data-architecture.md`](data-architecture.md) §2.1). |
+| Must not depend on | `notes`, `reimbursements`, `ml`; and it does not write the `tasks` or `projects` tables at all. |
+| Data ownership | `companies`, `job_applications`, `application_events`. Every one carries `user_id`, and the parent links are composite: `(company_id, user_id)` to `companies`, `(application_id, user_id)` to `job_applications`. The company name is unique per owner through a functional unique index on `(user_id, lower(name))`. The physical definition is in [`../database/schema.md`](../database/schema.md) §11.3–§11.5. |
+| Invariants | Every statement carries `user_id`. A stage change is decided by `ensure_transition` under `FOR UPDATE`, in one transaction with the rest of the `PATCH`. A company with applications is refused by a single `DELETE … AND NOT EXISTS (…)`, so the check is not a race. An event carries no `updated_at`; it is corrected in place, by decision `A-D1-1`. The event order is `occurred_at DESC, id DESC`. |
+| Error handling | `422` with a named field, `409` for a duplicate company name, for an illegal stage move and for deleting a company that still has applications, `404` for every absent or foreign row — the table is in the feature document §5. |
+| Security boundary | The caller's companies, applications and events only; a foreign id in a body is `404`, not `403`; an event id is meaningful only inside its application. The stage is personal data and is owner-scoped like every other field. |
+| Verification the implementing change must provide | Unit tests for the stage machine (every edge, both refusals) and for the company-name rule; integration tests for the duplicate-name `409`, the company-delete `409`, cross-account `404` on every verb, the event ordering and the next-action clearing. |
+| Limitations already known | `FOR UPDATE` serialises stage changes on one application; the company search is `ILIKE '%term%'`, which cannot use a B-tree index for a leading wildcard; the timeline does not record a stage change. The feature document §10 lists the rest. |
+
+### `ml` (planned)
+
+Local inference over the owner's own text: an embedding for a note or an
+application, three search modes over notes (`lexical`, `semantic`, `hybrid`), a
+ranking of the owner's notes against one application, and an owner-scoped,
+idempotent reindex. It is the only module permitted to load a model, and the
+only one permitted to run CPU-bound work inside a request.
+
+| Aspect | Description |
+| ------ | ----------- |
+| Public interface | `MlService` with the three use cases the feature document names — a search in the requested mode, a match and a reindex; the `Embedder` trait with `model_id`, `dimension`, `status` and `embed`, and exactly three implementations, `Burn`, `Deterministic` and `Disabled`; `EmbedderStatus`; `Embedding`; `EmbeddingRepository` with `find_for_sources` and the upsert and delete it needs; the DTOs `SearchRequest`, `SearchResponse`, `SearchHit`, `MatchResponse`, `MatchHit` and `ReindexResponse`. `AppState` carries `state.ml`, and the `MlService` it holds is the only holder of the selected `Arc<dyn Embedder>` — selected once, in `AppState::new`. |
+| Internal layering | The feature document names `mod.rs`, `embedder.rs`, `burn_embedder.rs`, `deterministic.rs`, `disabled.rs`, `service.rs`, `repository.rs` and `dto.rs` — no `handlers.rs` and no `models.rs`. The five-layer rule still applies: the row shape (the vector and its recorded `dim`) belongs in a `models.rs` rather than in the repository, and the three routes need a `handlers.rs`. **One of those routes is `POST /notes/search`, whose path sits under `/notes`**; its handler lives in `ml::handlers`, because a `notes` handler that called `MlService` would create the very dependency this document forbids. The embedder files are the *inside* of the service layer, not a layer of their own. The trait is justified by its three real implementations (`ML-R03`); it is not an abstraction waiting for a second one. |
+| May depend on | `error`, `pagination`, `helpers` (the search term is trimmed and bounded by the shared `validate_search`, so the bound has one home), `config`, `notes::repository` (the lexical candidate query and the notes search, so the search endpoint and the notes listing cannot disagree), `job_applications::repository` (loading the application a match ranks against), and `burn` v0.22 with the `flex` backend. |
+| Must not depend on | An HTTP client, a process spawn or a second runtime — there is none in the process, and adding one is a new decision, not a feature flag. It does not depend on `notes::service` or `job_applications::service`, only on their repositories. |
+| Data ownership | `embeddings`, and nothing else. It reads note and application rows through the repositories it is allowed to call, and it never writes them. |
+| Invariants | Every statement carries `user_id`. `source_id` is polymorphic and therefore has **no foreign key**; the source delete is responsible for its embeddings. `dim = cardinality(vector)` is a database check, and `(user_id, source_type, source_id, model_id)` is unique, so a re-embed is an upsert. A degraded search answers `200` with the applied mode. The embedder is selected once, at start-up; a missing model file selects `Disabled` and never fails the start-up. |
+| Error handling | `422` for an unknown mode or a malformed query, `404` for a foreign note or application, `409` for a reindex while the embedder is disabled, `408` for a match whose inference exceeds `ml.timeout_seconds`. A **search** never fails on a model problem: it degrades. |
+| Security boundary | An embedding is derived personal data and is protected like its source. No outbound call, no credential for a third party and no model download, which removes a data-processing question from the feature entirely. |
+| Verification the implementing change must provide | Unit tests that `Deterministic` is stable and reports its dimension and that `Disabled` reports rather than fails; integration tests for degraded lexical results in `200`, for owner isolation of search, match and reindex, and for idempotence of a reindex. The recorded manual quality run is not a CI gate. |
+| Limitations already known | There is no approximate-nearest-neighbour index, so hybrid recall is bounded by the lexical candidate set; the polymorphic `source_id` needs the delete discipline; inference cannot be cancelled once it runs. The feature document §11 lists the rest. |
+
+#### The one edge into `ml`, and why it is a repository and not a service
+
+[`../project-truth.md`](../project-truth.md) §15.1 and
+[`../decisions/ADR-0008-local-pure-rust-ml.md`](../decisions/ADR-0008-local-pure-rust-ml.md)
+make the **source delete** responsible for removing its embeddings, because
+`source_id` cannot carry a foreign key. That obligation is what makes "no module
+may depend on `ml`" need one precise exception, and the exception is bounded to
+the SQL layer:
+
+- `EmbeddingRepository::delete_for_source(executor, user_id, source_type,
+  source_id)` — the name is proposed; the feature document names the table and
+  the obligation, not the function — runs one `DELETE` against `embeddings`,
+  scoped by `user_id` as well as by the source.
+- It takes the caller's **transaction/connection** as an argument, so it joins
+  the delete instead of following it, and it returns no rows or an error.
+- It never constructs or consults an `Embedder`, and it never calls `MlService`.
+
+`NoteService::delete` and the application delete call it inside their own
+transaction. The module graph stays acyclic at the **service** layer, and the arc
+that exists between `notes`/`job_applications` and `ml` is exactly one SQL
+function wide, in the direction "the owner of the row deletes its derived rows".
+A change that replaces this with an injected hook or a shared trait would be a
+module-graph change, and it needs its own ADR before it is built.
+
+This is one of the four Phase 2 operations that need an explicit multi-statement
+transaction; Phase 1 has none, which [`data-architecture.md`](data-architecture.md)
+§7 records as a deliberate absence. The other three, and the transaction shape
+they share, are in the *Phase 2 data* section of that document.
+
+### The dependency direction to `tasks`
+
+Phase 2 adds two **optional** links, and both point *at* tables that exist. The
+direction is the invariant: neither link turns `tasks` or `projects` into a
+consumer of a Phase 2 module.
+
+| Link | Owned by | Direction | Who proves the owner | When the target is deleted |
+| ---- | -------- | --------- | -------------------- | ------------------------- |
+| `expense_claims.project_id` | `reimbursements` | claim → project | `reimbursements`, one owner-scoped read of `projects` before the write | `ON DELETE SET NULL`: the claim survives with `project_id` null (`REIMB-R09`) |
+| `job_applications.next_action_task_id` | `job-applications` | application → task | `job-applications`, through the `tasks → projects` join, because `tasks` has no `user_id` | `ON DELETE SET NULL`: the application survives with the field null (`JOB-R07`) |
+
+Neither is required: a claim without a project is a complete claim, and an
+application without a next action is a complete application. Neither is
+enforced by the database on the caller's side — the `SET NULL` handles the
+target's deletion, and the ownership predicate is a statement the service runs —
+so both need a `404` test, not a constraint test. `projects` and `tasks` gain no
+column, no route, no service method and no knowledge of Phase 2, which is what
+keeps [`../project-truth.md`](../project-truth.md) §15's "`tasks` depends on
+`projects`, not the other way round" true after Phase 2.
+
+### The planned cross-cutting addition: `money`
+
+Both Phase 2 features that handle money need one type: a validated decimal that
+deserialises **only** from a four-decimal JSON string and never from a number
+([`../decisions/ADR-0007-money-representation.md`](../decisions/ADR-0007-money-representation.md)).
+[`../features/reimbursements/architecture.md`](../features/reimbursements/architecture.md)
+§2.3 places it in that feature's own `dto.rs`. That placement is not viable once
+a second feature needs it:
+
+| Option | Why it is not chosen |
+| ------ | -------------------- |
+| `reimbursements::dto::Money`, imported by `job-applications` | One feature module would depend on another feature module's `dto`. No Phase 1 rule allows that, and it would make the two features impossible to deliver or retire separately. |
+| One `Money` newtype per feature | Two parsers for one published contract, so ADR-0007's four decimals would have two homes and could drift. The contract test would then test the wrong half. |
+| `helpers::money` | `helpers` is the **text** validators; a typed decimal with a wire format is not a text rule, and its errors are typed rejections rather than field-length violations. |
+| A new single-file module, `src/money.rs` | **Chosen.** It has the shape of [`pagination`](#74-pagination--the-list-convention): one convention, one type, no table, no handler, no configuration. It depends on nothing inside the crate except `error`, and it is the only place that knows the four-decimal rule. |
+
+This is a cross-feature structure question, and [`../README.md`](../README.md) §1
+gives it to this directory (rank 2), not to `features/` (rank 3, "not
+authoritative for cross-feature architecture"). The reimbursements feature
+document's §2.3 sentence must therefore be amended when the money type is built,
+in the same change as the module.
 
 ---
 

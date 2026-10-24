@@ -78,6 +78,58 @@ fn source(relative: &str) -> String {
         .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()))
 }
 
+/// Every Rust source file of the crate, as `(relative path, contents)`.
+///
+/// The paths are relative to the crate root and always use `/`, so that an
+/// assertion naming a file reads the same on every platform.
+fn rust_sources() -> Vec<(String, String)> {
+    fn walk(root: &Path, directory: &Path, found: &mut Vec<(String, String)>) {
+        let entries = std::fs::read_dir(directory)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", directory.display()));
+
+        for entry in entries {
+            let path = entry
+                .unwrap_or_else(|error| {
+                    panic!("cannot read an entry of {}: {error}", directory.display())
+                })
+                .path();
+
+            if path.is_dir() {
+                walk(root, &path, found);
+                continue;
+            }
+
+            if path.extension().is_none_or(|extension| extension != "rs") {
+                continue;
+            }
+
+            let relative = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+
+            let contents = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
+
+            found.push((relative, contents));
+        }
+    }
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut found = Vec::new();
+    walk(root, &root.join("src"), &mut found);
+    found.sort_by(|left, right| left.0.cmp(&right.0));
+
+    assert!(
+        !found.is_empty(),
+        "the scan found no Rust source under {}",
+        root.join("src").display()
+    );
+
+    found
+}
+
 /// The location of a published parameter, as the document spells it.
 fn location(parameter_in: &ParameterIn) -> &'static str {
     match parameter_in {
@@ -113,6 +165,13 @@ fn published_parameters(item: &PathItem, operation: &Operation) -> Vec<(String, 
 /// crate - so the test cannot agree with itself by both being stale. The
 /// explorer paths (`/api/v1/docs`, `/api/v1/openapi.json`) are router mounts,
 /// not operations, and are therefore not part of either side.
+///
+/// The size of the agreed surface is not pinned to a number: the tables are the
+/// source and the document is the assertion target, so a surface that grew or
+/// shrank is caught by the two-way set difference rather than by a count that
+/// would have to be edited alongside every deliberate change. Every operation
+/// must declare a success response, so one re-badied to an error-only entry is
+/// a failure too.
 #[test]
 fn the_route_table_and_the_document_describe_the_same_operations() {
     let document = openapi_document(&common::test_config());
@@ -127,15 +186,24 @@ fn the_route_table_and_the_document_describe_the_same_operations() {
 
     let mut described: BTreeSet<String> = BTreeSet::new();
     for (path, item) in document.paths.paths.iter() {
-        for (method, _) in operations(item) {
+        for (method, operation) in operations(item) {
+            assert!(
+                operation
+                    .responses
+                    .responses
+                    .keys()
+                    .any(|status| status.starts_with('2')),
+                "{method} {path} declares no success response"
+            );
             described.insert(format!("{method} {path}"));
         }
     }
 
     assert!(
-        !served.is_empty(),
-        "the route tables must declare at least one operation; an empty table would make this \
-         test pass without comparing anything"
+        !served.is_empty() && !described.is_empty(),
+        "both sides must declare at least one operation: an empty table or an empty document \
+         would make this comparison pass without asserting anything\n  served: {served:#?}\n  \
+         described: {described:#?}"
     );
 
     let served_but_not_described: Vec<&String> = served.difference(&described).collect();
@@ -156,11 +224,12 @@ fn the_route_table_and_the_document_describe_the_same_operations() {
 /// Every entry of both route tables is mounted on the real router.
 ///
 /// The probe carries no credentials, so the expected answer is a rejection -
-/// except `404`, which is the router's fallback for a path that is not mounted.
-/// `401`, `400`, `405`, `415`, `422` and `200` all prove that the route exists.
-/// The test therefore proves mounting, not authorisation, and deliberately does
-/// not assert a success status. The method comes from the table, not from a
-/// hard-coded `GET`.
+/// except `404`, which is the router's fallback for a path that is not mounted,
+/// and `405`, which is what an existing path answers for a method it does not
+/// declare. Every other status - `401`, `400`, `415`, `422` or `200` - proves
+/// that this method on this path exists. The test therefore proves mounting,
+/// not authorisation, and deliberately does not assert a success status. The
+/// method comes from the table, not from a hard-coded `GET`.
 #[tokio::test]
 async fn every_route_in_the_table_is_served_by_the_router() {
     let app = common::app(common::test_state().await);
@@ -197,39 +266,62 @@ async fn every_route_in_the_table_is_served_by_the_router() {
             "{uri} is declared in the route table but the router does not serve it: the request \
              answered 404, which is the fallback for an unmounted path"
         );
+        assert_ne!(
+            response.status,
+            StatusCode::METHOD_NOT_ALLOWED,
+            "{uri} is declared in the route table, but the router does not accept that method on \
+             it: the request answered 405"
+        );
     }
 }
 
 /// `/api/v1` is typed once, in the declaration that mounts it.
 ///
-/// The check is textual on purpose and scoped to the mounting layer: the
-/// `utoipa` attributes on the handlers must spell absolute paths, because the
-/// derive runs at compile time and cannot read a constant. What must not happen
-/// is a second declaration or a second mount, so the exact literal - quotes
-/// included - is counted across `src/api/routes.rs` and `src/api/mod.rs`.
+/// Every Rust source file of the crate is scanned, and the versioned literal -
+/// quotes included - must appear exactly once in all of them: in `API_PREFIX`, in
+/// `src/api/routes.rs`. A second constant, a second mount, or a handler that
+/// spells the prefix by hand is what lets the router and the document drift
+/// apart, so any occurrence outside that one declaration fails.
 ///
-/// The operator-facing prose in `src/api/mod.rs` mentions `/api/v1/docs` and
-/// `/api/v1/openapi.json` without quotes; prose is not a literal and must not
-/// match. The assertion is not loosened to accommodate it.
+/// The check is textual because the prefix has to be usable at compile time:
+/// `utoipa` derives the document at compile time and cannot read a constant, so
+/// the attributes on the handlers spell absolute paths. Those spell
+/// `/api/v1/notes`, not `/api/v1`, and therefore do not match the literal. The
+/// explorer builds its two paths from `API_PREFIX`, so it does not type the
+/// prefix either.
 #[test]
 fn the_version_prefix_is_declared_once() {
     const LITERAL: &str = "\"/api/v1\"";
+    const DECLARATION: &str = "pub const API_PREFIX";
 
-    let files = [
-        ("src/api/routes.rs", source("src/api/routes.rs")),
-        ("src/api/mod.rs", source("src/api/mod.rs")),
-    ];
+    let sources = rust_sources();
 
-    let mut occurrences: Vec<(&str, usize, &str)> = Vec::new();
+    // The scan must really be recursive: the one legitimate occurrence is a
+    // nested file, and a walk that stopped at `src/` would silently scan almost
+    // nothing. Two different nested directories have to be present.
+    for required in ["src/api/routes.rs", "src/notes/dto.rs"] {
+        assert!(
+            sources.iter().any(|(name, _)| name == required),
+            "the source scan missed {required}; it found {:?}",
+            sources
+                .iter()
+                .map(|(name, _)| name)
+                .collect::<Vec<&String>>()
+        );
+    }
+
+    let mut occurrences: Vec<(String, usize, String)> = Vec::new();
     let mut total = 0usize;
 
-    for (name, contents) in &files {
+    for (name, contents) in sources {
         for (index, line) in contents.lines().enumerate() {
             let count = line.matches(LITERAL).count();
-            if count > 0 {
-                total += count;
-                occurrences.push((name, index + 1, line.trim()));
+            if count == 0 {
+                continue;
             }
+
+            total += count;
+            occurrences.push((name.clone(), index + 1, line.trim().to_string()));
         }
     }
 
@@ -241,20 +333,25 @@ fn the_version_prefix_is_declared_once() {
 
     assert_eq!(
         total, 1,
-        "the literal {LITERAL} must appear exactly once in the mounting layer, but it appears \
-         {total} time(s):\n  {found}"
+        "the literal {LITERAL} must be typed exactly once in the crate, but it appears {total} \
+         time(s):\n  {found}"
     );
 
-    let (name, number, line) = occurrences[0];
+    let (file, number, line) = &occurrences[0];
+    assert_eq!(
+        file.as_str(),
+        "src/api/routes.rs",
+        "the single declaration of {LITERAL} must be in src/api/routes.rs, but it is at \
+         {file}:{number}: {line}"
+    );
     assert!(
-        line.contains("pub const API_PREFIX"),
-        "the single declaration of {LITERAL} must be the API_PREFIX constant, but it is at \
-         {name}:{number}: {line}"
+        line.contains(DECLARATION),
+        "the single occurrence of {LITERAL} must be the API_PREFIX declaration, but it is at \
+         {file}:{number}: {line}"
     );
 
-    let module = &files[1].1;
     assert!(
-        module.contains(".nest(routes::API_PREFIX"),
+        source("src/api/mod.rs").contains(".nest(routes::API_PREFIX"),
         "src/api/mod.rs must mount the prefix it declares, as .nest(routes::API_PREFIX, ...); \
          the router must not type the prefix a second time"
     );

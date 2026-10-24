@@ -1,7 +1,7 @@
 # ATOM — system overview
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-24
 > **Owner:** maintained by the `architect` agent
 
 The ATOM Phase 1 backend in one page: what it is, how it runs, what it is
@@ -31,6 +31,16 @@ There is **no frontend, no worker process and no outbound integration** in
 Phase 1. The only background activity is the in-process task that prunes the
 expired refresh sessions. The process makes no outbound network call at run
 time: every byte it sends is a response to a request it received.
+
+**Phase 2 is planned and changes none of that.** It adds three modules —
+`reimbursements`, `job-applications` and `ml` — inside the same binary: no new
+process, no new service, no worker, no message broker and no second language
+runtime. The one addition that could have introduced a service, machine
+learning, runs **in this process**, on the CPU, from a local model file, and
+makes no outbound call to a hosted service at build time or at run time. Phase 2
+is `Accepted` and **not built**; the module map is in
+[`module-boundaries.md`](module-boundaries.md), and the data it adds is in
+[`data-architecture.md`](data-architecture.md).
 
 ## 2. Runtime shape
 
@@ -142,7 +152,7 @@ the service.
 | Piece | State |
 | ----- | ----- |
 | The binary (`cargo run`, `cargo build --release`) | Implemented |
-| `docker-compose.yml` for a **local PostgreSQL only** | Implemented. It brings up `postgres:18-alpine` and creates the disposable `atom_test` database. It does **not** build an application image. |
+| `docker-compose.yml` for a **local PostgreSQL only** | Implemented. It brings up `postgres:18-alpine` and creates the development `atom_dev` database and the disposable `atom_test` one. It does **not** build an application image. |
 | A background task that prunes the expired refresh sessions | Implemented. It runs every hour by default and deletes the sessions that expired more than a day ago; both the interval and the grace period come from the configuration. |
 | A container image for the API | **Not implemented.** |
 | A CI pipeline | Implemented. `.github/workflows/ci.yml` runs the formatting check, the linter with warnings denied, the whole test suite against a real PostgreSQL, the release build and the documentation check, on every push and pull request to `master` or `develop`. It has been observed passing on GitHub-hosted runners; `KI-005` records the runs. |

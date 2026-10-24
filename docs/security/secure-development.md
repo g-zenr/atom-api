@@ -98,7 +98,16 @@ placeholder and never the secret itself.
 [`../../src/telemetry.rs`](../../src/telemetry.rs), in the development tool
 [`../../src/bin/atom-docs.rs`](../../src/bin/atom-docs.rs) and in the
 default-value helpers of
-[`../../src/config/settings.rs`](../../src/config/settings.rs) — nowhere else.
+[`../../src/config/settings.rs`](../../src/config/settings.rs) - nowhere else.
+
+The seeder binary [`../../src/bin/atom-seed.rs`](../../src/bin/atom-seed.rs) is
+the **exception to the exception**: it must never use `unwrap` or `expect`,
+because its errors are derived from `DATABASE_URL` and from row values, and
+`expect` on a `sqlx::Error` prints the driver's `Debug`, which renders the
+connection string from the `Configuration` variant and the offending value from
+`DETAIL`. It carries
+`#![deny(clippy::unwrap_used, clippy::expect_used)]` for that reason. See
+[`../database/seeding.md`](../database/seeding.md) §3.4.
 The CORS allowlist is validated when the configuration is loaded, so the router
 needs no assertion of its own: an origin that still fails to parse falls back
 to an empty header value, and the process is never taken down by it.

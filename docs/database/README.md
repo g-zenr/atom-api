@@ -1,16 +1,18 @@
 # ATOM database
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
-> **Owner:** maintained by the `docs` agent
+> **Last updated:** 2026-10-24
+> **Owner:** maintained by the `database` agent
 
-This directory holds the persistence documentation of the ATOM Phase 1
-backend.
+This directory holds the persistence documentation of the ATOM backend: the
+Phase 1 schema that the migrations create, the proposed Phase 2 schema, the
+migration workflow and the development seeder.
 
 | Document | Contents |
 | -------- | -------- |
-| [`schema.md`](schema.md) | Every table with its columns, types, nullability, defaults, constraints, indexes and relationships; the ownership model; the search design; the enum types; and the migration that introduced each table. |
+| [`schema.md`](schema.md) | Every Phase 1 table with its columns, types, nullability, defaults, constraints, indexes and relationships; the ownership model; the search design; the enum types; the migration that introduced each table; and, in §11, the proposed Phase 2 tables. |
 | [`migration-policy.md`](migration-policy.md) | How migrations are written, applied and reviewed; the rollback policy; the rule that every migration has a matching Rust model change; and the SQLx compile-time check workflow. |
+| [`seeding.md`](seeding.md) | `atom-seed`: the one command, the three profiles, the four safety guards, determinism, idempotency, `--reset`, the post-insert verification, the development credentials and the test list. |
 
 ## 1. The engine
 
@@ -40,6 +42,13 @@ out-of-contract value impossible to persist. The reasoning is recorded in
 | `tasks` | `migrations/0003_projects_and_tasks.sql` | `projects` | The units of work inside a project. |
 
 The full definition of each table is in [`schema.md`](schema.md).
+
+The Phase 1 tables above are the only tables that exist. Phase 2 proposes six
+more — `expense_claims`, `expense_items`, `companies`, `job_applications`,
+`application_events` and `embeddings` — and **none of them has a migration or a
+Rust model**. They are marked `Proposed` in [`schema.md`](schema.md) §11 and
+must not be treated as scope. The development seeder that fills the Phase 1
+tables is specified in [`seeding.md`](seeding.md).
 
 ## 3. The migration workflow at a glance
 
@@ -78,14 +87,17 @@ docker compose ps
 ```
 
 `docker-compose.yml` starts PostgreSQL on `127.0.0.1:5432` with the
-credentials `atom`/`atom`, the database `atom`, and a second, disposable
-database `atom_test`. The second database is created by
-`scripts/create-test-database.sh`, which runs as an entrypoint hook.
+credentials `atom`/`atom`, the bootstrap database `atom`, and two more:
+`atom_dev`, the development database the API and the seeder use, and
+`atom_test`, the disposable database the integration suite uses. Both are
+created by `scripts/create-test-database.sh`, which runs as an entrypoint
+hook. The seeder refuses `atom` by design, so `DATABASE_URL` points at
+`atom_dev`.
 
 ### Without Docker
 
 ```bash
-createdb atom
+createdb atom_dev
 createdb atom_test
 ```
 
@@ -99,7 +111,7 @@ Then set at least:
 
 | Variable | Purpose |
 | -------- | ------- |
-| `DATABASE_URL` | The database the API uses, for example `postgres://atom:atom@127.0.0.1:5432/atom`. |
+| `DATABASE_URL` | The database the API uses, for example `postgres://atom:atom@127.0.0.1:5432/atom_dev`. |
 | `TEST_DATABASE_URL` | The disposable database the integration suite uses. Its name **must** contain `test`; the harness refuses to run otherwise. |
 | `APP_JWT_SECRET` | The access-token signing secret, at least 32 bytes. |
 
@@ -166,9 +178,10 @@ by the migrations:
 ## 6. Related documents
 
 - [`schema.md`](schema.md) — the tables, the constraints, the indexes, the
-  ownership model and the search design.
+  ownership model and the search design, plus the proposed Phase 2 tables.
 - [`migration-policy.md`](migration-policy.md) — how a migration is written
   and what happens when one is wrong.
+- [`seeding.md`](seeding.md) — the development seeder and its guards.
 - [`../api/error-contract.md`](../api/error-contract.md) — how a database
   failure reaches the client.
 - [`../features/README.md`](../features/README.md) — the features that own

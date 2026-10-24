@@ -6,7 +6,7 @@
 # On Windows, either use `make` from a POSIX shell (Git Bash, WSL) or run the
 # commands directly — see CONTRIBUTING.md.
 
-DATABASE_URL ?= postgres://atom:atom@127.0.0.1:5432/atom
+DATABASE_URL ?= postgres://atom:atom@127.0.0.1:5432/atom_dev
 TEST_DATABASE_URL ?= postgres://atom:atom@127.0.0.1:5432/atom_test
 
 export DATABASE_URL

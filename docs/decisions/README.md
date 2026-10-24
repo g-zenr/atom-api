@@ -1,7 +1,7 @@
 # ATOM — architecture decision records
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-24
 > **Owner:** maintained by the `architect` agent
 
 An architecture decision record (ADR) records **one** decision, the options
@@ -118,6 +118,9 @@ and a unique identifier, and that every relative link in the tree resolves.
 | [ADR-0004](ADR-0004-documentation-as-project-truth.md) | The documentation tree is part of the product | Superseded | 2026-10-21 |
 | [ADR-0005](ADR-0005-ownership-enforced-in-sql.md) | Ownership is enforced in SQL | Accepted | 2026-10-21 |
 | [ADR-0006](ADR-0006-configuration-source-of-truth.md) | The configuration directory is the source of truth | Accepted | 2026-10-22 |
+| [ADR-0007](ADR-0007-money-representation.md) | Money is `NUMERIC(19,4)` and a JSON string | Accepted | 2026-10-24 |
+| [ADR-0008](ADR-0008-local-pure-rust-ml.md) | Machine learning is local and pure Rust | Accepted | 2026-10-24 |
+| [ADR-0009](ADR-0009-receipt-references.md) | A receipt is a reference, not an uploaded file | Accepted | 2026-10-24 |
 
 ## 5. Related documents
 

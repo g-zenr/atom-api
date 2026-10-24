@@ -25,10 +25,18 @@ services:
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
-      - atom-postgres-data:/var/lib/postgresql/data
-      # The official image creates one database. The integration suite needs a
-      # second, disposable one, and the harness refuses to run unless its name
-      # contains "test". The script below creates it on first initialisation.
+      # PostgreSQL 18 keeps its data in a major-version directory
+      # (`/var/lib/postgresql/18/docker`) and declares `/var/lib/postgresql` as
+      # its volume. The image refuses to start when a volume is mounted at the
+      # pre-18 `/var/lib/postgresql/data`, so the mount targets the directory
+      # the image declares. That is also what makes the init script below run
+      # exactly once, on a fresh volume.
+      - atom-postgres-data:/var/lib/postgresql
+      # The official image creates one database from `POSTGRES_DB`. The
+      # integration suite needs a second, disposable one, and the harness
+      # refuses to run unless its name contains "test"; the seeder refuses
+      # `atom` and needs a development name. The script below creates
+      # `atom_test` and `atom_dev` on first initialisation.
       - ./scripts/create-test-database.sh:/docker-entrypoint-initdb.d/10-create-test-database.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U atom -d atom"]

@@ -84,7 +84,7 @@ A feature is never `Verified` because its code exists or compiles.
 | -------- | -------- |
 | [`architecture/README.md`](architecture/README.md) | Index and the rules for architecture documentation. |
 | [`architecture/system-overview.md`](architecture/system-overview.md) | The system in one page: components, runtime shape, deployment topology. |
-| [`architecture/module-boundaries.md`](architecture/module-boundaries.md) | Every module: responsibility, public interface, dependencies, data ownership. |
+| [`architecture/module-boundaries.md`](architecture/module-boundaries.md) | Every module that exists, plus the three planned Phase 2 modules: responsibility, public interface, dependencies, data ownership. |
 | [`architecture/request-lifecycle.md`](architecture/request-lifecycle.md) | From socket to SQL and back, including middleware order and error mapping. |
 | [`architecture/data-architecture.md`](architecture/data-architecture.md) | The schema, the ownership model, search and indexing. |
 | [`architecture/security-architecture.md`](architecture/security-architecture.md) | Trust boundaries, the authentication boundary, the authorization model. |
