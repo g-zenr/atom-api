@@ -71,8 +71,50 @@ const UNREACHABLE_URL: &str = "postgres://atom:atom@127.0.0.1:1/atom_test";
 /// Fragments that must never appear in any seeder output (G4, A-C-S1-8).
 const NEVER_PRINTED: [&str; 4] = ["postgres://", "atom:atom", "127.0.0.1", "$argon2"];
 
-/// Serialises the tests that run the seeder. See the module documentation.
+/// Serialises the tests of this binary. See the module documentation.
 static SEEDER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// The advisory-lock key every copy of this suite uses.
+///
+/// The bytes spell `ATOMSEED`, so two copies of the suite cannot pick a
+/// different key by accident and the value cannot collide with the key
+/// `sqlx::migrate!` takes for its own migration lock.
+const SEEDER_LOCK_KEY: i64 = 0x4154_4f4d_5345_4544;
+
+/// Holds both seeder locks for the duration of a test.
+///
+/// The advisory lock lives on a session of its own, so PostgreSQL releases it
+/// when that connection closes — a crashed test cannot leave the suite wedged.
+struct SeederLock {
+    /// Declared first so it is dropped first: the server releases the advisory
+    /// lock before the next thread of this process takes the mutex.
+    _session: sqlx::PgConnection,
+    _thread: tokio::sync::MutexGuard<'static, ()>,
+}
+
+/// Takes the thread lock and then the cross-process lock.
+///
+/// The order is the same in every test, so two copies of the suite cannot
+/// deadlock against each other.
+async fn seeder_lock() -> SeederLock {
+    let thread = SEEDER_LOCK.lock().await;
+
+    let url = common::test_database_url();
+    let mut session = sqlx::PgConnection::connect(&url)
+        .await
+        .expect("the test database must be reachable for the seeder lock");
+
+    sqlx::query("SELECT pg_advisory_lock($1)")
+        .bind(SEEDER_LOCK_KEY)
+        .execute(&mut session)
+        .await
+        .expect("the seeder advisory lock must be acquirable");
+
+    SeederLock {
+        _session: session,
+        _thread: thread,
+    }
+}
 
 /// One finished seeder process.
 #[derive(Debug)]
@@ -540,7 +582,7 @@ async fn the_seeder_refuses_a_database_whose_name_is_not_a_development_database(
 
 #[tokio::test]
 async fn the_seeder_refuses_a_database_that_holds_foreign_rows() {
-    let _serialised = SEEDER_LOCK.lock().await;
+    let _serialised = seeder_lock().await;
     let pool = migrated_pool().await;
 
     // The shared database already holds accounts from the rest of the suite.
@@ -579,7 +621,7 @@ async fn the_seeder_refuses_a_database_that_holds_foreign_rows() {
 
 #[tokio::test]
 async fn an_override_flag_admits_a_database_that_holds_foreign_rows() {
-    let _serialised = SEEDER_LOCK.lock().await;
+    let _serialised = seeder_lock().await;
     let pool = migrated_pool().await;
 
     let foreign = insert_foreign_account(&pool).await;
@@ -605,7 +647,7 @@ async fn an_override_flag_admits_a_database_that_holds_foreign_rows() {
 
 #[tokio::test]
 async fn the_dev_profile_inserts_the_documented_counts() {
-    let _serialised = SEEDER_LOCK.lock().await;
+    let _serialised = seeder_lock().await;
     let pool = migrated_pool().await;
 
     let run = run_in_test_database(&["--profile", "dev", "--reset", "--allow-non-empty"]);
@@ -648,7 +690,7 @@ async fn the_dev_profile_inserts_the_documented_counts() {
 
 #[tokio::test]
 async fn a_second_run_skips_every_existing_row() {
-    let _serialised = SEEDER_LOCK.lock().await;
+    let _serialised = seeder_lock().await;
     let pool = migrated_pool().await;
 
     // Start from a canonical dataset so the test does not depend on what an
@@ -696,7 +738,7 @@ async fn a_second_run_skips_every_existing_row() {
 
 #[tokio::test]
 async fn a_reset_run_reproduces_the_same_ids_and_timestamps() {
-    let _serialised = SEEDER_LOCK.lock().await;
+    let _serialised = seeder_lock().await;
     let pool = migrated_pool().await;
 
     let first = run_in_test_database(&["--profile", "dev", "--reset", "--allow-non-empty"]);
@@ -748,7 +790,7 @@ async fn a_reset_run_reproduces_the_same_ids_and_timestamps() {
 
 #[tokio::test]
 async fn the_seeder_never_prints_the_connection_string_or_a_hash() {
-    let _serialised = SEEDER_LOCK.lock().await;
+    let _serialised = seeder_lock().await;
     let pool = migrated_pool().await;
 
     let run = run_in_test_database(&["--profile", "dev", "--reset", "--allow-non-empty"]);
@@ -784,7 +826,7 @@ async fn the_seeder_never_prints_the_connection_string_or_a_hash() {
 
 #[tokio::test]
 async fn seeded_tasks_belong_to_projects_of_the_same_owner() {
-    let _serialised = SEEDER_LOCK.lock().await;
+    let _serialised = seeder_lock().await;
     let pool = migrated_pool().await;
 
     run_in_test_database(&["--profile", "dev", "--reset", "--allow-non-empty"])
@@ -819,7 +861,7 @@ async fn seeded_tasks_belong_to_projects_of_the_same_owner() {
 
 #[tokio::test]
 async fn every_seeded_task_has_a_consistent_completion_timestamp() {
-    let _serialised = SEEDER_LOCK.lock().await;
+    let _serialised = seeder_lock().await;
     let pool = migrated_pool().await;
 
     run_in_test_database(&["--profile", "dev", "--reset", "--allow-non-empty"])
@@ -886,7 +928,7 @@ async fn a_connect_failure_prints_no_part_of_the_url() {
 
 #[tokio::test]
 async fn a_constraint_violation_is_reported_by_sqlstate_and_constraint_only() {
-    let _serialised = SEEDER_LOCK.lock().await;
+    let _serialised = seeder_lock().await;
     let pool = migrated_pool().await;
 
     // A foreign account holding the documented owner address. The seeder's
@@ -1001,7 +1043,7 @@ async fn an_unknown_flag_is_a_usage_error_that_names_the_flag() {
 
 #[tokio::test]
 async fn the_seeded_accounts_are_the_published_development_credentials() {
-    let _serialised = SEEDER_LOCK.lock().await;
+    let _serialised = seeder_lock().await;
     let pool = migrated_pool().await;
 
     run_in_test_database(&["--profile", "minimal", "--reset", "--allow-non-empty"])
@@ -1050,7 +1092,7 @@ async fn the_seeded_accounts_are_the_published_development_credentials() {
 
 #[tokio::test]
 async fn a_reset_deletes_rows_owned_by_the_seeded_accounts() {
-    let _serialised = SEEDER_LOCK.lock().await;
+    let _serialised = seeder_lock().await;
     let pool = migrated_pool().await;
 
     run_in_test_database(&["--profile", "minimal", "--reset", "--allow-non-empty"])
