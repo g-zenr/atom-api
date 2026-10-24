@@ -439,8 +439,9 @@ async fn the_expense_claim_tables_apply_from_an_empty_database() {
     );
     assert_eq!(
         probe.versions,
-        vec![1, 2, 3, 4],
-        "an empty database must end up carrying every migration, including 0004"
+        vec![1, 2, 3, 4, 5],
+        "an empty database must end up carrying every migration in the chain, \
+         including 0004 and 0005"
     );
     assert!(
         probe.claim_table,

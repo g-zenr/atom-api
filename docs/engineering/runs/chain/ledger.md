@@ -1096,6 +1096,42 @@ Contract `C-R3/C-R4` (the `R5` row of `PHASE=2`). Agents: `test-engineer`, `docs
 
 **Decision: ADVANCE on rows 1-9; rows 10-11 outstanding.** The gate's own report is the evidence that the review rows are not decoration: it refused to record a pass for a command it could not run, and it found four ledger and document defects that this session then fixed.
 
+### C-J1 - Job applications schema and types (locked 2026-10-24, PHASE=3)
+
+Authority: `docs/database/schema.md` §11.3, §11.4 and §11.5 are the column, constraint and index definitions, verbatim. This block names what that document leaves to the implementation. **No endpoint** in this chain: `/api/v1/openapi.json` stays at 34 operations.
+
+**SQL** - one new migration, `migrations/0005_job_applications.sql`, append-only:
+- `CREATE TYPE job_application_status AS ENUM ('wishlist','applied','screening','interview','offer','rejected','withdrawn')`; `CREATE TYPE application_event_kind AS ENUM ('note','email','call','interview','offer','rejection')`.
+- `companies`, `job_applications`, `application_events` exactly as §11.3-§11.5, with every named CHECK, the two composite foreign keys, the functional unique index `companies_user_id_lower_name_unique_idx ((user_id, LOWER(name)))`, and all six secondary indexes.
+- `job_applications_company_fk` is `ON DELETE NO ACTION`, not `RESTRICT`: only `NO ACTION` defers the check to the end of the statement, which is what lets `DELETE FROM users` succeed while still refusing a direct company delete.
+- `application_events` carries **no** `updated_at` (decision `A-D1-1`).
+
+**TYPES** - `src/job_applications/` with `mod.rs` and `models.rs` only in this chain; handlers/service/repository/dto arrive with the routes in `J2`-`J4`.
+- `ApplicationStatus` and `ApplicationEventKind`: serde `snake_case` plus `sqlx(type_name = "...", rename_all = "snake_case")`, like `ClaimStatus`.
+- `Company`, `JobApplication`, `ApplicationEvent` row structs. Salary money is `String` from `::text`, for the same reason as `C-R1`: SQLx cannot decode `NUMERIC` and `ADR-0007` forbids a decimal crate.
+- Register the module in `src/lib.rs`.
+
+**INVARIANTS** - I1 every row carries `user_id`; I2 a company and an application always share an owner, enforced by the composite key; I3 an event always shares its application's owner, likewise; I4 the seven-stage machine is **not** a CHECK (a CHECK cannot see the previous status) - the enum makes an unknown stage unrepresentable and the transition table is `J3`'s; I5 `next_action_task_id` cannot be owner-consistent in SQL because `tasks` has no `user_id`, so the service checks `tasks -> projects -> user_id` in `J3` and returns `404`; I6 salary bounds are non-negative, ordered, and carry a currency whenever either is present.
+
+**TESTS** - `tests/jobs_schema.rs`: `the_job_tables_apply_from_an_empty_database`, `a_company_name_is_unique_per_owner_case_insensitively`, `a_company_name_must_be_trimmed`, `an_application_cannot_belong_to_another_owners_company`, `a_company_with_applications_cannot_be_deleted`, `deleting_an_application_deletes_its_events`, `deleting_an_account_deletes_its_companies_applications_and_events`, `a_salary_bound_requires_a_currency`, `a_salary_minimum_above_the_maximum_is_refused`, `an_unknown_stage_is_unrepresentable`, `money_is_stored_with_four_decimal_places`. Plus, in `tests/seeder.rs`: `the_seeder_dev_profile_inserts_the_documented_company_and_application_counts`.
+
+**SEEDER (S3, mandatory in this chain)** - `V6` compares its table list against `information_schema`, so three new user tables without a seeder extension would fail every run:
+- applications **1 / 20 / 40** for minimal / dev / demo; companies `ceil(owner_apps / 3) + 2` **per owner**, applications grouped in threes under a company; events `1 + (i % 4)` per application.
+- That gives companies **5 / 12 / 18** and events **1 / 50 / 100**. Verify the arithmetic against `seeding.md` §7.4 before hard-coding anything; if the document and this block disagree, the document wins and you report it.
+- `--reset` deletes `application_events` -> `job_applications` -> `companies`, all by `user_id`, before `projects` and `users`. `V4` asserts the exact counts; `V6`'s list gains all three tables. Deterministic ids as before, entities `companies`, `job_applications`, `application_events`.
+
+**FILES** (exclusive)
+
+| Owner | Files |
+| ----- | ----- |
+| `database` | `migrations/0005_job_applications.sql`, `docs/database/schema.md` |
+| `rust-backend` | `src/job_applications/{mod,models}.rs`, `src/lib.rs`, `src/bin/atom-seed.rs` |
+| `test-engineer` | `tests/jobs_schema.rs`, `tests/seeder.rs` |
+| `docs` | `docs/features/job-applications/{status,architecture,testing}.md`, `docs/testing/strategy.md` |
+| orchestrator | `docs/engineering/**` |
+
+---
+
 ## Parked
 
 | Item | Blocker | Next step |

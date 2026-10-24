@@ -5,10 +5,12 @@
 > **Owner:** maintained by the `database` agent
 
 The complete Phase 1 schema of the ATOM database, table by table, as it is
-defined in `migrations/`. Section 11 is the Phase 2 schema: its first two tables
+defined in `migrations/`. Section 11 is the Phase 2 schema. Its first two tables
 are created by `migrations/0004_expense_claims.sql` and are served by the five
-claim endpoints of chain `R2`, and the rest of it is still proposed and does not
-exist yet.
+claim endpoints of chain `R2`; its next three are created by
+`migrations/0005_job_applications.sql` and have no endpoint yet, because chain
+`J1` is the schema and the Rust types only. `embeddings` is still proposed and
+does not exist.
 
 The conventions the schema follows are in
 [`../project-truth.md`](../project-truth.md) §12. The rules for changing it
@@ -24,6 +26,9 @@ users ──1:N──► refresh_sessions
   ├──1:N──► expense_claims ──1:N──► expense_items
   │              └─(project_id, SET NULL)──► projects
   │
+  ├──1:N──► companies ──1:N──► job_applications ──1:N──► application_events
+  │                                   └─(next_action_task_id, SET NULL)──► tasks
+  │
   └──1:N──► projects ──1:N──► tasks
 ```
 
@@ -36,14 +41,17 @@ users ──1:N──► refresh_sessions
 | `tasks` | `migrations/0003_projects_and_tasks.sql` | One row per task. |
 | `expense_claims` | `migrations/0004_expense_claims.sql` | One row per reimbursement claim. Read and written by the five `R2` claim endpoints (§11.1). |
 | `expense_items` | `migrations/0004_expense_claims.sql` | One row per claim line item. Read and written by the three item endpoints; the claim detail response reads it (§11.2). |
+| `companies` | `migrations/0005_job_applications.sql` | One row per employer (§11.3). Created by chain `J1`; no endpoint serves it yet. |
+| `job_applications` | `migrations/0005_job_applications.sql` | One row per role being pursued at a company (§11.4). Created by chain `J1`; no endpoint serves it yet. |
+| `application_events` | `migrations/0005_job_applications.sql` | One row per dated entry in an application's timeline (§11.5). Created by chain `J1`; no endpoint serves it yet. |
 
 Two enum types are created by `migrations/0003_projects_and_tasks.sql`:
 `task_status` and `task_priority`. `migrations/0004_expense_claims.sql` adds a
-third, `expense_claim_status`.
+third, `expense_claim_status`, and `migrations/0005_job_applications.sql` adds
+`job_application_status` and `application_event_kind` (§11.7).
 
-Four tables are still proposed for Phase 2 in §11 and do not exist:
-`companies`, `job_applications`, `application_events` and `embeddings`
-(§11.3–§11.6). `migrations/` ends at `0004`.
+One table is still proposed for Phase 2 in §11 and does not exist:
+`embeddings` (§11.6). `migrations/` ends at `0005`.
 
 ### 1.1 A stale comment in an applied migration
 
@@ -369,8 +377,12 @@ written with that in mind, and the policy in
 
 ## 11. Phase 2 (Proposed)
 
-> **Status:** **Proposed**, with one exception: `expense_claims` and
+> **Status:** **Proposed**, with two exceptions. `expense_claims` and
 > `expense_items` are served by the five claim endpoints of chain `R2` (§11.1).
+> `companies`, `job_applications` and `application_events` are created by
+> `migrations/0005_job_applications.sql` (§11.3-§11.5), but no endpoint serves
+> them yet: chain `J1` is the schema and the Rust types, and the routes arrive
+> in `J2`-`J4`.
 > Phase 1 of the run — the product intake — writes the accepted requirements in
 > [`../project-truth.md`](../project-truth.md) §18. This section records the
 > schema those requirements imply. Nothing in this section is `Verified` by this
@@ -383,8 +395,15 @@ written with that in mind, and the policy in
 > deleted; and the four lifecycle actions change a claim's `status` and the
 > timestamps the lifecycle `CHECK` requires. `currency` and `total_amount` are
 > still changed by nothing a client sends: the first is in no `SET` clause, the
-> second is computed from `SUM(amount)` inside the item transaction. §11.3-§11.6
-> remain proposed.
+> second is computed from `SUM(amount)` inside the item transaction.
+>
+> `migrations/0005_job_applications.sql` creates `job_application_status`,
+> `application_event_kind`, `companies`, `job_applications` and
+> `application_events` with every constraint and index named in §11.3-§11.5,
+> including the two composite foreign keys and the functional unique index on
+> `(user_id, LOWER(name))`. No statement reads them yet, so the indexes below
+> are the published access paths, not a measurement of a running query. §11.6
+> remains proposed.
 
 Six provisional assumptions underlie this section: **A1** (a claim has one
 currency and there is no FX), **A2** (a receipt is a reference), **A3**
@@ -392,9 +411,10 @@ currency and there is no FX), **A2** (a receipt is a reference), **A3**
 **A5** (single owner, no sharing) and **A6** (money is `NUMERIC(19,4)`, a JSON
 string with four decimals). All six are **provisional defaults, owner decision
 O1**; they were never confirmed by the owner. A1, A5 and A6 shape the columns
-most directly. A revision of any of them changes this section, and for §11.1
-and §11.2 it needs a new migration as well because `0004` is applied; the
-requirements in [`../project-truth.md`](../project-truth.md) §18.4 say how.
+most directly. A revision of any of them changes this section, and for
+§11.1-§11.5 it needs a new migration as well because `0004` and `0005` are
+applied; the requirements in [`../project-truth.md`](../project-truth.md) §18.4
+say how.
 
 The design follows the conventions of §10 and the rules of
 [`migration-policy.md`](migration-policy.md). Where a rule cannot be expressed
@@ -669,7 +689,10 @@ index; the owner's company count is small and the
 A company belongs to one user and is deleted with the account. A company that
 still has applications **cannot** be deleted: `JOB-R06` makes that a `409`, and
 §11.4 enforces it with `ON DELETE NO ACTION` on the applications' side. The
-service deletes the applications first, in one transaction, or refuses.
+service refuses with `409` **without deleting anything**: one statement carries
+`AND NOT EXISTS (SELECT 1 FROM job_applications WHERE company_id = $1)`, and a
+zero-row result is the `409`. It never deletes the applications to make itself
+succeed - that would destroy records the client did not ask to delete.
 
 ### 11.4 `job_applications`
 

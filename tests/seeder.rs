@@ -62,6 +62,18 @@ const DEV_TASKS: i64 = 60;
 const DEV_CLAIMS: i64 = 25;
 const DEV_CLAIM_ITEMS: i64 = 48;
 
+/// The `dev` profile's job applications and the two counts derived from them
+/// (`C-J1` §SEEDER, `seeding.md` §2 and §7.4).
+///
+/// The derivation, recomputed rather than copied: 20 applications alternate
+/// between the two owners (`i % 2`), so each owner has 10; each owner gets
+/// `ceil(10 / 3) + 2 == 4 + 2 == 6` companies, so 12 in total; and each
+/// application `i` carries `1 + (i % 4)` events, which over five cycles of
+/// `0..3` is `5 × (1 + 2 + 3 + 4) == 50`.
+const DEV_APPLICATIONS: i64 = 20;
+const DEV_COMPANIES: i64 = 12;
+const DEV_EVENTS: i64 = 50;
+
 /// The `minimal` profile counts (seeding.md §2).
 const MINIMAL_USERS: i64 = 2;
 const MINIMAL_NOTES: i64 = 5;
@@ -287,6 +299,20 @@ fn seeded_claim_ids(count: i64) -> Vec<Uuid> {
 fn seeded_item_ids(count: i64) -> Vec<Uuid> {
     (0..count)
         .map(|index| seeded_id("expense_items", index as usize))
+        .collect()
+}
+
+/// The ids of the seeded company rows.
+fn seeded_company_ids(count: i64) -> Vec<Uuid> {
+    (0..count)
+        .map(|index| seeded_id("companies", index as usize))
+        .collect()
+}
+
+/// The ids of the seeded job-application rows.
+fn seeded_application_ids(count: i64) -> Vec<Uuid> {
+    (0..count)
+        .map(|index| seeded_id("job_applications", index as usize))
         .collect()
 }
 
@@ -1341,5 +1367,186 @@ async fn a_seeded_claim_total_equals_the_sum_of_its_items() {
         statuses,
         vec!["approved", "draft", "paid", "rejected", "submitted"],
         "the dev profile must exercise every status the lifecycle constraint constrains"
+    );
+}
+
+#[tokio::test]
+async fn the_seeder_dev_profile_inserts_the_documented_company_and_application_counts() {
+    let _serialised = seeder_lock().await;
+    let pool = migrated_pool().await;
+
+    let run = run_in_test_database(&["--profile", "dev", "--reset", "--allow-non-empty"]);
+    let output = run.require_success("the dev profile");
+
+    // With --reset every row is inserted fresh, so the report must account for
+    // the whole profile and skip nothing.
+    // The report names the entity the way the rest of the seeder does -
+    // `applications`, not `job_applications` - while the derived id uses the
+    // table name. Both forms are checked, each where it is used.
+    assert_eq!(entity_count(&output, "companies"), (DEV_COMPANIES, 0));
+    assert_eq!(entity_count(&output, "applications"), (DEV_APPLICATIONS, 0));
+    assert_eq!(entity_count(&output, "events"), (DEV_EVENTS, 0));
+
+    // `atom_test` is shared, so every count is restricted to the two seeded
+    // accounts. A table-wide COUNT(*) would count another test's rows.
+    let accounts = seeded_user_ids();
+
+    let companies: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM companies WHERE user_id = ANY($1)")
+            .bind(accounts.clone())
+            .fetch_one(&pool)
+            .await
+            .expect("the seeded companies must be countable");
+    assert_eq!(
+        companies, DEV_COMPANIES,
+        "the database must agree with the count the seeder reported"
+    );
+
+    let applications: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM job_applications WHERE user_id = ANY($1)")
+            .bind(accounts.clone())
+            .fetch_one(&pool)
+            .await
+            .expect("the seeded applications must be countable");
+    assert_eq!(
+        applications, DEV_APPLICATIONS,
+        "the database must agree with the count the seeder reported"
+    );
+
+    let events: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM application_events WHERE user_id = ANY($1)")
+            .bind(accounts.clone())
+            .fetch_one(&pool)
+            .await
+            .expect("the seeded events must be countable");
+    assert_eq!(
+        events, DEV_EVENTS,
+        "the database must agree with the count the seeder reported"
+    );
+
+    // The counts alone would also pass if the rows sat on different
+    // deterministic slots, so the ids the seeder derives are checked too. This
+    // is the derivation `--reset` relies on: a re-inserted parent gets the same
+    // id, so a stale child would re-attach instead of being noticed.
+    let company_ids = seeded_company_ids(DEV_COMPANIES);
+    let companies_with_ids: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM companies WHERE id = ANY($1)")
+            .bind(&company_ids)
+            .fetch_one(&pool)
+            .await
+            .expect("the derived company ids must be countable");
+    assert_eq!(
+        companies_with_ids, DEV_COMPANIES,
+        "every company id must be SHA-256(\"atom-seed/v1/companies/<index>\")"
+    );
+
+    let application_ids = seeded_application_ids(DEV_APPLICATIONS);
+    let applications_with_ids: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM job_applications WHERE id = ANY($1)")
+            .bind(&application_ids)
+            .fetch_one(&pool)
+            .await
+            .expect("the derived application ids must be countable");
+    assert_eq!(
+        applications_with_ids, DEV_APPLICATIONS,
+        "every application id must be SHA-256(\"atom-seed/v1/job_applications/<index>\")"
+    );
+
+    // Every application's company must have the application's owner: this is
+    // the invariant the composite key enforces, so a seeded row that broke it
+    // could not have been inserted at all. The check proves the data exercises
+    // the rule rather than the rule merely existing.
+    let mismatched: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)
+         FROM job_applications a
+         JOIN companies c ON c.id = a.company_id
+         WHERE a.id = ANY($1) AND c.user_id <> a.user_id",
+    )
+    .bind(&application_ids)
+    .fetch_one(&pool)
+    .await
+    .expect("the seeded applications must be readable with their companies");
+    assert_eq!(
+        mismatched, 0,
+        "every seeded application's company must have the same owner"
+    );
+
+    // The join above is only meaningful if every application actually resolves
+    // a company, so the resolution is asserted rather than assumed.
+    let unresolved: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)
+         FROM job_applications a
+         LEFT JOIN companies c ON c.id = a.company_id
+         WHERE a.id = ANY($1) AND c.id IS NULL",
+    )
+    .bind(&application_ids)
+    .fetch_one(&pool)
+    .await
+    .expect("the seeded applications must be readable with their companies");
+    assert_eq!(
+        unresolved, 0,
+        "every seeded application must resolve a company for the owner check to mean anything"
+    );
+
+    // A currency is required whenever a salary bound is present
+    // (`job_applications_salary_currency_required_chk`, `JOB-R03`). A seeded
+    // row that broke it could not be stored, so this asserts the data the
+    // profile ships rather than the constraint.
+    let missing_currency: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)
+         FROM job_applications
+         WHERE id = ANY($1)
+           AND (salary_min IS NOT NULL OR salary_max IS NOT NULL)
+           AND salary_currency IS NULL",
+    )
+    .bind(&application_ids)
+    .fetch_one(&pool)
+    .await
+    .expect("the seeded applications must be countable by salary");
+    assert_eq!(
+        missing_currency, 0,
+        "a seeded salary bound must always carry a currency"
+    );
+
+    // And a currency must not appear without a bound.
+    let bare_currency: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)
+         FROM job_applications
+         WHERE id = ANY($1)
+           AND salary_currency IS NOT NULL
+           AND salary_min IS NULL
+           AND salary_max IS NULL",
+    )
+    .bind(&application_ids)
+    .fetch_one(&pool)
+    .await
+    .expect("the seeded applications must be countable by currency");
+    assert_eq!(
+        bare_currency, 0,
+        "a seeded application must not carry a currency with no salary bound"
+    );
+
+    // The two rules above must not pass only because the profile carries no
+    // salary at all. The seeder gives a bound to two applications in every
+    // three, so the data behind the rule is asserted rather than assumed, and
+    // the currency count must equal it: one currency per bounded application,
+    // none without a bound.
+    let (with_bound, with_currency): (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*) FILTER (WHERE salary_min IS NOT NULL OR salary_max IS NOT NULL),
+                COUNT(*) FILTER (WHERE salary_currency IS NOT NULL)
+         FROM job_applications
+         WHERE id = ANY($1)",
+    )
+    .bind(&application_ids)
+    .fetch_one(&pool)
+    .await
+    .expect("the seeded applications must be countable by salary");
+    assert!(
+        with_bound > 0,
+        "the dev profile must carry salary bounds, otherwise the currency rules have no data"
+    );
+    assert_eq!(
+        with_currency, with_bound,
+        "every seeded application with a salary bound must carry exactly one currency"
     );
 }

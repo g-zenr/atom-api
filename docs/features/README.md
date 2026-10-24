@@ -30,11 +30,11 @@ The three Phase 2 features were accepted in
 Reimbursements is `Implemented`: `migrations/0004_expense_claims.sql`,
 `src/reimbursements/` and all twelve published endpoints exist, and
 `tests/claims_schema.rs`, `tests/claims_api.rs`, `tests/claims_flow.rs` and
-`tests/openapi_contract.rs` are written against them. It is not `Verified`: no
-`code-reviewer` or `quality-gate` verdict exists for the chains that built it,
-and a passing suite is not a review. Job applications and local machine
-learning remain `Accepted`: neither has a migration, a module, an endpoint or a
-test.
+`tests/openapi_contract.rs` are written against them. Job applications has its
+**schema only**: `migrations/0005_job_applications.sql` and
+`src/job_applications/{mod,models}.rs`, with `tests/jobs_schema.rs` proving the
+constraints, but no endpoint and no service. Local machine learning has nothing
+yet. Neither is `Implemented` or `Verified`; a passing suite is not a review.
 
 The status column summarises the feature as a whole. The per-requirement
 evidence behind it is in each feature's `status.md`; a feature can contain both

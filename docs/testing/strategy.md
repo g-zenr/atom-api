@@ -90,7 +90,8 @@ the unix figure — 181 when the unit tests are counted. Counted on 2026-10-24.
 The figures and the table above are the Phase 1 files, measured on 2026-10-24.
 The files the Phase 2 run adds — `tests/openapi_contract.rs`,
 `tests/list_query.rs`, `tests/seeder.rs`, `tests/claims_schema.rs`,
-`tests/claims_api.rs` and `tests/claims_flow.rs` — are not in the table. The
+`tests/claims_api.rs`, `tests/claims_flow.rs` and `tests/jobs_schema.rs` — are
+not in the table. The
 whole-suite figures for them come from the chain's own record: **296 tests** in
 `ATOM-CHANGE-20261024-007`, and **299** in `ATOM-CHANGE-20261024-008`, where the
 three cases of `tests/claims_flow.rs` are counted. Neither figure is re-measured
@@ -436,14 +437,22 @@ Phase 2 feature has a recorded run at all.
 | **Degradation** — ML off and model missing return lexical results with `200` | Integration, with two configurations | A unit test can prove the selection function; only the request path proves the response shape and the status. |
 | **Seeder** — the guards, determinism, the money and ownership invariants | Integration, driving the binary | The seeder is not reachable through the router. |
 
-One Phase 2 feature has its layers in the tree today: the reimbursement schema
-(`tests/claims_schema.rs` applies migration `0004` and asserts the constraints,
-the cascades and the money scale), its endpoint layer (`tests/claims_api.rs`
-drives all twelve published operations, including every item write and every
-lifecycle action), its contract layer (`tests/openapi_contract.rs` pins the
-surface at 34 operations) and its **flow layer** (`tests/claims_flow.rs`: the
-journey, the ownership sweep and the seeded read), with the two caveats §7.2.1
-records. See §7.2.1 for the feature-by-feature state.
+One Phase 2 feature has all of its layers in the tree today: the reimbursement
+schema (`tests/claims_schema.rs` applies migration `0004` and asserts the
+constraints, the cascades and the money scale), its endpoint layer
+(`tests/claims_api.rs` drives all twelve published operations, including every
+item write and every lifecycle action), its contract layer
+(`tests/openapi_contract.rs` pins the surface at 34 operations) and its **flow
+layer** (`tests/claims_flow.rs`: the journey, the ownership sweep and the seeded
+read), with the two caveats §7.2.1 records.
+
+A second feature has its **schema layer** only: `tests/jobs_schema.rs` (chain
+`C-J1`) creates a scratch database, applies migrations `0001`-`0005` from empty
+and asserts the job-application constraints, the two composite keys, the
+cascades, the salary checks and the seven-value enum vocabulary, and
+`tests/seeder.rs` gains one case for the seeded `dev` counts. Its endpoint layer
+does not exist: there is no `tests/job_applications_api.rs`, no module below
+`models.rs`, and no route. See §7.2.1 for the feature-by-feature state.
 
 ### 7.2 The layers in the Phase 2 suite
 
@@ -467,7 +476,7 @@ the tree, so an empty layer is visible instead of assumed.
 | Feature | Covered today | Not covered |
 | ------- | ------------- | ----------- |
 | Reimbursements | The **schema layer**: `tests/claims_schema.rs` applies `0004` and asserts the constraints, the composite ownership key, the cascades, the `SET NULL` and the four-decimal money scale. The **seeded claims**: two cases in `tests/seeder.rs` assert the profile counts and the total invariant on data the API did not write. The **claim endpoint layer**: 34 cases in `tests/claims_api.rs` covering create/read/patch/delete, the listing with its filters, pagination and order, money on the wire, the ignored `currency` and `status` fields, ownership with a second account, `400`/`413`/`422` mapping and the credential. The **item endpoint layer and the lifecycle**: 21 further cases in the same file — the three item writes, the total recomputed after every one of them, the four-decimal input rule, the draft-only guard in every non-draft status, the five allowed edges and all fifteen refused ones, the reopen clearing both `submitted_at` and `decided_at`, the submit preconditions and `paid` as terminal. All twelve operations are also asserted to answer `401` without a credential. The **contract layer**: three cases in `tests/openapi_contract.rs` for the money schema types, the nullable `project_id` and the seven new operations' success statuses, with the surface pinned at 34. The **unit layer**: ten tests inside `src/reimbursements/` and three money tests in `src/helpers/validation.rs`. The **flow layer**: three cases in `tests/claims_flow.rs` (committed at `02c5489`) — the journey from registration to payment, the ownership sweep (eleven claim-addressed operations on each of five statuses, 55 requests, each `404`; the list operation is asserted by its empty page and `total` 0, because it publishes `200` rather than `404`) and the seeded read. | Two caveats on the flow layer. The seeded case is **opportunistic**: it returns with a printed reason when `owner@atom.local` is absent, so the seeded surface is covered only on a database a seeder run has touched, and the seeded *size* is never asserted because the shared database carries whichever profile ran last. The seeder's five statuses and the endpoint's field rules therefore meet in one test only where a seeder run has happened; the sweep does not supply that, because it registers both of its own accounts. Also open: `a_claim_can_be_deleted_in_any_status` (so `REIMB-R11`'s "in any status" is unasserted) and five smaller rules with no HTTP case — the 1–500 item-description bound, a non-date `incurred_on`, a non-UUID `item_id`, a file body on the item route, and any concurrency case. The `408` and `500` paths are not asserted on a claims route. The suite is recorded at 296 in `ATOM-CHANGE-20261024-007` and at 299 in `ATOM-CHANGE-20261024-008`, but no `code-reviewer` or `quality-gate` row has been written for this chain, so nothing in the feature is promoted to `Verified`. |
-| Job applications | Nothing. | Everything: no migration, no module, no endpoint and no test. |
+| Job applications | The **schema layer**: `tests/jobs_schema.rs` (11 cases, chain `C-J1`) creates a scratch database, applies `0001`-`0005` from empty, and asserts the functional unique index on `(user_id, LOWER(name))`, the trim check, the composite `job_applications_company_fk` that makes a cross-owner application unrepresentable, the `NO ACTION` company refusal together with the `DELETE FROM users` cascade it must not block, the `ON DELETE CASCADE` from an application to its events, the `user_id` cascades of all three tables, the three salary checks, four-decimal storage, and that the `job_application_status` enum refuses an unknown stage with `22P02` and no constraint name. The **seeded jobs**: one case in `tests/seeder.rs` asserts the `dev` counts (20 applications, 12 companies, 50 events), the deterministic ids, and the ownership and salary invariants of the seeded rows. | The **whole endpoint layer**: `tests/job_applications_api.rs` does not exist, because no handler, service, repository, DTO or route exists — `/api/v1/openapi.json` is still at 34 operations. Nothing asserts a request, a `404` for a foreign row, a stage transition, an events listing or a pagination bound. The schema suite also leaves the seven length checks, the two URL checks, the `application_event_kind` vocabulary, the `ON DELETE SET NULL` on `next_action_task_id` and the two listing orders unasserted; [`../features/job-applications/testing.md`](../features/job-applications/testing.md) §1.2 lists them. |
 | Local machine learning | Nothing. | Everything: no migration, no module, no endpoint and no test. |
 
 A schema test is not an endpoint test, and neither is a claim test an item test.
@@ -484,6 +493,10 @@ item-description and `incurred_on` validations. The requirement-by-requirement
 map, including what each still waits for, is
 [`../features/reimbursements/testing.md`](../features/reimbursements/testing.md)
 §2.9, and the gaps are collected in its §3.
+
+Job applications is the opposite shape: the **schema layer** is written and the
+**endpoint layer** is missing, so the feature stays `Accepted` with a built
+schema, and nothing in its `status.md` is `Implemented` or `Verified`.
 
 ### 7.3 The size target
 
@@ -516,6 +529,9 @@ wave adds 21 endpoint cases to the same file, one contract case in
 integration cases in `tests/claims_flow.rs` — the journey, the ownership sweep
 and the seeded read — which take the recorded suite from 296 to **299**
 (`ATOM-CHANGE-20261024-008`), and they are counted here.
+`C-J1` adds eleven integration cases in `tests/jobs_schema.rs` and one in
+`tests/seeder.rs`; those are counted from the files, and no run of them is
+recorded in this document.
 The counted totals are re-measured by the chain's gate and recorded in the run's
 ledger; this document does not carry a number it has not seen measured, and the
 number of names in a file is not a number of passing tests.

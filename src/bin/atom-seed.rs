@@ -2,10 +2,11 @@
 //!
 //! The binary fills a disposable PostgreSQL database with the Phase 1
 //! entities - `users`, `notes`, `projects` and `tasks` - and with the Phase 2
-//! `expense_claims` and `expense_items` rows that the reimbursements feature
-//! reads. It is specified in `docs/database/seeding.md`, locked by the `C-S1`
-//! contract (with the security amendments `A-C-S1-5` ... `A-C-S1-10`) and
-//! extended by `C-R1` §SEEDER, both in
+//! `expense_claims` / `expense_items` and `companies` / `job_applications` /
+//! `application_events` rows that the reimbursements and job-application
+//! features read. It is specified in `docs/database/seeding.md`, locked by the
+//! `C-S1` contract (with the security amendments `A-C-S1-5` ... `A-C-S1-10`)
+//! and extended by `C-R1` and `C-J1` §SEEDER, all in
 //! `docs/engineering/runs/chain/ledger.md`.
 //!
 //! ```text
@@ -72,15 +73,18 @@ const ARGON2_PARALLELISM: u32 = 1;
 /// hang the process for the operating system's connect timeout.
 const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Every table the seeder handles: the six it inserts into and
+/// Every table the seeder handles: the nine it inserts into and
 /// `refresh_sessions`, which `--reset` deletes but the seeder never inserts.
 ///
 /// `V6` compares this list with the schema and fails the run when a table
 /// exists that the list does not name. That is what makes "add a table, extend
 /// the seeder" enforceable.
-const SEEDED_TABLES: [&str; 7] = [
+const SEEDED_TABLES: [&str; 10] = [
+    "application_events",
+    "companies",
     "expense_claims",
     "expense_items",
+    "job_applications",
     "notes",
     "projects",
     "refresh_sessions",
@@ -164,6 +168,58 @@ impl Profile {
         }
     }
 
+    /// The number of job applications the profile seeds.
+    const fn applications(self) -> usize {
+        match self {
+            Self::Minimal => 1,
+            Self::Dev => 20,
+            Self::Demo => 40,
+        }
+    }
+
+    /// The number of applications seeded user `owner` receives.
+    ///
+    /// Ownership alternates by row (`i % 2`), so every profile gives both
+    /// accounts data and the two counts stay within one row of each other.
+    const fn applications_for_owner(self, owner: usize) -> usize {
+        let total = self.applications();
+        (total + SEEDED_USERS.len() - 1 - owner) / SEEDED_USERS.len()
+    }
+
+    /// The number of companies the profile seeds.
+    ///
+    /// Derived, not a table entry. Each owner's applications are grouped in
+    /// threes under that owner's companies, and the owner has two further
+    /// companies with no application (`seeding.md` §2.1), so an owner
+    /// contributes `ceil(applications / 3) + 2`. With one application that is
+    /// five companies, with the twenty of `dev` twelve, and with the forty of
+    /// `demo` eighteen.
+    const fn companies(self) -> usize {
+        let mut total = 0;
+        let mut owner = 0;
+        while owner < SEEDED_USERS.len() {
+            total += companies_for_owner(self, owner);
+            owner += 1;
+        }
+        total
+    }
+
+    /// The number of application events the profile seeds.
+    ///
+    /// Derived from the applications: application `i` carries
+    /// `1 + (i % 4)` events, so `minimal`, `dev` and `demo` give `1`, `50` and
+    /// `100`. The insert loop and this function share
+    /// [`events_per_application`], so the rows and the count cannot disagree.
+    const fn events(self) -> usize {
+        let mut total = 0;
+        let mut index = 0;
+        while index < self.applications() {
+            total += events_per_application(index);
+            index += 1;
+        }
+        total
+    }
+
     /// The number of expense items the profile seeds.
     ///
     /// It is derived, not a table entry: the sum of [`items_per_claim`] over
@@ -205,6 +261,128 @@ impl Profile {
 /// function, so the seeded rows and the asserted count cannot disagree.
 const fn items_per_claim(index: usize) -> usize {
     if index == 0 { 0 } else { 1 + (index % 3) }
+}
+
+/// The number of companies seeded user `owner` receives.
+///
+/// `ceil(applications / 3) + 2`: one company per group of three applications,
+/// plus the two companies that hold none (`seeding.md` §2.1). Integer `+ 2`
+/// before the division is the ceiling of `applications / 3`.
+const fn companies_for_owner(profile: Profile, owner: usize) -> usize {
+    profile.applications_for_owner(owner).div_ceil(3) + 2
+}
+
+/// The number of events application `index` carries (`seeding.md` §2.1).
+const fn events_per_application(index: usize) -> usize {
+    1 + (index % 4)
+}
+
+/// The company's `created_at`: base + 20 days + `index × 3` hours.
+fn company_created_at(index: usize) -> DateTime<Utc> {
+    base_timestamp() + Duration::days(20) + Duration::hours(3 * index as i64)
+}
+
+/// The application's `created_at`: base + 28 days + `index × 4` hours.
+fn application_created_at(index: usize) -> DateTime<Utc> {
+    base_timestamp() + Duration::days(28) + Duration::hours(4 * index as i64)
+}
+
+/// The owner and the per-owner position of a global company index.
+///
+/// Company ids are numbered per owner: every company of the first account
+/// precedes every company of the second. The insert loop and the application
+/// grouping share this rule, so an application can name its company by index
+/// without a query.
+fn company_position(profile: Profile, company_index: usize) -> (usize, usize) {
+    let mut base = 0;
+    for owner in 0..SEEDED_USERS.len() {
+        let count = companies_for_owner(profile, owner);
+        if company_index < base + count {
+            return (owner, company_index - base);
+        }
+        base += count;
+    }
+
+    // Unreachable for an index below `Profile::companies`; the fallback keeps
+    // the function total instead of panicking, and the count check would catch
+    // a row that depended on it.
+    (SEEDED_USERS.len() - 1, 0)
+}
+
+/// The global company index that employs application `application_index`.
+///
+/// Within an owner, local application position `p` belongs to that owner's
+/// company `2 + p / 3`, so the first two companies of each owner are the
+/// documented two with no application (`seeding.md` §2.1). The owner's
+/// applications occupy every second row, which is why the local position is
+/// `application_index / 2`.
+fn company_index_for_application(profile: Profile, application_index: usize) -> usize {
+    let owner = application_index % SEEDED_USERS.len();
+    let local_position = application_index / SEEDED_USERS.len();
+
+    let mut base = 0;
+    let mut previous = 0;
+    while previous < owner {
+        base += companies_for_owner(profile, previous);
+        previous += 1;
+    }
+
+    base + 2 + local_position / 3
+}
+
+/// The owner of task `index`, derived from the project the task belongs to.
+///
+/// `seed_tasks` attaches task `i` to project `i % project_count`, and
+/// `seed_projects` gives project `j` to user `j % 2`, so task ownership is
+/// transitive and needs no query (`A-C-S1-3`).
+fn task_owner(profile: Profile, index: usize) -> usize {
+    let project_count = profile.projects();
+    if project_count == 0 {
+        return 0;
+    }
+    (index % project_count) % SEEDED_USERS.len()
+}
+
+/// The first seeded task owned by `owner`, when the profile has one.
+///
+/// A profile can contain tasks and still give one account none: `minimal` has
+/// one project, so all of its tasks belong to the first account. The link is
+/// then left `NULL` instead of pointing at a task of another owner.
+fn first_task_of_owner(profile: Profile, owner: usize) -> Option<Uuid> {
+    let mut index = 0;
+    while index < profile.tasks() {
+        if task_owner(profile, index) == owner {
+            return Some(seeded_id("tasks", index));
+        }
+        index += 1;
+    }
+    None
+}
+
+/// The salary columns for application `index`.
+///
+/// Every third row carries no salary, every third carries both bounds, and the
+/// remaining third only a minimum, so the nullable maximum and both branches of
+/// `job_applications_salary_currency_required_chk` have data behind them. The
+/// values are fixed decimal strings: no money is parsed or compared in Rust
+/// (`ADR-0007`), and every maximum in the list is greater than the minimum at
+/// the same index.
+fn salary_for_application(
+    index: usize,
+) -> (
+    Option<&'static str>,
+    Option<&'static str>,
+    Option<&'static str>,
+) {
+    let currency = SALARY_CURRENCIES[index % SALARY_CURRENCIES.len()];
+    let minimum = SALARY_MINIMUMS[index % SALARY_MINIMUMS.len()];
+    let maximum = SALARY_MAXIMUMS[index % SALARY_MAXIMUMS.len()];
+
+    match index % 3 {
+        0 => (Some(minimum), Some(maximum), Some(currency)),
+        1 => (Some(minimum), None, Some(currency)),
+        _ => (None, None, None),
+    }
 }
 
 /// The claim's `created_at`: base + 21 days + `index × 6` hours.
@@ -348,6 +526,9 @@ struct SeedOutcome {
     tasks: EntityOutcome,
     claims: EntityOutcome,
     items: EntityOutcome,
+    companies: EntityOutcome,
+    applications: EntityOutcome,
+    events: EntityOutcome,
 }
 
 impl SeedOutcome {
@@ -358,6 +539,9 @@ impl SeedOutcome {
             + self.tasks.inserted
             + self.claims.inserted
             + self.items.inserted
+            + self.companies.inserted
+            + self.applications.inserted
+            + self.events.inserted
     }
 
     fn total_skipped(&self) -> u64 {
@@ -367,6 +551,9 @@ impl SeedOutcome {
             + self.tasks.skipped
             + self.claims.skipped
             + self.items.skipped
+            + self.companies.skipped
+            + self.applications.skipped
+            + self.events.skipped
     }
 }
 
@@ -482,6 +669,13 @@ async fn run(args: SeedArgs) -> Result<(), Failure> {
     // Rust (ADR-0007); a claim whose insert was skipped keeps its stored total,
     // and `V1` fails if that total no longer matches its items.
     refresh_claim_totals(&mut transaction, &inserted_claims).await?;
+
+    // Companies come after the tasks (an application may point at one as its
+    // next action), applications after the companies they reference, and the
+    // events last because each one references an application.
+    outcome.companies = seed_companies(&mut transaction, args.profile).await?;
+    outcome.applications = seed_applications(&mut transaction, args.profile).await?;
+    outcome.events = seed_events(&mut transaction, args.profile).await?;
 
     if let Err(failure) = verify(&mut transaction, args.profile, &seed_ids).await {
         transaction.rollback().await.ok();
@@ -707,6 +901,10 @@ async fn reset_seeded_rows(
 ) -> Result<(), Failure> {
     let statements = [
         (
+            "application_events",
+            "DELETE FROM application_events WHERE user_id = ANY($1)",
+        ),
+        (
             "expense_items",
             "DELETE FROM expense_items WHERE user_id = ANY($1)",
         ),
@@ -714,6 +912,11 @@ async fn reset_seeded_rows(
             "expense_claims",
             "DELETE FROM expense_claims WHERE user_id = ANY($1)",
         ),
+        (
+            "job_applications",
+            "DELETE FROM job_applications WHERE user_id = ANY($1)",
+        ),
+        ("companies", "DELETE FROM companies WHERE user_id = ANY($1)"),
         (
             "refresh_sessions",
             "DELETE FROM refresh_sessions WHERE user_id = ANY($1)",
@@ -1219,6 +1422,214 @@ async fn refresh_claim_totals(
     Ok(())
 }
 
+/// Inserts the profile's companies.
+///
+/// Company ids are numbered across both accounts, with every company of the
+/// first account preceding every company of the second. Each owner's first two
+/// companies hold no application, so the grouping rule of `seeding.md` §2.1 is
+/// visible in the data and the two empty places are deterministic.
+async fn seed_companies(
+    connection: &mut PgConnection,
+    profile: Profile,
+) -> Result<EntityOutcome, Failure> {
+    let mut outcome = EntityOutcome::default();
+
+    for index in 0..profile.companies() {
+        let (owner, local_index) = company_position(profile, index);
+        let id = seeded_id("companies", index);
+        let user_id = seeded_id("users", owner);
+        // Every profile seeds at most nine companies per owner, and the list is
+        // longer than that, so a name is never repeated within one owner.
+        let name = COMPANY_NAMES[local_index % COMPANY_NAMES.len()];
+        // Some rows carry a site and some do not, so both branches of
+        // `companies_website_chk` have data behind them.
+        let website = if index % 3 == 2 {
+            None
+        } else {
+            Some(format!("https://www.example.com/companies/{index}"))
+        };
+        let notes = COMPANY_NOTES[index % COMPANY_NOTES.len()];
+        let created_at = company_created_at(index);
+        let updated_at = created_at + Duration::hours(1);
+
+        let inserted = sqlx::query(
+            "INSERT INTO companies \
+                 (id, user_id, name, website, notes, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7) \
+             ON CONFLICT (id) DO NOTHING",
+        )
+        .bind(id)
+        .bind(user_id)
+        .bind(name)
+        .bind(website)
+        .bind(notes)
+        .bind(created_at)
+        .bind(updated_at)
+        .execute(&mut *connection)
+        .await
+        .map_err(|error| insert_failure("companies", &error))?
+        .rows_affected();
+
+        outcome.record(inserted);
+    }
+
+    Ok(outcome)
+}
+
+/// Inserts the profile's job applications.
+///
+/// Each application is attached to a company of the same owner, so
+/// `job_applications_company_fk` accepts the row. The status cycles the seven
+/// stages by `index % 7`; `applied_on` is present exactly when the stage is not
+/// `wishlist` (`JOB-R02`). Salary bounds are fixed decimal strings bound and
+/// cast to `numeric`; a currency accompanies any bound, and the maximum at a
+/// given index is greater than the minimum, so both salary `CHECK`s hold.
+async fn seed_applications(
+    connection: &mut PgConnection,
+    profile: Profile,
+) -> Result<EntityOutcome, Failure> {
+    let mut outcome = EntityOutcome::default();
+
+    for index in 0..profile.applications() {
+        let id = seeded_id("job_applications", index);
+        let owner = index % SEEDED_USERS.len();
+        let user_id = seeded_id("users", owner);
+        let company_id = seeded_id("companies", company_index_for_application(profile, index));
+        let role_title = APPLICATION_ROLES[index % APPLICATION_ROLES.len()];
+        // Some rows carry a source and some do not, so the nullable column has
+        // data on both sides.
+        let source = if index % 4 == 3 {
+            None
+        } else {
+            Some(APPLICATION_SOURCES[index % APPLICATION_SOURCES.len()])
+        };
+        let status = APPLICATION_STATUSES[index % APPLICATION_STATUSES.len()];
+        let created_at = application_created_at(index);
+        let applied_on = if status == "wishlist" {
+            None
+        } else {
+            Some((created_at - Duration::days(1)).date_naive())
+        };
+        let (salary_min, salary_max, salary_currency) = salary_for_application(index);
+        let job_url = if index % 3 == 0 {
+            Some(format!("https://jobs.example.com/applications/{index}"))
+        } else {
+            None
+        };
+        let description = format!(
+            "{} Application {} for the {} profile.",
+            APPLICATION_DESCRIPTIONS[index % APPLICATION_DESCRIPTIONS.len()],
+            index + 1,
+            profile.as_str()
+        );
+        // The documented rule links every fifth row to a task of the same
+        // account; the profile may give that account no task, and then the
+        // link stays `NULL` rather than naming another owner's task.
+        let next_action_task_id = if index % 5 == 4 {
+            first_task_of_owner(profile, owner)
+        } else {
+            None
+        };
+        let updated_at = created_at + Duration::hours(1);
+
+        let inserted = sqlx::query(
+            "INSERT INTO job_applications \
+                 (id, user_id, company_id, role_title, source, status, applied_on, \
+                  salary_min, salary_max, salary_currency, job_url, description, \
+                  next_action_task_id, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, $6::text::job_application_status, $7, \
+                     $8::numeric, $9::numeric, $10::char(3), $11, $12, $13, $14, $15) \
+             ON CONFLICT (id) DO NOTHING",
+        )
+        .bind(id)
+        .bind(user_id)
+        .bind(company_id)
+        .bind(role_title)
+        .bind(source)
+        .bind(status)
+        .bind(applied_on)
+        .bind(salary_min)
+        .bind(salary_max)
+        .bind(salary_currency)
+        .bind(job_url)
+        .bind(description)
+        .bind(next_action_task_id)
+        .bind(created_at)
+        .bind(updated_at)
+        .execute(&mut *connection)
+        .await
+        .map_err(|error| insert_failure("job_applications", &error))?
+        .rows_affected();
+
+        outcome.record(inserted);
+    }
+
+    Ok(outcome)
+}
+
+/// Inserts the events of every application.
+///
+/// Event ids are `SHA-256("atom-seed/v1/application_events/<n>")` with `n`
+/// counting across the whole profile, so the derivation does not depend on how
+/// the applications are grouped. The owner is the application's owner, which
+/// the composite key would reject otherwise. `occurred_at` is the
+/// application's `created_at` plus `offset` days; `created_at` is one day later
+/// than that instant, as `seeding.md` §4.2 fixes.
+async fn seed_events(
+    connection: &mut PgConnection,
+    profile: Profile,
+) -> Result<EntityOutcome, Failure> {
+    let mut outcome = EntityOutcome::default();
+    let mut event_index = 0_usize;
+
+    for application_index in 0..profile.applications() {
+        let application_id = seeded_id("job_applications", application_index);
+        let user_id = seeded_id("users", application_index % SEEDED_USERS.len());
+        let application_created = application_created_at(application_index);
+
+        for offset in 0..events_per_application(application_index) {
+            let id = seeded_id("application_events", event_index);
+            let kind = EVENT_KINDS[event_index % EVENT_KINDS.len()];
+            let occurred_at = application_created + Duration::days(offset as i64);
+            let created_at = application_created + Duration::days((offset + 1) as i64);
+            let summary = format!(
+                "{} (application {})",
+                EVENT_SUMMARIES[event_index % EVENT_SUMMARIES.len()],
+                application_index + 1
+            );
+            let details = format!(
+                "{} Seed reference: atom-seed/v1/application_events/{event_index}.",
+                EVENT_DETAILS[event_index % EVENT_DETAILS.len()]
+            );
+
+            let inserted = sqlx::query(
+                "INSERT INTO application_events \
+                     (id, user_id, application_id, kind, occurred_at, summary, details, \
+                      created_at) \
+                 VALUES ($1, $2, $3, $4::text::application_event_kind, $5, $6, $7, $8) \
+                 ON CONFLICT (id) DO NOTHING",
+            )
+            .bind(id)
+            .bind(user_id)
+            .bind(application_id)
+            .bind(kind)
+            .bind(occurred_at)
+            .bind(summary)
+            .bind(details)
+            .bind(created_at)
+            .execute(&mut *connection)
+            .await
+            .map_err(|error| insert_failure("application_events", &error))?
+            .rows_affected();
+
+            outcome.record(inserted);
+            event_index += 1;
+        }
+    }
+
+    Ok(outcome)
+}
+
 /// Runs the six post-insert checks before the transaction commits.
 async fn verify(
     connection: &mut PgConnection,
@@ -1370,6 +1781,53 @@ async fn verify_ownership(
         "a seeded item disagrees with its claim about the owner",
     )?;
 
+    let company_ids = seeded_ids("companies", profile.companies());
+    let companies = query_count(
+        connection,
+        "SELECT COUNT(*) FROM companies WHERE id = ANY($1) AND user_id <> ALL($2)",
+        &company_ids,
+        seed_ids,
+    )
+    .await?;
+    expect_zero(
+        "V2 ownership (companies)",
+        companies,
+        "seeded companies belong to a user outside the seeded set",
+    )?;
+
+    let application_ids = seeded_ids("job_applications", profile.applications());
+    let applications = query_count(
+        connection,
+        "SELECT COUNT(*) FROM job_applications a JOIN companies c ON c.id = a.company_id \
+         WHERE a.id = ANY($1) AND (a.user_id <> ALL($2) OR c.user_id <> a.user_id)",
+        &application_ids,
+        seed_ids,
+    )
+    .await?;
+    expect_zero(
+        "V2 ownership (applications)",
+        applications,
+        "a seeded application belongs to another owner's company or to a user outside the \
+         seeded set",
+    )?;
+
+    let event_ids = seeded_ids("application_events", profile.events());
+    let events = query_count(
+        connection,
+        "SELECT COUNT(*) FROM application_events e \
+         JOIN job_applications a ON a.id = e.application_id \
+         WHERE e.id = ANY($1) AND (e.user_id <> ALL($2) OR a.user_id <> e.user_id)",
+        &event_ids,
+        seed_ids,
+    )
+    .await?;
+    expect_zero(
+        "V2 ownership (events)",
+        events,
+        "a seeded event belongs to another owner's application or to a user outside the \
+         seeded set",
+    )?;
+
     Ok(())
 }
 
@@ -1458,6 +1916,34 @@ async fn verify_counts(
     )
     .await?;
     expect_count("V4 counts (items)", profile.items(), items)?;
+
+    let companies = query_count_single(
+        connection,
+        "SELECT COUNT(*) FROM companies WHERE user_id = ANY($1)",
+        seed_ids,
+    )
+    .await?;
+    expect_count("V4 counts (companies)", profile.companies(), companies)?;
+
+    let applications = query_count_single(
+        connection,
+        "SELECT COUNT(*) FROM job_applications WHERE user_id = ANY($1)",
+        seed_ids,
+    )
+    .await?;
+    expect_count(
+        "V4 counts (applications)",
+        profile.applications(),
+        applications,
+    )?;
+
+    let events = query_count_single(
+        connection,
+        "SELECT COUNT(*) FROM application_events WHERE user_id = ANY($1)",
+        seed_ids,
+    )
+    .await?;
+    expect_count("V4 counts (events)", profile.events(), events)?;
 
     Ok(())
 }
@@ -1623,6 +2109,9 @@ fn print_report(profile: Profile, outcome: &SeedOutcome) {
     print_entity("tasks", outcome.tasks);
     print_entity("claims", outcome.claims);
     print_entity("items", outcome.items);
+    print_entity("companies", outcome.companies);
+    print_entity("applications", outcome.applications);
+    print_entity("events", outcome.events);
     println!(
         "atom-seed: verification passed (6 checks); {} rows inserted, {} skipped",
         outcome.total_inserted(),
@@ -1634,7 +2123,7 @@ fn print_report(profile: Profile, outcome: &SeedOutcome) {
 /// Prints one entity's inserted and skipped counts.
 fn print_entity(name: &str, outcome: EntityOutcome) {
     println!(
-        "  {name:<10} inserted {:<5} skipped {}",
+        "  {name:<12} inserted {:<5} skipped {}",
         outcome.inserted, outcome.skipped
     );
 }
@@ -1893,6 +2382,132 @@ const ITEM_CATEGORIES: [Option<&str>; 5] = [
     Some("supplies"),
 ];
 
+/// Company names. Each profile seeds at most nine companies per owner, so the
+/// twelve entries are never repeated within one owner and
+/// `companies_user_id_lower_name_unique_idx` cannot see a duplicate.
+const COMPANY_NAMES: [&str; 12] = [
+    "Northwind Systems",
+    "Contoso Labs",
+    "Fabrikam Cloud",
+    "Tailspin Analytics",
+    "Adventure Works",
+    "Litware Digital",
+    "Proseware Studio",
+    "Wingtip Trading",
+    "Copperfield Data",
+    "Blue Yonder Robotics",
+    "Coho Vineyard Media",
+    "Alpine Air Freight",
+];
+
+/// Employer notes, cycling. Short enough for the 5 000-character check and
+/// trimmed, because the column's check bounds the length and the service
+/// trims before writing.
+const COMPANY_NOTES: [&str; 5] = [
+    "Referred through a former colleague.",
+    "Second conversation after the first role closed.",
+    "Met the hiring manager at a local meetup.",
+    "Recruiter reached out; no application form required.",
+    "Hybrid role, two days a week in the office.",
+];
+
+/// The roles the applications are for. Each is short enough for the
+/// 200-character column check.
+const APPLICATION_ROLES: [&str; 10] = [
+    "Backend Engineer",
+    "Platform Engineer",
+    "Data Engineer",
+    "Site Reliability Engineer",
+    "Rust Developer",
+    "API Engineer",
+    "Database Engineer",
+    "Security Engineer",
+    "DevOps Engineer",
+    "Technical Lead",
+];
+
+/// Where the lead came from. A label, not a controlled value, and trimmed.
+const APPLICATION_SOURCES: [&str; 5] = [
+    "referral",
+    "company site",
+    "job board",
+    "recruiter",
+    "conference",
+];
+
+/// The seven stages, in the enum's declaration order, cycled by `i % 7`.
+const APPLICATION_STATUSES: [&str; 7] = [
+    "wishlist",
+    "applied",
+    "screening",
+    "interview",
+    "offer",
+    "rejected",
+    "withdrawn",
+];
+
+/// One sentence appended to each application's description.
+const APPLICATION_DESCRIPTIONS: [&str; 5] = [
+    "Role found through a personal contact.",
+    "Description matched the owner's last project.",
+    "Second interview scheduled with the platform team.",
+    "Process stopped after the first technical screen.",
+    "Offer under review; the start date is flexible.",
+];
+
+/// Optional lower salary bounds. Fixed decimal strings, never parsed or
+/// compared in Rust (ADR-0007); every entry is below the maximum at the same
+/// index, so `job_applications_salary_range_chk` holds by construction.
+const SALARY_MINIMUMS: [&str; 6] = [
+    "42000.0000",
+    "56000.0000",
+    "37500.0000",
+    "65000.0000",
+    "48000.0000",
+    "72000.0000",
+];
+
+/// Optional upper salary bounds, paired index for index with
+/// [`SALARY_MINIMUMS`].
+const SALARY_MAXIMUMS: [&str; 6] = [
+    "58000.0000",
+    "74000.0000",
+    "52000.0000",
+    "88000.0000",
+    "66000.0000",
+    "95000.0000",
+];
+
+/// The currencies the salary rows cycle through, each three upper-case
+/// letters as `job_applications_salary_currency_chk` requires.
+const SALARY_CURRENCIES: [&str; 3] = ["USD", "EUR", "GBP"];
+
+/// The six event kinds, in the enum's declaration order, cycled by the global
+/// event index.
+const EVENT_KINDS: [&str; 6] = ["note", "email", "call", "interview", "offer", "rejection"];
+
+/// One sentence per event, before the application reference is appended. Short
+/// enough that the appended suffix leaves the summary within 200 characters.
+const EVENT_SUMMARIES: [&str; 8] = [
+    "Recruiter confirmed the process",
+    "Sent the updated CV",
+    "Introductory call with the hiring manager",
+    "Technical screen scheduled",
+    "Panel interview completed",
+    "References requested",
+    "Offer discussed",
+    "Rejection received",
+];
+
+/// One sentence per event's details, before the seed reference is appended.
+const EVENT_DETAILS: [&str; 5] = [
+    "The next step is expected within a week.",
+    "The recruiter asked for salary expectations.",
+    "The role is hybrid and based in the same city.",
+    "The team uses Rust and PostgreSQL.",
+    "No further action unless the owner follows up.",
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1969,6 +2584,61 @@ mod tests {
             || items_per_claim(3) != 1
         {
             return Err("the per-claim item rule does not match seeding.md §2.1".to_string());
+        }
+
+        // C-J1 §SEEDER fixes the applications and the derived companies and
+        // events: `ceil(apps / 3) + 2` companies per owner over the two owners,
+        // and `1 + (i % 4)` events per application.
+        let jobs = [
+            (Profile::Minimal, 1_usize, 5_usize, 1_usize),
+            (Profile::Dev, 20, 12, 50),
+            (Profile::Demo, 40, 18, 100),
+        ];
+
+        for (profile, application_count, company_count, event_count) in jobs {
+            if profile.applications() != application_count {
+                return Err(format!(
+                    "profile {}: applications {} != {application_count}",
+                    profile.as_str(),
+                    profile.applications()
+                ));
+            }
+            if profile.companies() != company_count {
+                return Err(format!(
+                    "profile {}: companies {} != {company_count}",
+                    profile.as_str(),
+                    profile.companies()
+                ));
+            }
+            if profile.events() != event_count {
+                return Err(format!(
+                    "profile {}: events {} != {event_count}",
+                    profile.as_str(),
+                    profile.events()
+                ));
+            }
+        }
+
+        // The grouping the insert loop applies: application `i` is owned by
+        // user `i % 2` and belongs to that owner's first application-holding
+        // company, so the first two companies of each owner stay empty.
+        if company_index_for_application(Profile::Dev, 0) != 2
+            || company_index_for_application(Profile::Dev, 1) != 8
+            || company_index_for_application(Profile::Dev, 9) != 9
+            || company_index_for_application(Profile::Dev, 19) != 11
+        {
+            return Err(
+                "the application-to-company grouping does not match seeding.md".to_string(),
+            );
+        }
+
+        if events_per_application(0) != 1
+            || events_per_application(3) != 4
+            || events_per_application(4) != 1
+        {
+            return Err(
+                "the per-application event rule does not match seeding.md §2.1".to_string(),
+            );
         }
 
         if Profile::default() != Profile::Dev {

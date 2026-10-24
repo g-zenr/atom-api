@@ -484,7 +484,7 @@ blocks Phase 1 work that does not depend on the answer.
 | CI pipeline | Implemented | `.github/workflows/ci.yml` - the three quality gates, a release build, the documentation check and the OpenCode configuration check |
 | Container image | Not started | `docker-compose.yml` is provided for local PostgreSQL only |
 | Reimbursement tracking | Implemented | accepted in §18.1; migration `0004_expense_claims.sql`, `src/reimbursements/` and all twelve published operations exist. `tests/claims_schema.rs` asserts the constraints, `tests/claims_api.rs` the twelve operations and `tests/openapi_contract.rs` the published surface. No reviewer has read the chain that completed it, so the feature is **not** `Verified`; a passing suite is not a review. |
-| Job application tracking | Not started | accepted in §18.2; no code, no migration, no test exists |
+| Job application tracking | Implemented (schema only) | accepted in §18.2; migration `0005_job_applications.sql`, the two enums, the three tables and `src/job_applications/{mod,models}.rs` exist and compile. `tests/jobs_schema.rs` asserts the constraints. No endpoint and no service exist, so the feature is `Accepted` and not `Verified`. |
 | Local machine learning | Not started | accepted in §18.3; no code, no migration, no test exists |
 | Everything else in the roadmap | Not started | by design |
 

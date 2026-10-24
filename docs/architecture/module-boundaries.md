@@ -149,11 +149,11 @@ Source: `src/tasks/handlers.rs`, `src/tasks/service.rs`,
 > `expense_claim_status`, `expense_claims` and `expense_items` with their
 > constraints and indexes. All twelve published operations are served, and
 > `tests/claims_schema.rs`, `tests/claims_api.rs` and `tests/claims_flow.rs`
-> prove the constraints and the behaviour. There is no `src/job_applications/`
-> and no `src/ml/`, and no `migrations/0005` or `0006`. Those two are
-> **accepted product scope** — `JOB-R01`…`R09` and `ML-R01`…`R09` in
-> [`../project-truth.md`](../project-truth.md) §18 — with feature status
-> `Accepted`, which means *not built*.
+> prove the constraints and the behaviour. `job-applications` has its **schema
+> only**: `migrations/0005_job_applications.sql` and
+> `src/job_applications/{mod,models}.rs`, proved by `tests/jobs_schema.rs`, with
+> no handler, service, repository, DTO or route. There is no `src/ml/` and no
+> `migrations/0006`; `ml` is `Accepted`, not built.
 
 **What "every module" means from here.** §1–§7 describe every module that
 **exists**. From this section on, the phrase means "every module that exists

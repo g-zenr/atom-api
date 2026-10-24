@@ -63,7 +63,8 @@ A feature is never `Verified` because the code exists or compiles.
 | Contract tests against the OpenAPI document | `Verified` | [`../../tests/openapi_contract.rs`](../../tests/openapi_contract.rs) - `the_route_table_and_the_document_describe_the_same_operations` (the tables and the document agree in both directions), `every_route_in_the_table_is_served_by_the_router`, `the_version_prefix_is_declared_once`, `each_list_endpoint_publishes_its_filter_and_pagination_parameters_once` and `each_list_handler_extracts_the_query_string_once`. What is asserted is the operation set, the methods, the version prefix and the list parameter sets; response bodies and schemas are not snapshotted. | 2026-10-24 |
 | The disposable test database guard | `Verified` | [`../../tests/common/mod.rs`](../../tests/common/mod.rs) refuses to start unless the database name contains `test` | 2026-10-22 |
 | Development database seeder (`atom-seed`) | `Verified` | [`../../src/bin/atom-seed.rs`](../../src/bin/atom-seed.rs) and [`../../tests/seeder.rs`](../../tests/seeder.rs) — 18 integration tests and 6 unit tests in the binary, passing in the 225-test run recorded under `ATOM-CHANGE-20261024-005`. Development tooling, not product behaviour: the chain's review rows (`D2.S1` rows 10–11) are outstanding. | 2026-10-24 |
-| Reimbursements: claims, items and the lifecycle | `Implemented` | [`../../migrations/0004_expense_claims.sql`](../../migrations/0004_expense_claims.sql), [`../../src/reimbursements/`](../../src/reimbursements/) (six modules) — 34 operations on the surface, `CONTRACT_OPERATIONS = 34`; 55 cases in [`../../tests/claims_api.rs`](../../tests/claims_api.rs), 3 in [`../../tests/claims_flow.rs`](../../tests/claims_flow.rs) and 10 in [`../../tests/claims_schema.rs`](../../tests/claims_schema.rs). Not `Verified`: the chains`D2.R2`-`R5` have no `code-reviewer` or `quality-gate` verdict. | 2026-10-24 |
+| Reimbursements: claims, items and the lifecycle | `Implemented` | [`../../migrations/0004_expense_claims.sql`](../../migrations/0004_expense_claims.sql), [`../../src/reimbursements/`](../../src/reimbursements/) (six modules) — 34 operations on the surface, `CONTRACT_OPERATIONS = 34`; 56 cases in [`../../tests/claims_api.rs`](../../tests/claims_api.rs), 3 in [`../../tests/claims_flow.rs`](../../tests/claims_flow.rs) and 10 in [`../../tests/claims_schema.rs`](../../tests/claims_schema.rs). Not `Verified`: the chains `D2.R2`-`R6` have no `code-reviewer` or `quality-gate` verdict. | 2026-10-24 |
+| Job applications: schema and row types (no endpoint) | `Implemented` | [`../../migrations/0005_job_applications.sql`](../../migrations/0005_job_applications.sql), [`../../src/job_applications/`](../../src/job_applications/) (`mod.rs`, `models.rs`) — 11 cases in [`../../tests/jobs_schema.rs`](../../tests/jobs_schema.rs) prove the constraints, including the composite company key and the `NO ACTION` that lets an account be deleted. No handler, service, repository, DTO or route exists, so `/api/v1/openapi.json` is unchanged. The **feature** stays `Accepted`. | 2026-10-24 |
 | CI pipeline | `Implemented` | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) - formatting, linting, the test suite, a release build, the documentation check and the OpenCode configuration check. | 2026-10-22 |
 | Container image | `Implemented` | [`../../Dockerfile`](../../Dockerfile) builds a two-stage image: pinned base images, `--locked`, no toolchain in the runtime stage, unprivileged UID 10001, no secret inside. [`../../.github/workflows/container.yml`](../../.github/workflows/container.yml) builds and verifies it on every relevant change. **Verified** in run [`40011694239`](https://github.com/g-zenr/atom-api/actions/runs/40011694239): `Config.User=10001:10001`, `uid=10001(atom)`, no `cargo` or `rustc` in the runtime stage, no missing shared library, and the binary exits 1 with `required environment variable DATABASE_URL is missing or empty`, which is the evidence that nothing was baked in. | 2026-10-24 |
 | Compile-time SQLx verification | `Proposed` | Queries are checked at run time. The workflow is documented, not enabled. | — |
@@ -71,12 +72,12 @@ A feature is never `Verified` because the code exists or compiles.
 | The rest of the roadmap | `Proposed` | By design, apart from the seeder and the reimbursements schema above. See [`../roadmap.md`](../roadmap.md). | — |
 
 The last full run of the test suite on a Windows host was on 2026-10-24, at
-commit `02c5489` (chain `D2.R5`): **299 tests pass** — 124 unit, 3 `atom-docs`,
-6 `atom-seed`, 29 authentication, 55 claims, 3 claims flow, 10 `claims_schema`,
-2 explorer, 4 `list_query`, 12 notes, 8 `openapi_contract`, 25 projects and
-tasks, 18 `seeder`, 0 shutdown — 0 failed. The split is the one the six
+the `D3.J1` commit: **314 tests pass** — 126 unit, 3 `atom-docs`,
+6 `atom-seed`, 29 authentication, 56 claims, 3 claims flow, 10 `claims_schema`, 11 jobs
+schema, 2 explorer, 4 `list_query`, 12 notes, 8 `openapi_contract`, 25 projects and
+tasks, 19 `seeder`, 0 shutdown — 0 failed. The split is the one the six
 gates printed.
-On CI's `ubuntu` runner the same tree is **301**, because the two unix-only
+On CI's `ubuntu` runner the same tree is **316**, because the two unix-only
 shutdown tests run there. The run covers the current tree, including the claim
 CRUD under `ATOM-CHANGE-20261024-006`, items and the lifecycle under `-007`, and
 the flow and sweep under the `D2.R5` commit. The configuration module

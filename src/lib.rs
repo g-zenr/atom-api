@@ -9,6 +9,7 @@
 //! * `projects`— projects.
 //! * `tasks`   — tasks belonging to a project.
 //! * `reimbursements` — expense claims and their line items.
+//! * `job_applications` — companies, applications and their timeline.
 //! * `config`  — configuration loading, validation and the message catalogue.
 //! * `helpers` — cohesive operations that support a behaviour.
 //! * `utils`   — generic, domain-independent utilities.
@@ -26,6 +27,7 @@ pub mod config;
 pub mod error;
 pub mod health;
 pub mod helpers;
+pub mod job_applications;
 pub mod notes;
 pub mod pagination;
 pub mod projects;
