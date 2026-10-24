@@ -38,6 +38,9 @@ permissions:
   - action: shell
     resource: "cargo build *"
     effect: allow
+  - action: shell
+    resource: "*gate.ps1*"
+    effect: allow
   - action: subagent
     resource: "*"
     effect: deny
