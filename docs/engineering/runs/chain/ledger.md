@@ -109,7 +109,7 @@ step deliberately, and the rows are renamed only between runs.
 | Item | Wave | State | Commit | Notes |
 | ---- | ---- | ----- | ------ | ----- |
 | D0 | Close Phase 1 | **done** | `906d6dc` | Contract `C-D0` (+ A-C-D0-1..10). **Closed 2026-10-24**: route tables and `API_PREFIX` from the earlier sessions; this session completed `TasksListQuery` + the single-extractor handlers, `nest(routes::API_PREFIX, …)`, the settings **value** comparison in `atom-docs` with three unit tests, the `config/README.md` `100`→`10` fix, `tests/openapi_contract.rs` (5 tests) and `tests/list_query.rs` (4 tests), then six green gates, a review pass and a gate pass. 191 tests. |
-| D1 | Product intake | **done** | see `## Resume` | Documents only. **Committed 2026-10-24**: `project-truth.md` §18 (18.1 reimbursements `REIMB-R01`…`R10`, 18.2 job applications, 18.3 local ML, 18.4 the provisional-status note), three feature directories with five documents each, `ADR-0007`/`0008`/`0009`, the proposed schema, `docs/database/seeding.md`, the money convention, the test matrix, `Q-11` answered and `Q-13` opened for `A1`–`A6`. The only code change is the checker's `FEATURES` list, 4 → 7. Nothing in it is `Implemented` or `Verified`. |
+| D1 | Product intake | **done (checkpoint PARKED: review outstanding)** | `ec41105` | Documents only. **Committed 2026-10-24**: `project-truth.md` §18 (18.1 reimbursements `REIMB-R01`…`R10`, 18.2 job applications, 18.3 local ML, 18.4 the provisional-status note), three feature directories with five documents each, `ADR-0007`/`0008`/`0009`, the proposed schema, `docs/database/seeding.md`, the money convention, the test matrix, `Q-11` answered and `Q-13` opened for `A1`–`A6`. The only code change is the checker's `FEATURES` list, 4 → 7. Nothing in it is `Implemented` or `Verified`. Rows 10 and 11 of its checkpoint did not run — see `## Checkpoints` and `## Parked`. |
 | D2.S1 | Seeder foundation | pending | — | `atom-seed` for users, notes, projects and tasks. Guards, determinism, `--reset`, tests, docs. No new dependency. |
 | D2.R1 | Reimbursements — schema and types | pending | — | |
 | D2.R2 | Claim CRUD | pending | — | |
@@ -640,6 +640,21 @@ cross-checked against the tree and found consistent, and the verdict was that no
 recorded gate was dishonest. What it called over-stated was the "prove it can
 fail" claim, which this ledger now states narrowly.
 
+### Pushes and CI
+
+| Commit | Branch → `develop` | CI | Container |
+| ------ | ------------------ | -- | --------- |
+| `906d6dc` + `775dc57` (`D0`) | `eb33f3e..775dc57`, push bypassed the two required status checks (owner decision `O2`) | run `40033433607` — **FAILED**: 16 broken links, all inside `docs/project-truth.md`, `docs/api/conventions.md` and `docs/README.md`, pointing at `ADR-0007/0008/0009` and the three new feature directories, which were still untracked. The local checker had passed because the untracked targets existed. | run `40033433654` — success |
+| `ec41105` (`D1`) | `775dc57..ec41105` | run `40056051329` — **success**, 1m49s, including the documentation check and the two unix-only shutdown tests | run `40056051246` — success |
+
+**The `D0` CI failure was mine and is recorded rather than hidden.** Three
+documents were staged whole although a concurrent session had also edited them,
+so their new links were committed while the files they point at stayed
+untracked. The fix is the `D1` commit, which carries those targets. The lesson
+for the next session: `git add` a file only when every part of its diff is
+yours, and run the gate on a clean checkout, not only in a working tree that
+happens to contain the missing files.
+
 ---
 
 ## Failures
@@ -727,7 +742,9 @@ show happening around unfinished work. It is not done here.
 ## Resume
 
 **State at the end of this session: `D0` is `done` and green at commit
-`906d6dc`; `D1` is the next item and has not been started by this session.**
+`906d6dc`, pushed to `develop` as `775dc57` with CI green. `D1` is committed as
+`ec41105` with CI green, but its checkpoint is PARKED because its two review
+rows never ran.**
 
 `D0` closed the Phase 1 leftovers the audit had deferred: the version prefix is
 declared once and mounted from that constant, the route table and the OpenAPI
@@ -739,32 +756,37 @@ against a file value of `10`. 191 tests pass on this Windows host (193 on CI,
 where the two unix-only shutdown tests run). The scorecard is in
 `## Checkpoints`; the six exit codes are in `## Evidence`.
 
-**The next command.** `D1` is documents only — it must not touch `src/`,
-`migrations/` or `tests/`. Start it with the architect locking the intake
-contract, then run `database` and `docs` in parallel over disjoint files:
+`D1` committed the intake: `project-truth.md` §18, three feature directories,
+three ADRs, the proposed schema and the seeding specification. It adds no code,
+and nothing in it is `Implemented` or `Verified`.
+
+**The first command of the next session** is the review that `D1` is missing,
+not new work:
 
 ```powershell
 git status --short
-Get-Content docs/engineering/runs/chain/ledger.md | Select-Object -Last 60
+cargo run --quiet --bin atom-docs -- --strict
 ```
 
-`D1` produces: accepted requirements in `docs/project-truth.md` (with `A1`–`A6`
-marked **provisional**, per `O1`), the roadmap statuses, three feature
-directories (`reimbursements`, `job-applications`, `ml`) with five documents
-each, `ADR-0007` (money), `ADR-0008` (local ML, `REAL[]` not pgvector),
-`ADR-0009` (receipts as references), the proposed schema in
-`docs/database/schema.md`, `docs/api/conventions.md` for money-as-a-string, the
-test matrix in `docs/testing/strategy.md`, and `docs/database/seeding.md`.
-Adding feature directories means adding them to the `FEATURES` constant in
-`src/bin/atom-docs.rs`, which is one line and is the **only** code change `D1`
-is allowed to make.
+then `code-reviewer` and `quality-gate` over `git diff 775dc57..ec41105`. Until
+that verdict exists, `D2` must not start: every `D2` chain builds on the
+reimbursements requirements and the seeding specification, and building on an
+unreviewed specification is how a wrong contract becomes a wrong module.
 
-**Two things the next session must not repeat.** First, `D0` was declared `in
-progress` by four consecutive sessions and finished by none; the queue row is
-the state, and a session that does not change it did not do the work. Second,
-the run folder moved while a session was writing to it. Read the newest
-preflight record in this file before assuming the tree is yours.
+**What the next session will find uncommitted.** A concurrent session began
+`D2.S1` while this one was finishing: `src/bin/atom-seed.rs`, a `[[bin]]` stanza
+in `Cargo.toml`, and edits to `.env.example`, `ci.yml`, `Makefile`,
+`docker-compose.yml`, `README.md`, `docs/architecture/**` and
+`docs/security/secure-development.md`. It was left untouched, because it has run
+no gate and because `atom-seed.rs` and its `Cargo.toml` stanza must be committed
+together. Decide deliberately whether that work is kept and finished or dropped;
+do not `git checkout --` over it. A `STOP-RUN` sentinel is in the repository root
+and was not created by this session.
 
-`D1` has no test gate of its own — it is `Accepted` documentation, and nothing
-in it may be marked `Verified`. The six gates still run, because the
-documentation checker is one of them.
+**Two things this run must not repeat.** First, `D0` was declared `in progress`
+by four consecutive sessions and finished by none; the queue row is the state,
+and a session that does not change it did not do the work. Second, the run folder
+moved while a session was writing to it, and a document was committed with links
+whose targets were untracked, which is what turned run `40033433607` red. Read
+the newest preflight record in this file, and run the checker on what is
+committed, before assuming the tree is yours.
