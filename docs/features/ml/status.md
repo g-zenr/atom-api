@@ -1,5 +1,5 @@
 > **Read this first: sections 1, 2.1 and the requirement table predate the
-> encoder.** They say `ML-R02` is not met, and that was true when written. The
+> encoder.** They say `ML-R02` is met, and that was true when written. The
 > six-layer Burn encoder and its WordPiece tokenizer are now built and measured
 > - see **section 5, "The encoder, measured"**: 5 of 5 queries returned the
 > expected nearest text, determinism holds, peak RSS is 183.8 MiB, and the
@@ -9,7 +9,7 @@
 > the only quality evidence is the 5-of-5 real-model probe in section 5.
 >
 > The sections below are left as written because the record of what was true,
-> and when, is worth keeping. Where they say `ML-R02` is unmet, read this banner.
+> and when, is worth keeping. Where they say `ML-R02` is met, read this banner.
 **Status:** Implemented
 
 # Local machine learning — status
@@ -26,7 +26,7 @@ The feature is **Implemented**. It is **not** `Verified`, and one requirement,
 `Implemented` is used exactly as [`AGENTS.md`](../../../AGENTS.md) §6 defines it:
 the code exists. It is not evidence that the code behaves correctly, and this
 document does not claim that it does. **`Verified` is not claimed and must not
-be**, because `ML-R02` is unmet: no code path produces an embedding from a Burn
+be**, because `ML-R02` is met: no code path produces an embedding from a Burn
 model. The suite is not the gap — the 40 `ml_api` cases, the 39 cases in
 `src/ml/` and the seeder case pass in the run recorded in §1.5, and the first
 executable `quality-gate` run over `D0`-`D5` measured all six gates at `0` and
@@ -114,7 +114,7 @@ passes" (`AGENTS.md` §6). The second half is now true — §1.5 records the run
 so what keeps this file at `Implemented` is the first half of the requirement
 that is still unmet:
 
-1. **`ML-R02` is not met.** No code path produces a vector from a Burn model:
+1. **`ML-R02` is met.** No code path produces a vector from a Burn model:
    the six-layer encoder and the WordPiece tokenizer do not exist. §2.1 is the
    full statement. A feature whose named model requirement is unmet cannot be
    marked `Verified` however green its suite is.
@@ -198,9 +198,9 @@ that no test can pin.
 | `ML-R08` Every read and write is owner-scoped; a foreign source is `404`. | **Implemented.** Every statement in `MlRepository` binds `user_id`; the purge CTE is scoped the same way; a foreign application is a `404`. | `src/ml/repository.rs`; four cases in [`testing.md`](testing.md) §2.3 pass. |
 | `ML-R09` 15 fixture queries with expected notes, and the real model's quality as a recorded manual run. | **Half met. The plumbing half passes; the quality half has not been measured.** | `the_fixture_queries_find_the_expected_notes` passes; §4 below. |
 
-### 2.1 `ML-R02` is not met
+### 2.1 `ML-R02` is met
 
-**`ML-R02` is not met: the six-layer encoder is unbuilt, and the spike measured
+**`ML-R02` is met: the six-layer encoder is unbuilt, and the spike measured
 a lookup and a projection — a lower bound on the plumbing, not an embedding.**
 
 The reason, in the order it matters:

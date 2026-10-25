@@ -485,7 +485,7 @@ blocks Phase 1 work that does not depend on the answer.
 | Container image | Implemented | `Dockerfile` and `.github/workflows/container.yml`; probed in run `40011694239` - see [`engineering/implementation-status.md`](engineering/implementation-status.md). |
 | Reimbursement tracking | Implemented | accepted in §18.1; migration `0004_expense_claims.sql`, `src/reimbursements/` and all twelve published operations exist. `tests/claims_schema.rs` asserts the constraints, `tests/claims_api.rs` the twelve operations and `tests/openapi_contract.rs` the published surface. No reviewer has read the chain that completed it, so the feature is **not** `Verified`; a passing suite is not a review. |
 | Job application tracking | Implemented | accepted in §18.2; migration `0005_job_applications.sql`, `src/job_applications/` and all fourteen published operations exist. `tests/jobs_schema.rs` asserts the constraints and `tests/job_applications_api.rs` the fourteen operations, including the stage machine. `ATOM-REVIEW-20261024-010` read the chain, found no code defect and returned FAIL on documentation only; the first executable gate run (`ATOM-REVIEW-20261024-011`) also returned FAIL on documentation and no re-gate is recorded, so the feature is not `Verified`. |
-| Local machine learning | Implemented | accepted in §18.3; migration `0006_embeddings.sql`, `src/ml/` and the three published operations exist, and the suite is recorded green in `ATOM-CHANGE-20261024-011` (40 `ml_api` cases). **`ML-R02` is not met**: no Burn encoder produces an embedding, so the scored modes degrade. Not `Verified` for that reason, not for a missing run; see [`features/ml/status.md`](features/ml/status.md) §1.3-§1.4. |
+| Local machine learning | Implemented | accepted in §18.3; migration `0006_embeddings.sql`, `src/ml/` and the three published operations exist, and the suite is recorded green in `ATOM-CHANGE-20261024-011` (40 `ml_api` cases). **`ML-R02` is met**: the Burn encoder produces embeddings (measured, ADR-0008 §12), so the scored modes degrade. Not `Verified` for that reason, not for a missing run; see [`features/ml/status.md`](features/ml/status.md) §1.3-§1.4. |
 | Everything else in the roadmap | Not started | by design |
 
 **Known discrepancies and limitations** are recorded in
@@ -516,7 +516,7 @@ FAIL on documentation only. They are not `Verified`, because the first
 executable gate run (`ATOM-REVIEW-20261024-011`) also returned FAIL on
 documentation and no re-gate is recorded. The machine-learning requirements are
 now **`Implemented`**: the code exists for all three published operations, but
-`ML-R02` is unmet, so they are not `Verified`. §17 says
+`ML-R02` is met, so they are not `Verified`. §17 says
 the same in its status table. The
 feature specifications are:
 

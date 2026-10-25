@@ -195,7 +195,7 @@ read-only entry point, `powershell -NoProfile -ExecutionPolicy Bypass -File .\sc
 | - | ---- | ---- |
 | 1 | `cargo fmt --all -- --check` | `0` |
 | 2 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | `0` |
-| 3 | `cargo test --all-targets --locked` | `0` — **504 tests**, 0 failed on Windows (**485** on CI, where the two unix-only `shutdown` tests run) |
+| 3 | `cargo test --all-targets --locked` | `0` — **504 tests**, 0 failed on Windows (**506** on CI, where the two unix-only `shutdown` tests run) |
 | 4 | `cargo check --no-default-features --all-targets --locked` | `0` |
 | 5 | `cargo run --quiet --bin atom-docs` | `0` |
 | 6 | `cargo run --quiet --bin atom-docs -- --strict` | `0` |

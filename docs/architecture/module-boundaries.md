@@ -159,7 +159,7 @@ Source: `src/tasks/handlers.rs`, `src/tasks/service.rs`,
 > `tests/job_applications_api.rs` and `tests/job_applications_flow.rs` prove the
 > constraints and the behaviour. `migrations/0006_embeddings.sql` creates
 > `embeddings`; `src/ml/` serves the three published operations, and `tests/ml_api.rs`
-> proves them. `ml` is `Implemented`, not `Verified`: `ML-R02` is unmet because no
+> proves them. `ml` is `Implemented`, not `Verified`: `ML-R02` is met because no
 > Burn encoder produces an embedding.
 
 **What "every module" means from here.** §1–§7 describe every module that

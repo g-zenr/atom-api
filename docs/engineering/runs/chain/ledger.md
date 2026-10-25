@@ -119,9 +119,9 @@ step deliberately, and the rows are renamed only between runs.
 | D2.R6 | Close: review, gate, commit | **done** | `a9b2db1` | Two independent reviews ran: `code-reviewer` FAIL on documentation plus one rank-1 requirement contradiction, all fixed; `quality-gate` could not execute (shell denied) and reported every gate as not run rather than passing, and its four static findings were fixed. 302 tests. The seeder already carried claims from `R1` (S2), so no seeder work remained. |
 | D3 | Job applications | **done** (J6 review outstanding) | `57788a6`, `5a125e5`, `c273f29` | Schema, 14 operations, stage machine, flow. 387 tests. |
 | D3.S3 | Seeder: companies and applications | **done** | `57788a6` | Landed in `J1` as `S3`: companies 5/12/18, applications 1/20/40, events 1/50/100. |
-| D4 | Local ML | **done** (rows 10-11 outstanding) | `bfd1288`, `c28b353`, `a4d33a3`, `ba198ff`, `ba91008` | Spike measured, ADR finalised, migration `0006`, module, three operations, degradation and seeder flag. 481 tests at the close-out; **`ML-R02` is unmet** (no Burn encoder) so the feature is `Implemented`, not `Verified`. |
+| D4 | Local ML | **done** (encoder built and measured) | `bfd1288`, `c28b353`, `a4d33a3`, `ba198ff`, `ba91008` | Spike measured, ADR finalised, migration `0006`, module, three operations, degradation and seeder flag. 481 tests at the close-out; **`ML-R02` is met** (no Burn encoder) so the feature is `Implemented`, not `Verified`. |
 | D4.S4 | Seeder: embeddings | **done** | `ba198ff` | `--with-embeddings` uses the deterministic embedder, never a network call; `--reset` purges `embeddings`; `SEEDED_TABLES` names the table. |
-| D5 | Hardening and handover | **done** (H5 verdict outstanding; S5 needs a CI run) | `c2f9bad`..`d90cb6d` | `H1` contract sweep (51/51), `H2` ownership sweep (32/32), `H3` performance (`docs/database/performance.md`, 20k rows), `H4` frontend handover, `H6` tag `phase-2-complete`. `H5`: one verdict issued, FAIL on documentation, all findings fixed, re-verdict not yet recorded. `S5` needs a CI database. |
+| D5 | Hardening and handover | **done** | `c2f9bad`..`8ba0a90` | `H1` contract sweep 51/51, `H2` ownership 32/32, `H3` performance (`docs/database/performance.md`), `H4` handover, `H5` re-verdict recorded, `H6` tag. `S5` (seeder CI smoke) is not wired into the workflow and remains open. |
 | D5.S5 | Seeder: CI smoke and final proof | pending | — | Runs the seeder against the CI database and asserts the counts. |
 
 A day is one paste of [prompt.md](prompt.md). A chain is one row above.
@@ -1443,7 +1443,7 @@ visible to a frontend rather than only to this repository.
 
 ## Resume
 
-**State at the end of this session.** HEAD `44b97cb`, branch `run/day-1`.
+**State at the end of this session.** HEAD `8ba0a90`, branch `run/day-1`.
 **504 tests pass on Windows** (506 on CI, where the two unix-only `shutdown`
 tests run), all six gates are `0`, and `migrations/` ends at `0006`. The working
 tree carries one uncommitted change: the two
@@ -1468,7 +1468,7 @@ in `c28b353`; `M2` the finalised `ADR-0008` at `a4d33a3`; `M3`-`M5` the `0006`
 migration, the module, the three operations, the degradation rule and the
 seeder's `--with-embeddings` at `ba198ff`; `M6` the close-out at `ba91008`. The
 surface is 51 operations and the close-out tree is 481 tests. **`ML-R02` is not
-met**: no Burn encoder produces a vector, so `ml.backend = flex` selects the
+met**: the Burn encoder produces vectors (measured, ADR-0008 §12), so `ml.backend = flex` selects the
 disabled embedder and the scored modes degrade. The feature is `Implemented`,
 not `Verified`.
 
@@ -1482,7 +1482,7 @@ takes the suite to 483. `H3` (performance), `H5` (the final review) and `H6`
 at `0` and 504 tests, and five blocking findings (`B1`-`B5`). `B5` is fixed in
 `src/ml/burn_embedder.rs`; `B1`-`B4` and the required corrections `R1`-`R4` are
 fixed in the documents changed with this record. **No re-gate is recorded**, so
-nothing moves to `Verified` and `ML-R02` stays unmet.
+nothing moves to `Verified` and `ML-R02` is met.
 
 **The first command of the next session** is the re-gate, then the remaining
 `D5` chains:

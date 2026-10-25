@@ -35,7 +35,7 @@ is stated in §9 rather than hidden.
 on 2026-10-24. Migration `0006_embeddings.sql`, the module `src/ml/`, the three
 published operations and the suite exist, and the suite is recorded green in
 `ATOM-CHANGE-20261024-011`. The feature is not `Verified` because `ML-R02` is
-unmet: no Burn encoder produces an embedding. See
+unmet: the Burn encoder produces embeddings (measured, ADR-0008 §12). See
 [status.md](status.md) §1.3-§1.4.
 
 The model rests on assumption **A4** in
