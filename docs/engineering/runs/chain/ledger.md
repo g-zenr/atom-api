@@ -1515,3 +1515,12 @@ moved while a session was writing to it, and a document was committed with links
 whose targets were untracked, which is what turned run `40033433607` red. Read
 the newest preflight record in this file, and run the checker on what is
 committed, before assuming the tree is yours.
+
+**Tag and tip (2026-10-25).** `phase-2-complete` points at `a44d625`; the branch
+tip is one commit later, which wires the seeder into CI (`D5.S5`). The tag was
+deliberately **not** moved: a published tag can only be moved by deleting and
+re-pushing it, which is a force-push, and this run forbids that (`O2`). The tag
+message says so, and that commit records the seeder's CI evidence: 425 rows
+inserted with verification passed, 0 inserted and 425 skipped on the second run,
+counts `2 200 25 20` scoped to the seeded accounts, and `G1` refusing
+`APP_ENV=prod`.
