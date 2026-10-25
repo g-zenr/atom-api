@@ -12,11 +12,11 @@ is in [api.md](api.md); the agreed requirements are in
 
 This document is the design the feature was built against. It is written in the
 present tense of the plan, and the corrections below record what existed at each
-chain; read them together with [status.md](status.md) §1.1 and §1.4. The
+chain; read them together with [status.md](status.md) §1.1, §1.4 and §5. The
 `embeddings` migration, the module, the three routes and the seven `ml.*`
-settings now exist. What does **not** exist is the Burn encoder and the WordPiece
-tokenizer, so `ML-R02` is unmet; the text that describes them as `M3`'s work is
-the plan, not a claim about the tree.
+settings exist. The Burn encoder and the WordPiece tokenizer exist as of chain
+`D4.M6` and are measured by `src/bin/atom-ml-bench.rs`, so `ML-R02` is **met**;
+`ML-R09`'s manual quality evaluation is still outstanding (status.md §4).
 
 **Correction (2026-10-24, chain `D4.M1`).** `src/ml/` was created as the spike
 surface: `embedder.rs` (the trait and the error type), `disabled.rs`,
@@ -43,10 +43,27 @@ on `M3`:
   a vocabulary that the SafeTensors file does not contain
   ([`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) §10).
 
+**Correction (2026-10-25, chain `D4.M7`).** The encoder and tokenizer landed and
+`atom-ml-bench` measured the real forward pass: **88 ms** for one text,
+**112.6 ms** per text sustained, **804 ms** worst case at 256 tokens, 183.8 MiB
+RSS. §7 was re-derived from that measurement, and two things changed with it:
+
+- **`ml.timeout_seconds` bounds one inference, not one re-rank.** A hybrid
+  search embeds the query and then scores **stored** vectors; `MlService::hybrid`
+  contains no inference call. The earlier text that described the timeout as
+  bounding the re-rank (§4.2, §11) was wrong, and §7 now states which setting
+  bounds which. The defaults did not change: **2 s**, **200**.
+- **`ml.candidate_limit` gained a ceiling and lost its floor.** The rule
+  "`candidate_limit >= api.pagination.max_limit`" is withdrawn: its stated
+  reason — that a page two would be impossible — was false, because a ranked set
+  shorter than the page size yields a well-formed short page. It is replaced by
+  `MAX_ML_CANDIDATE_LIMIT = 1_000`. See
+  [`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) §12.
+
 §12 is the **build contract for chains `M3`–`M6`**: the exact trait, the three
 implementations, the table, the endpoints with their status codes, the
 degradation rule, the test names and the files each agent owned. Everything in it
-is built except the Burn encoder and the WordPiece tokenizer.
+is built.
 
 ## 1. Responsibilities
 
@@ -54,8 +71,8 @@ is built except the Burn encoder and the WordPiece tokenizer.
 | ------ | -------------- | ------ |
 | `src/ml/mod.rs` | The module surface: `MlService`, `Embedder`, the error type. | Exists. |
 | `src/ml/embedder.rs` | The `Embedder` trait, `EmbedderStatus`, `MlError`, `l2_norm`, and the selection at start-up. | Exists. |
-| `src/ml/burn_embedder.rs` | The Burn v0.22 implementation on the `flex` backend, loading SafeTensors weights with `burn_store`. | Weight lookup, mean-pool and projection; **no encoder** (§12.3). |
-| `src/ml/tokenizer.rs` | The WordPiece tokenizer: vocabulary load, greedy longest-match, `[CLS]`/`[SEP]`, `[UNK]`, truncation. | **No** |
+| `src/ml/burn_embedder.rs` | The Burn v0.22 encoder on the `flex` backend: the six-layer BERT module, masked mean pooling, L2 normalisation, and SafeTensors weights loaded with `burn_store`. | Exists (§12.3). |
+| `src/ml/tokenizer.rs` | The WordPiece tokenizer: vocabulary load, greedy longest-match, `[CLS]`/`[SEP]`, `[UNK]`, truncation. | Exists. |
 | `src/ml/deterministic.rs` | The hash-based embedder used by every test and by the seeder. | Exists. |
 | `src/ml/disabled.rs` | The embedder that reports unavailability and never panics. | Exists. |
 | `src/ml/service.rs` | The use cases: search in three modes, match, reindex, and the degradation rule. | Exists. |
@@ -291,8 +308,10 @@ POST /notes/search   {"query":"…","mode":"hybrid"}
 Three properties follow from the pipeline and are worth stating:
 
 1. **The re-rank is bounded.** The candidate set is at most
-   `ml.candidate_limit` rows, so memory and CPU are bounded by configuration,
-   not by the corpus.
+   `ml.candidate_limit` rows, and `ml.candidate_limit` is at most
+   `MAX_ML_CANDIDATE_LIMIT` (1,000), so memory and CPU are bounded by
+   configuration, not by the corpus. This is the only bound the re-rank has:
+   `ml.timeout_seconds` bounds the query's inference, not the scoring loop (§7).
 2. **The score sort is total.** The tie-break is the note id, so two pages of
    the same query do not overlap or skip a row.
 3. **`pagination.total` is the size of the candidate set**, not the number of
@@ -396,11 +415,10 @@ POST /api/v1/ml/reindex        (no body)
 
 ## 7. Configuration
 
-The seven settings **do not exist in `config/` yet.** They are added by the
-implementing change, in all the places `AGENTS.md` §4.11 requires: the file,
-the typed structure, the loader, the validation, `.env.example`, the reference
-table in
-[`deployment.md`](../../architecture/deployment.md) and the tests.
+The seven settings exist in `config/ml.toml`, in `MlSettings`, in the loader, in
+`validate_ml`, in `.env.example`, in the reference table in
+[`deployment.md`](../../architecture/deployment.md) and in the tests. Below is
+what each means and what the validation enforces.
 
 | Setting | Default | Validation |
 | ------- | ------- | ---------- |
@@ -410,25 +428,72 @@ table in
 | `ml.tokenizer_path` | unset — the `vocab.txt` beside `ml.model_path` | a path; a missing vocabulary is `Disabled`, not a start-up failure ([`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) §10) |
 | `ml.dimension` | `384` | `> 0`; must equal what the embedder reports |
 | `ml.timeout_seconds` | `2` | `> 0` and at most the request timeout |
-| `ml.candidate_limit` | `200` | `> 0` and at most the configured maximum page size × a documented factor |
+| `ml.candidate_limit` | `200` | `> 0` and at most `MAX_ML_CANDIDATE_LIMIT` (1,000) |
 
-The section lives in a new `config/ml.toml`. Two things are needed for it to
-exist at all, and both are part of the same change:
+**The two budget settings are not a pair, and the validation no longer pretends
+they are.** They bound different things:
 
-- `src/config/loader.rs` gains `"ml.toml"` to `BASE_FILES` (which is
-  `const BASE_FILES: [&str; 5]`, so the length changes too) **and** an arm to
+| Setting | What it bounds | Where it is applied |
+| ------- | -------------- | ------------------- |
+| `ml.timeout_seconds` | **One inference.** The query's, for a search; the application's, for a match; each source's, for a reindex. | `tokio::time::timeout` in `MlService::embed` (`src/ml/service.rs`) |
+| `ml.candidate_limit` | **One re-rank.** The number of stored vectors a hybrid search scores. | The `LIMIT` of `NoteRepository::lexical_candidates` |
+
+A search performs **one** inference and then scores stored vectors: `hybrid`
+never embeds a candidate ([`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md)
+§12.2). So the two settings are independent, and neither is derived from the
+other or from `api.pagination.max_limit`.
+
+**The candidate limit is a work bound, so it has a ceiling.** At the ceiling the
+re-rank is ≈1.2 million `f64` operations and 1.5 MB of held vectors — on the
+order of a millisecond, against an 88 ms inference. Negligible, but finite, and
+until `ADR-0008` §12.5 nothing enforced it: the validation bounded
+`candidate_limit` from below and left it unbounded above. The ceiling is
+`MAX_ML_CANDIDATE_LIMIT = 1_000`, a constant in `src/config/validation.rs`
+beside `MAX_PAGINATION_LIMIT`, not a setting, because a deployment has no reason
+to raise it and `AGENTS.md` §4.11 reserves a setting for a value a deployment
+might need to change. It equals `MAX_PAGINATION_LIMIT`, so a legal page and a
+legal candidate set cannot outgrow each other.
+
+**A page is a separate bound, and a short page is not an error.** `limit` is
+clamped by the shared envelope. When the ranked set is smaller than the page
+size — a candidate set smaller than `limit`, or fewer scored candidates than
+asked for — the response is a well-formed short page: the items that exist, the
+true `total`, and `has_more: false`
+([`pagination.rs`](../../../src/pagination.rs)). The validation therefore
+imposes no relation between `ml.candidate_limit` and `api.pagination.max_limit`.
+It did, until
+[`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) §12.5 withdrew the
+rule on the grounds that its justification was false and that it left the work
+bound unbounded above.
+
+**`semantic` mode is the exception, and it is bounded by the corpus, not by
+these settings.** It scores every embedding the caller has
+([`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) §4), so
+`candidate_limit` does not apply to it and `ml.timeout_seconds` bounds only its
+query embed. That is the accepted cost of having no vector index, and it is a
+limitation of §11, not a gap in the validation.
+
+**The reindex is bounded by the request timeout, not by `ml.timeout_seconds`.**
+It embeds one text per source that is not already current, so its wall clock is
+`sources × per-inference` and the binding limit is `app.limits.request_timeout`
+(30 s by default) enforced by `timeout_middleware`. At the measured cost that is
+**≈266 short sources, or ≈37 at 256 tokens**, per request; past it the answer is
+`408`, the rows already written stay, and the next run skips them. This is a
+recorded limit ([`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md)
+§12.6), not a setting.
+
+The section lives in `config/ml.toml`. Two things are needed for it to exist at
+all, and both are done:
+
+- `src/config/loader.rs` lists `"ml.toml"` in `BASE_FILES` **and** has an arm in
   `fn embedded(name: &str)`. A file that is only in the directory is absent from
   an embedded build, and a file that is only in `embedded` is absent from a
   directory build. Both, or neither works.
-- Each setting gets its `APP_ML_*` override in the `apply_*` function that reads
+- Each setting has its `APP_ML_*` override in the `apply_*` function that reads
   the environment, matching `APP_AUTH_*` and `APP_API_*`. `ml.model_path` and
   `ml.tokenizer_path` are **not** secrets, so a literal default in a committed
   file is allowed; a machine-specific path belongs in the environment and not in
   `config/ml.toml`.
-
-The last bound deserves a note: a candidate limit below the page size would
-make page two impossible. The validation refuses a limit smaller than
-`api.pagination.max_limit`.
 
 `ml.backend` accepts exactly two values:
 
@@ -473,7 +538,10 @@ The reason is in the same ADR amendment.
   [`threat-model.md`](../../security/threat-model.md)); a corrupt file yields
   `Disabled`, not code execution.
 - **The candidate limit is a resource bound, not a quality knob.** It caps the
-  work one request may do, which is why it is validated at start-up.
+  work one request may do, which is why it is validated at start-up — in both
+  directions: it must be positive, and it must not exceed
+  `MAX_ML_CANDIDATE_LIMIT` (§7). The ceiling is what makes the sentence true; a
+  floor alone bounds recall, not work.
 - **A degraded response must not leak why a model failed.** The reason is one
   of three fixed codes; the underlying error is logged once at start-up and
   never returned.
@@ -482,17 +550,17 @@ The reason is in the same ADR amendment.
 
 | File | Role | Exists |
 | ---- | ---- | ------ |
-| `src/notes/repository.rs` | The lexical query the search modes reuse; the delete statement that also purges the note's embeddings. | Yes, to be extended. |
-| `src/api/routes.rs` | Registers the three routes and the schemas, in `api_routes()` and in `ROUTE_TABLE`. | Yes, to be extended. |
-| `src/state.rs` | Holds the `MlService`, which holds the `Arc<dyn Embedder>`. | Yes, to be extended. |
-| `src/config/` | The seven `ml.*` settings, including `BASE_FILES` and `embedded()`. | Yes, to be extended. |
-| `src/job_applications/repository.rs` | Finds the application a match ranks against; the delete statement that also purges the application's embeddings. | Yes, to be extended. |
-| `src/ml/**` | The feature itself. | **Partly**: the spike surface only (`embedder.rs`, `disabled.rs`, `deterministic.rs`, `burn_embedder.rs`). `service.rs`, `repository.rs`, `dto.rs` and `handlers.rs` do not exist. |
+| `src/notes/repository.rs` | The lexical query the search modes reuse; the delete statement that also purges the note's embeddings. | Yes. |
+| `src/api/routes.rs` | Registers the three routes and the schemas, in `api_routes()` and in `ROUTE_TABLE`. | Yes. |
+| `src/state.rs` | Holds the `MlService`, which holds the `Arc<dyn Embedder>`. | Yes. |
+| `src/config/` | The seven `ml.*` settings, including `BASE_FILES` and `embedded()`. | Yes. |
+| `src/job_applications/repository.rs` | Finds the application a match ranks against; the delete statement that also purges the application's embeddings. | Yes. |
+| `src/ml/**` | The feature itself. | Yes: `embedder.rs`, `disabled.rs`, `deterministic.rs`, `burn_embedder.rs`, `tokenizer.rs`, `service.rs`, `repository.rs`, `dto.rs`, `handlers.rs`. |
 | `src/bin/atom-ml-spike.rs` | The `D4.M1` measurement. **Frozen**: it is the record behind `ADR-0008` §8 and is not edited to measure a later network. | Yes. |
-| `src/bin/atom-ml-bench.rs` | The `M3` re-measurement of the real encoder and tokenizer. | **No** |
-| `migrations/0006_embeddings.sql` | The `embeddings` table, its constraints and its two indexes, exactly as [`schema.md`](../../database/schema.md) §11.6 specifies. | **No** |
-| `config/ml.toml` | The seven settings. | **No** |
-| `tests/ml_api.rs` | The integration suite of §12.6. | **No** |
+| `src/bin/atom-ml-bench.rs` | The `M3` re-measurement of the real encoder and tokenizer; the source of the numbers in `ADR-0008` §12.1. | Yes. |
+| `migrations/0006_embeddings.sql` | The `embeddings` table, its constraints and its two indexes, exactly as [`schema.md`](../../database/schema.md) §11.6 specifies. | Yes. |
+| `config/ml.toml` | The seven settings. | Yes. |
+| `tests/ml_api.rs` | The integration suite of §12.7. | Yes. |
 
 ## 10. Related decisions
 
@@ -527,7 +595,11 @@ The reason is in the same ADR amendment.
   embeddings leaves an orphan; the reindex sweep is the backstop.
 - **Inference cannot be cancelled.** A timed-out request returns, but the
   blocking task finishes. With `ml.timeout_seconds` at 2 seconds, the wasted
-  work is bounded.
+  work is bounded by one inference.
+- **The reindex is bounded by one request.** It embeds one text per source that
+  is not already current, so 30 s of request budget is ≈266 short sources or
+  ≈37 at 256 tokens; past that the answer is `408` and the next run resumes.
+  A corpus larger than that needs a resumable job, which is a future decision.
 - **Two models can coexist but only one is queried.** A model change is a
   reindex; the old rows are deleted by the orphan sweep only after the new
   `model_id` is refused by the `find` queries, which is a nuance the
@@ -535,20 +607,21 @@ The reason is in the same ADR amendment.
 - **A degraded response is hard to notice.** `degraded: true` is the only
   signal, and a client that ignores it shows weaker results without saying so.
   A future readiness check could expose the embedder status.
-- **The encoder and the tokenizer do not exist yet.** The measured latency in
-  [`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) §8 is a lower
-  bound: no attention, feed-forward block or LayerNorm ran, and the tokenizer is
-  a stand-in. §12.3 is the work that turns the stand-in into a model, and §11 of
-  the ADR is the agreed outcome if it does not fit this phase.
+- **The measured cost is one machine's.** `ADR-0008` §12.1 records 88 ms per
+  text and 804 ms at 256 tokens on the reference development machine, and the
+  `2 s` budget is 2.4× the worst case there. A slower host raises
+  `APP_ML_TIMEOUT_SECONDS`; the default is not re-derived from a guess.
 - **Concurrent requests each hold their own activations.** The embedder is
   shared and immutable, so two requests may embed at once and each allocates for
-  its own sequence. Time is bounded by `ml.timeout_seconds`; memory is bounded by
-  the API's ordinary request concurrency, not by a semaphore this design adds.
-  At single-owner traffic this is not a bound worth engineering.
+  its own sequence. The time a request spends **in inference** is bounded by
+  `ml.timeout_seconds`; the re-rank is bounded separately by
+  `ml.candidate_limit`; memory is bounded by the API's ordinary request
+  concurrency, not by a semaphore this design adds. At single-owner traffic this
+  is not a bound worth engineering.
 
 ## 12. The build contract for chains `M3`–`M6`
 
-**Status: built, except the Burn encoder and the tokenizer.** This section is the
+**Status: built.** This section is the
 contract `M3`, `M4`, `M5` and `M6` were held to. The requirements are
 [`specification.md`](specification.md) §5, the public shapes are
 [`api.md`](api.md), the test list is [`testing.md`](testing.md), the table is
@@ -653,9 +726,11 @@ missing, and the measured latency in `ADR-0008` §8 does **not** cover them.
    texts, peak RSS, the output L2 norm, and bit-exact determinism. The
    `atom-ml-spike` binary is **not edited**; it is the record behind `ADR-0008`
    §8. The bench's numbers go into the change log, and they are what justifies
-   `ml.timeout_seconds` and `ml.candidate_limit`. If a 100-text re-rank no
-   longer fits the default budget, the implementing change **reports the number
-   and asks**; it does not quietly change a published default.
+   `ml.timeout_seconds` and `ml.candidate_limit`. The 100-text row measures
+   **embedding 100 texts**, which is a **reindex** of 100 sources: a search
+   embeds one query. If a 100-source reindex no longer fits the request budget,
+   the implementing change **reports the number and asks**; it does not quietly
+   change a published default.
 
 A note on the fixture text: the bench uses note-shaped sentences, as the spike
 did, so the two tables are comparable.
@@ -784,7 +859,7 @@ must be shown to fail first):
 | `deterministic.rs` | `the_deterministic_embedder_is_stable`, `the_deterministic_embedder_has_the_configured_dimension`, `the_deterministic_embedder_returns_a_unit_vector`, `the_deterministic_embedder_performs_no_io` |
 | `tokenizer.rs` (new) | `the_tokenizer_splits_a_word_into_wordpieces`, `the_tokenizer_marks_an_unknown_word_as_unk`, `the_tokenizer_frames_the_sequence_with_cls_and_sep`, `the_tokenizer_truncates_to_the_bound` |
 | `service.rs` | `cosine_similarity_is_symmetric_and_bounded`, `a_vector_of_the_wrong_dimension_is_skipped`, `a_timeout_maps_to_the_inference_timeout_degradation` |
-| `src/config/tests.rs` | `the_ml_settings_have_their_documented_defaults`, `the_candidate_limit_must_be_at_least_the_max_page_size`, `the_ml_backend_is_one_of_the_supported_values`, `the_tokenizer_path_defaults_to_the_models_directory` |
+| `src/config/tests.rs` | `the_ml_settings_have_their_documented_defaults`, `the_candidate_limit_is_bounded_above`, `the_ml_backend_is_one_of_the_supported_values`, `the_tokenizer_path_defaults_to_the_models_directory` |
 
 **`tests/seeder.rs`** — `the_seeder_writes_embeddings_only_with_the_flag`
 (without `--with-embeddings` the `embeddings` count is 0; with it, one row per

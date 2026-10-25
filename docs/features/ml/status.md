@@ -339,3 +339,33 @@ which is the behaviour `ML-R06` defines and the tests assert.
 `ML-R09`'s fifteen-query fixture evaluation remains outstanding; the 5-of-5 result
 above is the smallest evidence that the vectors are meaningful, not that
 evaluation.
+### Correction (2026-10-25) - the budget is not invalidated
+
+The section above claims the encoder measurement "invalidates two shipped
+defaults" and that a 200-candidate re-rank needs 22 seconds. **That is wrong, and
+it was wrong when written.**
+
+A hybrid search does **not** embed its candidates. `MlService::hybrid` selects at
+most `candidate_limit` candidate ids, loads their **already-stored** vectors, and
+scores them with one dot product per row. The only inference in a search request
+is the single query embed. So:
+
+- the cost of 200 x 112.6 ms is the cost of **embedding** 200 texts, which is what
+  `POST /ml/reindex` does - not a page, and not a candidate set;
+- a hybrid search at the maximum page size takes about **90 ms**, not 11.3 s;
+- `ml.timeout_seconds = 2` bounds **one inference**, whose worst real case is
+  804 ms at the 256-token truncation bound - a 2.4x margin, not a violation;
+- the re-rank of 200 candidates at dimension 384 is about 230,000 `f64`
+  operations and 307 KB, two orders of magnitude below the inference it follows.
+
+Both defaults stand unchanged. `ADR-0008` §12 records the decision and the
+arithmetic.
+
+What the measurement **does** expose is a different defect: the validation rule
+`ml.candidate_limit >= api.pagination.max_limit` bounds the candidate set from
+below, on the false premise that a page shorter than the requested size is
+impossible. It is not - `Pagination::new` computes `has_more` from the real
+total, and a short page is well-formed. The consequence is that the re-rank,
+which `ml.timeout_seconds` does not bound, has **no upper bound at all**: the
+setting is accepted at ten million. The rule should be a ceiling of 1,000, not a
+floor. That change is `D4.M8` and is not yet applied.

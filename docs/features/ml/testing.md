@@ -136,16 +136,84 @@ instead (§3), and the absence of an end-to-end case is in §6.
 
 ### 2.7 The evaluation fixture — `ML-R09`, plumbing half
 
-| Case | Rule it protects |
-| ---- | ---------------- |
-| `the_fixture_queries_find_the_expected_notes` | Fifteen query/title pairs, each note planted with its own query vector; every query returns its note in the top five with a score above `0.999`. |
+`the_fixture_queries_find_the_expected_notes` **is** the fifteen-query fixture
+evaluation `ML-R09` asks for; there is no second file and no second set. Each of
+the fifteen notes is created through the published API and planted with the
+deterministic vector of *its own* query, and each query is then sent to
+`POST /notes/search` with `mode: "semantic"` and `limit=5`, against the same
+account.
+
+For every pair the case asserts six things, and all six pass:
+
+| # | Assertion |
+| - | --------- |
+| 1 | The set holds **fifteen** pairs. A shorter table would quietly weaken the requirement. |
+| 2 | `pagination.total` is 15: every embedded note is a candidate, so the ranking is over the whole fixture corpus. |
+| 3 | The hit at **rank 1** is the note the fixture created for that query, compared by **id** — the identity the API returned, not a title that happens to look right. |
+| 4 | That note's title is the expected one, which only makes a failure readable. |
+| 5 | Its published score is above `0.999` (the contract's stated floor) **and** `1.0 ± 1e-4`: the planted vector *is* the query's own, so a pipeline that compared a different pair of vectors would fail even if it landed on the right note. |
+| 6 | It **outranks every other hit on the page**, so rank 1 comes from the score and not from the `note_id` tie-break. |
+
+The fifteen pairs, and the result of the recorded run:
+
+| # | Query | Expected note | Observed | Published score | Result |
+| - | ----- | ------------- | -------- | --------------- | ------ |
+| 1 | `kubernetes rollout` | `Kubernetes rollout` | rank 1 | `1.0` | **pass** |
+| 2 | `postgres index tuning` | `PostgreSQL index tuning` | rank 1 | `1.0` | **pass** |
+| 3 | `rust ownership rules` | `Rust ownership rules` | rank 1 | `1.0` | **pass** |
+| 4 | `interview preparation` | `Interview preparation` | rank 1 | `1.0` | **pass** |
+| 5 | `expense report deadline` | `Expense report deadline` | rank 1 | `1.0` | **pass** |
+| 6 | `canary release checklist` | `Canary release checklist` | rank 1 | `1.0` | **pass** |
+| 7 | `on-call rotation` | `On-call rotation` | rank 1 | `1.0` | **pass** |
+| 8 | `incident postmortem` | `Incident postmortem` | rank 1 | `1.0` | **pass** |
+| 9 | `salary negotiation` | `Salary negotiation` | rank 1 | `1.0` | **pass** |
+| 10 | `remote work setup` | `Remote work setup` | rank 1 | `1.0` | **pass** |
+| 11 | `database migration plan` | `Database migration plan` | rank 1 | `1.0` | **pass** |
+| 12 | `api rate limiting` | `API rate limiting` | rank 1 | `1.0` | **pass** |
+| 13 | `observability dashboard` | `Observability dashboard` | rank 1 | `1.0` | **pass** |
+| 14 | `technical debt backlog` | `Technical debt backlog` | rank 1 | `1.0` | **pass** |
+| 15 | `promotion case` | `Promotion case` | rank 1 | `1.0` | **pass** |
+
+**15 of 15 pass.** The runner-up scores in the recorded run were far below the
+expected note — `0.0539` and `0.0233` behind a top score of `1.0` on the first
+query — so assertion 6 is not measuring noise.
+
+The **control**: the case ends with `"zeppelin airship"`, a query no note was
+planted for and that no fixture note contains, and asserts that it returns **no
+hits** with `total` 0 rather than a confident wrong match. The control runs in
+`hybrid` mode because `semantic` cannot express "nothing matched": it scans
+every stored vector and always answers with a page. The account is not empty at
+that point — the fifteen queries above scored perfectly against it — so the empty
+answer is the pipeline declining to name a best match, not an empty corpus.
+
+One behaviour the control measurement exposed, and that a reader should know:
+**hybrid applies no score floor.** A query with a lexical candidate returns that
+candidate even when its score is `0.0`, because the candidate set is the lexical
+match and the score only orders it. That is why the control needs a query with no
+lexical candidate at all, and it is the honest limit of what this control proves.
 
 **This case does not prove retrieval quality and must not be described as if it
 did.** The deterministic embedder hashes its input, so a note is "about" a query
-only because the fixture planted the query's own vector. What the fifteen cases
-establish is the pipeline: the query is embedded, the stored vectors are
-compared, the sort runs, the expected note is on the page. The quality question
-is §5, and it is unmeasured.
+only because the fixture planted the query's own vector: pair 1 would score
+exactly as well if the note were titled "Groceries". What the fifteen pairs
+establish is the **pipeline** — the query is embedded, the stored vectors are
+compared by cosine, the sort runs, the expected note comes first, the score is
+the one the arithmetic implies, and an unmatched query yields nothing. They say
+nothing about whether any model understands English, and the `1.0` in the table
+above is a property of the fixture, not a quality signal.
+
+The only quality evidence that exists is the encoder benchmark recorded in
+[status.md](status.md) — the section titled *The encoder, measured*: **5 of 5
+queries returned the expected nearest text** with cosines of `0.31`–`0.64`
+through the real Burn encoder. That is a single five-query manual run on one
+machine, recorded rather than asserted, and it is what `ML-R09`'s quality half
+stands on until a full manual evaluation happens.
+
+The case was shown to fail for the reason it names: pointing pair 1's expected id
+at another note fails at that pair with both ids and the whole returned page in
+the message (exit `101`), and restoring the id passes. Pointing the control at
+`"kubernetes"` — a query that *does* lexically match — fails the empty-page
+assertion the same way.
 
 ## 3. Unit tests
 
@@ -201,17 +269,22 @@ The seeder constructs `Deterministic` directly rather than reading
 | `the_fixture_queries_find_the_expected_notes` | The plumbing, as §2.7 describes. | CI, deterministic embedder |
 | The manual quality run | Whether a real model retrieves paraphrases, and its latency and memory on the reference machine. | Once, by the owner or the implementing agent, recorded in [status.md](status.md) |
 
-**The manual run has not happened.** There is no encoder, so there is nothing to
-evaluate. [status.md](status.md) §4 is where the result goes, and the spike's
-numbers do not belong there: they measured a lookup and a projection.
+**The full manual run has not happened; one smaller probe has.** The encoder and
+its WordPiece tokenizer now exist (committed `97d7b4b`, measured in `a3e8c46`),
+and [status.md](status.md) §5 records what `src/bin/atom-ml-bench.rs` measured,
+including a five-query probe in which all five returned the expected nearest
+text. That is a probe, not the evaluation this section describes: it is five
+queries rather than fifteen, it asserts no threshold, and it is not a CI gate.
+[status.md](status.md) §4 is where the full result goes, and the spike's numbers
+do not belong there: they measured a lookup and a projection.
 
 ## 6. Deliberately not covered, and the honest gaps
 
 | Gap | Why |
 | --- | --- |
-| **A real-model run.** | No Burn encoder exists, so no case and no manual run has embedded through a model; every executed case uses `Deterministic`. `ML-R02` is unmet. |
-| **The Burn model's output, in CI.** | The weights are not in the repository, and downloading them in CI would break the no-outbound rule. `Deterministic` covers the plumbing. **No run of the Burn path has ever produced a vector.** |
-| **Retrieval quality of a real model.** | It is the manual run in §5, recorded rather than asserted. A quality threshold would be a product decision nobody has made. **It has not been measured.** |
+| **A real-model run in the suite.** | No automated case loads a model: the weights are not in the repository and every executed case uses `Deterministic`. The encoder has been run once, by hand, in `src/bin/atom-ml-bench.rs`, and that run is recorded in [status.md](status.md) §5 — it is a measurement, not an assertion. |
+| **The Burn model's output, in CI.** | The weights are not in the repository, and downloading them in CI would break the no-outbound rule. `Deterministic` covers the plumbing. **No automated case has ever embedded through the Burn path.** |
+| **Retrieval quality of a real model.** | The only measurement is the five-query probe in [status.md](status.md) §5 (5 of 5 expected nearest texts, cosine `0.31`–`0.64`). The fifteen-query set of §2.7 has never been run against a real model, and a quality threshold would be a product decision nobody has made. |
 | **An inference timeout through the API.** | It needs a fourth `Embedder` (forbidden by `ML-R03`) or a real model slow enough to exceed the budget. The mapping is unit-tested; the end-to-end `408` on a match stays a gap. |
 | **Concurrency.** | Nothing exercises two searches, two reindexes, or a reindex concurrent with a note delete for the same account. For ML this matters more than elsewhere: reindex writes while search reads. |
 | **A live `database_error`.** | Fault injection; the mapping is unit-tested in `src/`. |

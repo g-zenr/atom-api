@@ -100,8 +100,9 @@ Three modes on `POST /api/v1/notes/search`:
 
 - The re-rank is in Rust, over the candidate rows only. Memory and time are
   bounded by `ml.candidate_limit`, not by the size of the corpus.
-- `ml.timeout_seconds` bounds the inference and the re-rank, so a large model
-  cannot hold a request beyond the configured budget.
+- `ml.timeout_seconds` bounds **one inference** — the query's, for a search.
+  The re-rank performs none, and is bounded by `ml.candidate_limit` instead
+  (§12.2 and §12.5).
 - **Degradation is explicit.** When ML is disabled or the model file is
   missing, `semantic` and `hybrid` return **lexical results with `200`**, and
   the response names the requested mode, the applied mode and a degradation
@@ -120,8 +121,8 @@ validation, `.env.example`, the reference table and the tests, as
 | `ml.backend` | `flex` | One of `flex` or `deterministic`; anything else is refused at start-up (see §7). |
 | `ml.model_path` | unset | The local SafeTensors file. |
 | `ml.dimension` | `384` | The vector length the embedder must produce. |
-| `ml.timeout_seconds` | `2` | The budget for one embed or re-rank. |
-| `ml.candidate_limit` | `200` | The largest lexical candidate set a hybrid search will re-rank. |
+| `ml.timeout_seconds` | `2` | The budget for **one inference** (§12.3). |
+| `ml.candidate_limit` | `200` | The largest lexical candidate set a hybrid search will re-rank. At most `MAX_ML_CANDIDATE_LIMIT`, 1,000 (§12.5). |
 
 **Amended 2026-10-24:** this table has a **seventh** row, `ml.tokenizer_path`,
 added by §10. Read the two together; the value is not optional in the sense that
@@ -398,6 +399,210 @@ API response and is available to a readiness check, and a later chain adds the
 encoder **without a schema change**, because `model_id` is a column and the
 degraded path is the same code path a working model uses.
 
+### 12. Amendment (2026-10-25) — the measured encoder cost, and which bound applies
+
+**This is an amendment, and it is marked as one.** It records the second run of
+§6's gate — the real six-layer encoder and WordPiece tokenizer, not the spike's
+lookup — and settles the two numbers that run was said to invalidate. §4's
+sentence about what `ml.timeout_seconds` bounds is corrected: it bounds **one
+inference**, not one re-rank. No other part of the decision changes.
+
+#### 12.1 The measurement
+
+`src/bin/atom-ml-bench.rs`, `--release`, the real
+`sentence-transformers/all-MiniLM-L6-v2` SafeTensors file and its `vocab.txt`,
+on the development machine. Recorded in
+[`../features/ml/status.md`](../features/ml/status.md) §5.
+
+| Measurement | Value |
+| ----------- | ----- |
+| One text, steady state | **88.0 ms** mean (min 28.8, max 210.0) |
+| Ten texts | **111.6 ms** per text |
+| One hundred texts | **112.6 ms** per text — **11.3 s** total |
+| Worst case, 256 tokens (the truncation bound) | **804 ms** mean (min 775, max 834) |
+| Peak RSS | **183.8 MiB** |
+| Determinism | bit-identical for the same input; different for a different input |
+| Semantic quality | 5 of 5 probe queries returned the expected nearest text |
+
+Roughly **5,600 times** the spike's 0.017–0.020 ms per text, which measured a
+lookup, a mean-pool and a projection (§8.1). This is the real cost of an
+embedding, and §8's numbers are superseded for every purpose except the record
+of what the spike proved.
+
+#### 12.2 What it invalidates, and what it does not
+
+The chain that prompted this amendment was opened with the arithmetic
+`200 candidates × 112.6 ms = 22 s`, and proposed therefore
+`ml.candidate_limit ≈ 100` with `ml.timeout_seconds ≈ 12`.
+
+**That is not the arithmetic of a search.** A hybrid or semantic request embeds
+exactly **one** text — the query — and compares it against vectors that are
+already stored:
+
+- `MlService::search` (`src/ml/service.rs:152`) calls `embed_query` once and
+  then hands the vector to `hybrid`.
+- `MlService::hybrid` (`src/ml/service.rs:250`) contains **no inference call at
+  all**. It selects at most `ml.candidate_limit` candidate *identifiers*
+  (`NoteRepository::lexical_candidates`), loads their **stored** vectors
+  (`MlRepository::vectors_for_sources`), and ranks them with `rank` — one dot
+  product per row, over 384 `f32` values.
+- `ml.timeout_seconds` is applied inside `MlService::embed`
+  (`src/ml/service.rs:519`), which wraps **one** `Embedder::embed` call.
+
+The number of inferences per request is therefore:
+
+| Request | Inferences |
+| ------- | ---------- |
+| `POST /notes/search`, `semantic` or `hybrid` | **1** (the query) |
+| `POST /job-applications/{id}/match` | **1** (the application) |
+| `POST /ml/reindex` | **one per source that is not already current** |
+
+The 11.3 s and the 22 s are the cost of *embedding* 100 and 200 texts. That is
+the cost of `POST /ml/reindex` over 100 and 200 notes. It is not the cost of a
+page, and it is not the cost of a candidate set.
+
+So the measurement does not force a change to the search budget. It forces two
+things this ADR and the feature architecture had got wrong: the reindex's
+ceiling, which nobody had computed, and the claim that
+`ml.timeout_seconds` bounds the re-rank, which it does not.
+
+#### 12.3 `ml.timeout_seconds` stays `2`
+
+The budget is **per inference**, and no inference this feature can be asked to
+perform comes near it:
+
+- The worst single inference that exists is a 256-token sequence at **804 ms**
+  mean, **834 ms** maximum. The tokenizer truncates at 256 tokens
+  ([`../features/ml/architecture.md`](../features/ml/architecture.md) §12.3), so
+  nothing can be longer, and 834 ms is a hard ceiling on the reference machine.
+  `2 s` is **2.4×** it.
+- A search embeds a query capped at **200 characters**
+  (`MAX_SEARCH_LENGTH`, `src/helpers/validation.rs:101`), which is a short
+  sequence: **88.0 ms** mean, **210.0 ms** observed maximum. `2 s` is **9.5×**
+  the observed maximum and **23×** the mean.
+- A match embeds `role_title` and `description`, truncated at the same 256
+  tokens: bounded by the same 834 ms.
+
+A value of `12` would be **dead configuration**. Nothing this encoder can be
+asked to do takes two seconds, let alone twelve, so the only observable effect
+of raising the budget is that a genuinely wedged call holds a `spawn_blocking`
+thread for six times as long before the honest `inference_timeout` is reported.
+Timing out later is not a performance improvement; it is a slower failure.
+
+Slower hardware is what `APP_ML_TIMEOUT_SECONDS` exists for. `2 s` absorbs a
+host **2.4× slower** than the reference machine at the absolute worst case, and
+**9.5× slower** on the path a user actually waits for. A deployment that
+measures otherwise raises the value; the default describes the measurement, not
+a guessed fleet.
+
+#### 12.4 `ml.candidate_limit` stays `200`
+
+The re-rank's entire cost is `candidate_limit × dim` multiply-adds and
+`candidate_limit × dim × 4` bytes. `score()` computes a dot product and two
+norms per row, so count roughly three passes over 384 values per candidate:
+
+| At 200 candidates, dimension 384 | Value | Against the 88 ms inference |
+| -------------------------------- | ----- | --------------------------- |
+| Floating-point operations | ≈230,000 (`f64`) | sub-millisecond — two orders of magnitude below |
+| Vectors held in memory | **307 KB** | negligible |
+
+The candidate bound was never the source of the 22 s: it costs well under a
+millisecond, against an inference of tens to hundreds of milliseconds. It is
+negligible at 200, and 200 buys recall that a bound of 15 or 100 does not. It is
+not changed.
+
+#### 12.5 The `candidate_limit >= api.pagination.max_limit` rule is withdrawn
+
+`validate_ml` (`src/config/validation.rs:502`) refuses a candidate limit below
+`api.pagination.max_limit`. Its stated reason is:
+
+> A candidate set smaller than one page would make page two impossible: the
+> re-rank would have nothing left to slice.
+
+**That is false.** `Pagination::new(limit, offset, total)`
+(`src/pagination.rs:64`) computes `has_more: offset + limit < total`, so a
+ranked list shorter than the page size yields a well-formed **short page**: the
+items that exist, the true `total`, and `has_more: false`. Nothing is
+impossible, and the feature's own public contract already publishes exactly this
+behaviour — [`../features/ml/api.md`](../features/ml/api.md) §2.3 says the
+`hybrid` `pagination.total` "is never more than `ml.candidate_limit`".
+
+Two further facts make the floor actively harmful rather than merely wrong:
+
+1. **It is satisfied in the suite only by moving the other setting.** The test
+   that proves the bound, `hybrid_never_returns_more_than_the_candidate_limit`,
+   needs a candidate bound of 3, so `test_state_with_candidate_limit`
+   (`tests/common/mod.rs:237`) lowers `api.pagination.max_limit` to 3 as well.
+   A rule that every test can only obey by changing a second value is not
+   testing a product constraint; it is testing a workaround.
+2. **It leaves `candidate_limit` with no upper bound at all.** The floor's own
+   maximum is 1,000 only by accident, inherited from `MAX_PAGINATION_LIMIT` on
+   `max_limit`; the setting itself is accepted at `10_000_000`. §8 says the
+   value "is a resource bound, not a quality knob … which is why it is validated
+   at start-up". As implemented, validation bounded it from **below** and not
+   from above — and §12.2 shows that the re-rank is the one part of a search
+   that `ml.timeout_seconds` does **not** bound, so `candidate_limit` is the
+   re-rank's **only** bound. The bound was missing where it was needed and
+   present where it was not.
+
+**Decision: the floor is replaced by a ceiling.** `ml.candidate_limit` must be
+positive and **at most `MAX_ML_CANDIDATE_LIMIT = 1_000`**, a constant declared in
+`src/config/validation.rs` beside `MAX_PAGINATION_LIMIT` — the same character of
+value: a hard ceiling on a configurable quantity, not a deployment policy, and
+therefore not a setting (`AGENTS.md` §4.11).
+
+The value is derived, not chosen for roundness. At 1,000 the re-rank is ≈1.2
+million `f64` operations — on the order of a millisecond, two orders of
+magnitude below the 88 ms inference that precedes it — and holds **1.5 MB** of
+vectors. It also equals `MAX_PAGINATION_LIMIT`, so a legal page and a legal
+candidate set can never outgrow the other and **no relation between the two
+settings is needed at all**.
+
+The direction of the old rule was the error. A page is a **presentation** bound;
+a candidate set is a **work** bound. Requiring the work bound to be at least the
+presentation bound expressed neither, and left the work bound unbounded.
+
+#### 12.6 The reindex has a ceiling, and it is the request timeout
+
+With `ml.timeout_seconds` at 2, the per-inference budget is never the binding
+limit for a reindex: `POST /ml/reindex` embeds one text per source that is not
+already current, so its wall clock is `sources × per-inference`, and the limit
+that binds is `app.limits.request_timeout` — **30 s** by default — enforced
+globally by `timeout_middleware` (`src/api/mod.rs:145`, installed at `:94`).
+
+| Source shape | Per source | Sources inside one 30 s request |
+| ------------ | ---------- | ------------------------------- |
+| Short note (the bench's text shape) | 112.6 ms | **≈266**, before the per-row SQL |
+| Worst case, 256 tokens | 804 ms | **≈37** |
+
+Past that the request answers `408`, the rows already written stay, and the next
+run skips them, because the reindex is idempotent (§3). That is the behaviour
+[`../features/ml/architecture.md`](../features/ml/architecture.md) §12.6 already
+defines. What had never been written down is the **number**, and it now is.
+
+This is a recorded limit for Phase 1's personal corpus, not a defect this
+amendment fixes. A reindex that must exceed one request needs its own decision —
+a resumable job with a cursor, or a request-scoped budget — and it is named as
+such here rather than bought by enlarging a timeout that no inference needs.
+
+#### 12.7 What this amendment corrects in the other documents
+
+| Claim | Where it was | What it becomes |
+| ----- | ------------ | --------------- |
+| "`ml.timeout_seconds` bounds the inference and the re-rank" | §4 of this ADR; §4.2 and §11 of the feature architecture | It bounds **one inference**. The re-rank is bounded by `ml.candidate_limit`, and now by a ceiling on it. |
+| "a candidate set smaller than one page would make page two impossible" | `validate_ml`; `config/ml.toml`; `.env.example`; `config/README.md`; [`../architecture/deployment.md`](../architecture/deployment.md) §1.3 and §1.5 | Withdrawn. A short page is well formed and already published. |
+| "If a 100-text **re-rank** no longer fits the default budget …" | [`../features/ml/architecture.md`](../features/ml/architecture.md) §12.3 | "… a 100-source **reindex** …". The mislabelling is what made `200 × 112.6 ms` look like a page. |
+
+#### 12.8 Rejected alternatives
+
+| Alternative | Why it was not chosen |
+| ----------- | --------------------- |
+| **`candidate_limit = 100`, `timeout_seconds = 12`** — the arithmetic this chain opened with | Refuted by §12.2: it prices a reindex as if it were a search. It would halve hybrid recall, and make a wedged inference take twelve seconds to report a `408`, for a workload no measurement produces. |
+| **`candidate_limit = 15`** — `2 s ÷ 112.6 ms` | The same error with a smaller number. It would cap the default 10-row page at 15 candidates and destroy hybrid recall to buy headroom against a cost that is not on the request path. |
+| **Keep the floor and add the ceiling** | The floor's justification is false (§12.5), and floor-plus-ceiling would keep the accidental coupling — two independent bounds expressed as one relation, with the direction of the surviving rule still wrong. |
+| **A new `ml.reindex_budget` setting** | A new setting, in `AGENTS.md` §4.11's seven places, for a value no deployment has yet needed to change, in a chain whose question was what two existing numbers should be. `app.limits.request_timeout` already bounds it; §12.6 records the number so an operator can size a corpus. |
+| **Raise `timeout_seconds` to cover a slower host** | A default describes the measured reference machine. A slower host sets `APP_ML_TIMEOUT_SECONDS`; inventing a number for unknown hardware is the same class of mistake as the 12 s. |
+
 ## Alternatives considered
 
 | Alternative | Why it was not chosen |
@@ -419,9 +624,11 @@ degraded path is the same code path a working model uses.
   difference between the development machine, CI and production.
 - **No new trust boundary.** The model is a local file read by the process;
   no request leaves the machine and no credential for a third party exists.
-- **The growth is bounded.** Time and memory per search are bounded by
-  `ml.candidate_limit` and `ml.timeout_seconds`, so a large corpus degrades
-  the *quality* of the candidate set rather than the stability of the API.
+- **The growth is bounded.** Time per search is one inference, bounded by
+  `ml.timeout_seconds`; the re-rank's time and memory are bounded by
+  `ml.candidate_limit`, which is bounded above at start-up. A large corpus
+  degrades the *quality* of the candidate set rather than the stability of the
+  API.
 - **The feature is testable without a model.** The deterministic embedder
   makes the plumbing — storage, upsert, re-rank, degradation — fully covered
   by the suite.
@@ -473,10 +680,13 @@ degraded path is the same code path a working model uses.
   execution; the operator is already inside the trust boundary (TB-4 in
   [`../security/threat-model.md`](../security/threat-model.md)), so this is
   consistent with how the rest of the process treats its host.
-- **Resource use is bounded by configuration.** `ml.timeout_seconds` and
-  `ml.candidate_limit` bound one request. A large model still costs memory at
-  load time, once, which is why the Phase 4 spike measures it before the
-  endpoint depends on it.
+- **Resource use is bounded by configuration, and the configuration is
+  bounded.** `ml.timeout_seconds` bounds one inference; `ml.candidate_limit`
+  bounds one re-rank and is itself refused above `MAX_ML_CANDIDATE_LIMIT`
+  (§12.5), so neither an operator nor a client can make one request's CPU or
+  memory grow without a start-up error. `semantic` mode's corpus-sized scan is
+  the one unbounded path, and it is the accepted cost of having no index (§12.2,
+  and *Negative* below).
 - **The degradation path must not be a silent quality drop.** The response
   reports the applied mode, so a client can tell the owner that results are
   lexical. A `500` would be worse: it would turn a missing optional file into
@@ -507,4 +717,5 @@ Supersedes: none. No earlier decision covered machine learning.
 
 Superseded by: none. A review of this decision is due when the corpus outgrows
 the bounded re-rank, when the Phase 4 spike fails and ML ships disabled, when
-the encoder is deferred under §11, or when the owner changes O6.
+the encoder is deferred under §11, when a reindex must exceed one request
+(§12.6), or when the owner changes O6.

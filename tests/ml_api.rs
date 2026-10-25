@@ -2289,11 +2289,37 @@ async fn a_hybrid_score_is_the_cosine_of_the_planted_vectors() {
 /// The deterministic embedder hashes its input, so a note is "about" a query
 /// only because the fixture planted the query's own vector for it. What the
 /// fifteen cases establish is the pipeline: the query is embedded, the stored
-/// vectors are compared, the sort runs, and the expected note is in the top
-/// results.
+/// vectors are compared, the sort runs, and the expected note **comes first**.
+///
+/// Each pair is pinned twice over: by the identifier the API returned when the
+/// note was created, and by its title. The planted vector *is* the query's own,
+/// so the published score must be a perfect match within [`SCORE_TOLERANCE`]; a
+/// pipeline that compared anything other than the query with the stored vector
+/// could not reach it, and a pipeline that returned the right note for the
+/// wrong reason would fail the identifier comparison.
+///
+/// The control at the end is the other half of the claim. The account holds
+/// fifteen vectors that the queries above scored perfectly, so an empty answer
+/// to a query nothing was planted for is the pipeline declining to invent a
+/// best match, not an empty corpus.
 #[tokio::test]
 async fn the_fixture_queries_find_the_expected_notes() {
+    /// The page bound: the expected note is found inside one page, not by
+    /// reading the whole corpus.
     const LIMIT: usize = 5;
+
+    /// The floor the fixture set is specified with (`ML-R09`, `testing.md`
+    /// §2.7), kept as its own assertion because it is the number a reader of
+    /// the contract can check. The tighter identity below is derived from the
+    /// fixture rather than from the contract.
+    const MIN_TOP_SCORE: f64 = 0.999;
+
+    /// The number of pairs `ML-R09` requires.
+    const REQUIRED_PAIRS: usize = 15;
+
+    /// A query no fixture plants a vector for, and that no fixture note
+    /// contains lexically.
+    const CONTROL_QUERY: &str = "zeppelin airship";
 
     // Fifteen queries, each with the note that must be found for it.
     let fixtures = [
@@ -2314,23 +2340,34 @@ async fn the_fixture_queries_find_the_expected_notes() {
         ("promotion case", "Promotion case"),
     ];
 
+    assert_eq!(
+        fixtures.len(),
+        REQUIRED_PAIRS,
+        "ML-R09 names fifteen fixture queries; a shorter set would weaken the requirement"
+    );
+
     let state = test_state_with_deterministic_ml().await;
     let db = state.db.clone();
     let app = app(state);
     let user = register_user(&app, "ml-fixtures").await;
 
+    // The identifier of each planted note travels with the pair, so the case
+    // can name the note it expects rather than a title that happens to look
+    // right.
+    let mut planted = Vec::with_capacity(fixtures.len());
     for (query, title) in fixtures {
         let note_id = create_note(&app, &user, title, "a fixture note").await;
         plant_vector(&db, user.id, "note", note_id, &query_vector(query)).await;
+        planted.push((query, title, note_id));
     }
 
     assert_eq!(
         embedding_count(&db, user.id).await,
-        i64::try_from(fixtures.len()).expect("the fixture count fits"),
+        i64::try_from(planted.len()).expect("the fixture count fits"),
         "every fixture note must have a vector, or the case proves nothing"
     );
 
-    for (query, title) in fixtures {
+    for (query, title, note_id) in &planted {
         let response = search(
             &app,
             &user.access_token,
@@ -2343,31 +2380,83 @@ async fn the_fixture_queries_find_the_expected_notes() {
         assert_search_response(&body, "semantic", "semantic", false, None);
         assert_eq!(
             body["pagination"]["total"],
-            i64::try_from(fixtures.len()).expect("the fixture count fits"),
+            i64::try_from(planted.len()).expect("the fixture count fits"),
             "the semantic total counts every embedded note: {body}"
         );
 
-        let ids = hit_ids(&body);
+        let page = hits(&body);
         assert!(
-            !ids.is_empty(),
+            !page.is_empty(),
             "the query {query:?} must return a page: {body}"
         );
 
-        let page = hits(&body);
-        let hit = page
-            .iter()
-            .find(|hit| hit["note"]["title"] == title)
-            .unwrap_or_else(|| {
-                panic!("the query {query:?} must find the note {title:?}; the page was {body}")
-            });
-
-        let score = hit["score"]
-            .as_f64()
-            .unwrap_or_else(|| panic!("a semantic hit carries a score: {hit}"));
-        assert!(
-            score > 0.999,
-            "the fixture plants the query's own vector, so {title:?} must score at the top for \
-             {query:?}: got {score}"
+        // The expected note, first. The identifier is the identity of the note;
+        // the title only makes a failure readable.
+        let expected_id = (*note_id).to_string();
+        assert_eq!(
+            page[0]["note"]["id"].as_str(),
+            Some(expected_id.as_str()),
+            "the query {query:?} must rank its own note {title:?} ({expected_id}) first, not \
+             another one; the page was {body}"
         );
+        assert_eq!(
+            page[0]["note"]["title"].as_str(),
+            Some(*title),
+            "the first hit of {query:?} must be the note {title:?}, but it is {observed}: {body}",
+            observed = page[0]["note"]["title"]
+        );
+
+        let score = page[0]["score"]
+            .as_f64()
+            .unwrap_or_else(|| panic!("a semantic hit carries a score: {body}"));
+
+        assert!(
+            score > MIN_TOP_SCORE,
+            "the fixture plants the query's own vector, so {title:?} must score above \
+             {MIN_TOP_SCORE} for {query:?}: got {score}"
+        );
+
+        // The planted vector *is* the query's own, so the cosine is 1 by
+        // construction. A pipeline that compared a different pair of vectors
+        // could land on the right note while publishing the wrong score, and
+        // only this assertion would notice.
+        assert!(
+            (score - 1.0).abs() <= SCORE_TOLERANCE,
+            "the stored vector is the query's own, so {title:?} must score 1.0 for {query:?} \
+             within {SCORE_TOLERANCE}: got {score}"
+        );
+
+        // And it must outrank the rest rather than tie with them: the ordering
+        // here is the score, not the identifier tie-break.
+        for other in page.iter().skip(1) {
+            let other_score = other["score"]
+                .as_f64()
+                .unwrap_or_else(|| panic!("a semantic hit carries a score: {other}"));
+
+            assert!(
+                score > other_score,
+                "the expected note for {query:?} must outrank every other fixture note, but \
+                 {score} is not above {other_score}: {body}"
+            );
+        }
     }
+
+    // The control. `semantic` scans every stored vector and always answers with
+    // a page, so it cannot express "nothing matched"; `hybrid` can, because its
+    // candidate set is the lexical match. The account is not empty — the
+    // fifteen queries above scored perfectly against it — so this empty page is
+    // the pipeline declining to name a best match rather than an empty corpus.
+    let response = search_mode(&app, &user.access_token, CONTROL_QUERY, "hybrid").await;
+    let body = response.expect_status(StatusCode::OK);
+
+    assert_search_response(&body, "hybrid", "hybrid", false, None);
+    assert!(
+        hits(&body).is_empty(),
+        "a query no note was planted for must return no hit rather than a wrong best match: \
+         {body}"
+    );
+    assert_eq!(
+        body["pagination"]["total"], 0,
+        "the control query has no lexical candidate, so the total is zero: {body}"
+    );
 }
