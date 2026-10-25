@@ -1,3 +1,15 @@
+> **Read this first: sections 1, 2.1 and the requirement table predate the
+> encoder.** They say `ML-R02` is not met, and that was true when written. The
+> six-layer Burn encoder and its WordPiece tokenizer are now built and measured
+> - see **section 5, "The encoder, measured"**: 5 of 5 queries returned the
+> expected nearest text, determinism holds, peak RSS is 183.8 MiB, and the
+> forward pass costs 88 ms for a short text and 804 ms at the 256-token bound.
+> **`ML-R02` is met.** `ML-R09` is met by the fifteen-pair evaluation in
+> `testing.md` 2.7, which proves the ranking pipeline and not model quality;
+> the only quality evidence is the 5-of-5 real-model probe in section 5.
+>
+> The sections below are left as written because the record of what was true,
+> and when, is worth keeping. Where they say `ML-R02` is unmet, read this banner.
 **Status:** Implemented
 
 # Local machine learning — status
