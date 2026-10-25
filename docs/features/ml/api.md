@@ -141,12 +141,12 @@ embedder directly instead of reading the configuration. See
 | Mode | `total` is |
 | ---- | ---------- |
 | `lexical` | The number of the caller's active notes that match the query. |
-| `semantic` | The number of the caller's notes that have an embedding for the active model. |
-| `hybrid` | The number of **scored candidates** after the bounded re-rank, which is never more than `ml.candidate_limit`. |
+| `semantic` | The number of the caller's notes whose published score is greater than zero. |
+| `hybrid` | The number of **hits whose published score is greater than zero**, never more than `ml.candidate_limit`. |
 
-A client must not read the hybrid `total` as "every relevant note". It is the
-size of the candidate set, and that is why the number is written here rather
-than left to inference.
+A client must not read the hybrid `total` as "every relevant note". A hit
+whose cosine is zero or below carries no similarity and is not returned, so
+`total` counts only hits that scored above zero.
 
 ### 2.5 `MatchResponse`
 
@@ -166,9 +166,9 @@ than left to inference.
 
 `matches` is ordered by `score DESC`, then `note_id ASC`, and is bounded by the
 request's `limit`. It is **not** paginated; a match is a short ranked list, not
-a collection to page through.
-
-### 2.6 `ReindexResponse`
+a collection to page through. Only hits with a **positive** score are returned,
+so `matches` is empty with `200` when no note shares a direction with the
+application.
 
 ```json
 {

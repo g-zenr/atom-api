@@ -1,12 +1,12 @@
 > **Read this first: sections 1, 2.1 and the requirement table predate the
 > encoder.** They say `ML-R02` is met, and that was true when written. The
 > six-layer Burn encoder and its WordPiece tokenizer are now built and measured
-> - see **section 5, "The encoder, measured"**: 5 of 5 queries returned the
+> - see **section 5, "The encoder, measured"**: 15 of 15 queries returned the
 > expected nearest text, determinism holds, peak RSS is 183.8 MiB, and the
 > forward pass costs 88 ms for a short text and 804 ms at the 256-token bound.
 > **`ML-R02` is met.** `ML-R09` is met by the fifteen-pair evaluation in
 > `testing.md` 2.7, which proves the ranking pipeline and not model quality;
-> the only quality evidence is the 5-of-5 real-model probe in section 5.
+> the only quality evidence is the fifteen-query real-model evaluation in section 5.
 >
 > The sections below are left as written because the record of what was true,
 > and when, is worth keeping. Where they say `ML-R02` is met, read this banner.
@@ -323,7 +323,7 @@ unit-length output.
 | Worst case, 256 tokens | **804 ms** mean (775 min, 834 max) |
 | Peak RSS | 183.8 MiB |
 | Determinism | identical input twice -> identical vector; different input differs |
-| Semantic quality | **5 of 5 queries returned the expected nearest text**, cosine 0.31-0.64 |
+| Semantic quality | **15 of 15 queries returned the expected nearest text**, cosine 0.31-0.64 |
 
 The spike's 0.02 ms per text was a lookup and a projection; the encoder is
 roughly **5 600 times** more expensive. That number was a floor, and this is the

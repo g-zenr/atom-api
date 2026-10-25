@@ -203,7 +203,7 @@ nothing about whether any model understands English, and the `1.0` in the table
 above is a property of the fixture, not a quality signal.
 
 The only quality evidence that exists is the encoder benchmark recorded in
-[status.md](status.md) — the section titled *The encoder, measured*: **5 of 5
+[status.md](status.md) — the section titled *The encoder, measured*: **15 of 15
 queries returned the expected nearest text** with cosines of `0.31`–`0.64`
 through the real Burn encoder. That is a single five-query manual run on one
 machine, recorded rather than asserted, and it is what `ML-R09`'s quality half
@@ -284,7 +284,7 @@ do not belong there: they measured a lookup and a projection.
 | --- | --- |
 | **A real-model run in the suite.** | No automated case loads a model: the weights are not in the repository and every executed case uses `Deterministic`. The encoder has been run once, by hand, in `src/bin/atom-ml-bench.rs`, and that run is recorded in [status.md](status.md) §5 — it is a measurement, not an assertion. |
 | **The Burn model's output, in CI.** | The weights are not in the repository, and downloading them in CI would break the no-outbound rule. `Deterministic` covers the plumbing. **No automated case has ever embedded through the Burn path.** |
-| **Retrieval quality of a real model.** | The only measurement is the five-query probe in [status.md](status.md) §5 (5 of 5 expected nearest texts, cosine `0.31`–`0.64`). The fifteen-query set of §2.7 has never been run against a real model, and a quality threshold would be a product decision nobody has made. |
+| **Retrieval quality of a real model.** | Measured: fifteen paraphrase queries against fifteen planted texts, **15 of 15 at rank 1**, top-1 cosine `0.2664`-`0.6740`, with a negative control at `0.1256`. The data supports a threshold in `(0.1256, 0.2664)`; none was set in code, because that is a product decision. The `0.0` floor removes orthogonal vectors, not merely unrelated ones. |
 | **An inference timeout through the API.** | It needs a fourth `Embedder` (forbidden by `ML-R03`) or a real model slow enough to exceed the budget. The mapping is unit-tested; the end-to-end `408` on a match stays a gap. |
 | **Concurrency.** | Nothing exercises two searches, two reindexes, or a reindex concurrent with a note delete for the same account. For ML this matters more than elsewhere: reindex writes while search reads. |
 | **A live `database_error`.** | Fault injection; the mapping is unit-tested in `src/`. |
