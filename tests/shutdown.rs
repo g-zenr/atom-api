@@ -131,10 +131,10 @@ mod unix {
                     panic!("the server exited before it became ready: {status}");
                 }
 
-                if let Some(response) = http_get(self.addr, "/health/ready") {
-                    if response.starts_with("HTTP/1.1 200") {
-                        return;
-                    }
+                if let Some(response) = http_get(self.addr, "/health/ready")
+                    && response.starts_with("HTTP/1.1 200")
+                {
+                    return;
                 }
 
                 if Instant::now() >= deadline {
