@@ -72,6 +72,24 @@ pub const MAX_BODY_BYTES_BACKSTOP: usize = 4 * 1024 * 1024;
 /// request from pulling an arbitrary slice of a table out of the database.
 pub const MAX_PAGINATION_LIMIT: i64 = 1_000;
 
+/// The largest lexical candidate set one hybrid search may re-rank.
+///
+/// This is the same character of value as [`MAX_PAGINATION_LIMIT`]: a hard
+/// ceiling on a configurable quantity, not a deployment policy, and therefore
+/// not a setting (`AGENTS.md` §4.11). A page is a **presentation** bound; a
+/// candidate set is a **work** bound, and the re-rank performs no inference, so
+/// `ml.timeout_seconds` does not bound it. This ceiling is the only bound on
+/// the work one hybrid search may ask for
+/// ([`ADR-0008`](../../docs/decisions/ADR-0008-local-pure-rust-ml.md) §12.5).
+///
+/// The number is derived, not chosen for roundness. At 1,000 the re-rank is
+/// ≈1.2 million `f64` operations — on the order of a millisecond, two orders of
+/// magnitude below the 88 ms inference that precedes it — and holds 1.5 MB of
+/// vectors. It equals [`MAX_PAGINATION_LIMIT`], so a legal page and a legal
+/// candidate set cannot outgrow each other and no relation between the two
+/// settings is needed at all.
+pub const MAX_ML_CANDIDATE_LIMIT: i64 = 1_000;
+
 /// Placeholder secrets that must never reach production.
 pub const PLACEHOLDER_SECRETS: [&str; 2] = [
     "replace-me-with-a-development-only-secret-at-least-32-bytes-long",
@@ -451,9 +469,14 @@ fn validate_auth(config: &Config) -> Result<(), ConfigError> {
 
 /// Validates the local machine-learning settings.
 ///
-/// The four rules are the ones
+/// The five rules are the ones
 /// [`docs/features/ml/architecture.md`](../../docs/features/ml/architecture.md)
-/// §7 lists. The backend value is not checked here: it is an enum, so the
+/// §7 lists. Two of them exist because the two budget settings bound different
+/// things: `ml.timeout_seconds` bounds **one inference**, while the re-rank
+/// performs no inference at all, so `ml.candidate_limit` is the only bound on
+/// the work a hybrid search may ask for
+/// ([`ADR-0008`](../../docs/decisions/ADR-0008-local-pure-rust-ml.md) §12.2 and
+/// §12.5). The backend value is not checked here: it is an enum, so the
 /// loader has already refused anything outside `{flex, deterministic}` before
 /// this function runs. Nothing in this group may stop the process because a
 /// *model file* is absent — that is the `Disabled` state, not a
@@ -497,16 +520,15 @@ fn validate_ml(config: &Config) -> Result<(), ConfigError> {
         });
     }
 
-    // A candidate set smaller than one page would make page two impossible: the
-    // re-rank would have nothing left to slice.
-    if config.ml.candidate_limit < config.api.pagination.max_limit {
+    // The re-rank performs no inference, so `ml.timeout_seconds` does not bound
+    // it: this ceiling is the only bound on the work one hybrid search asks for
+    // (ADR-0008 §12.5). It does not relate to the page size, and a candidate set
+    // smaller than a page is a well-formed short page, not an error.
+    if config.ml.candidate_limit > MAX_ML_CANDIDATE_LIMIT {
         return Err(ConfigError::Invalid {
             key: "ml.candidate_limit".to_string(),
             value: config.ml.candidate_limit.to_string(),
-            expected: format!(
-                "at least the maximum page size ({})",
-                config.api.pagination.max_limit
-            ),
+            expected: format!("at most {MAX_ML_CANDIDATE_LIMIT} candidate rows"),
         });
     }
 

@@ -36,11 +36,13 @@ tokenizer_path = ""
 # tuning knob.
 dimension = 384
 
-# The budget for one embed or one re-rank, in seconds. It may not exceed
-# `app.limits.request_timeout_seconds`.
+# The budget for one inference, in seconds. It may not exceed
+# `app.limits.request_timeout_seconds`. It does not bound the hybrid re-rank:
+# the re-rank performs no inference, and is bounded by `candidate_limit`.
 timeout_seconds = 2
 
-# The largest lexical candidate set a hybrid search will re-rank. It may not be
-# smaller than `api.pagination.max_limit`, because a candidate set smaller than
-# one page would make page two impossible.
+# The largest lexical candidate set a hybrid search will re-rank, and the work
+# bound of one re-rank. It must be positive and at most 1,000
+# (`MAX_ML_CANDIDATE_LIMIT`). It has no relation to the page size: a candidate
+# set smaller than a page is a well-formed short page, not an error.
 candidate_limit = 200

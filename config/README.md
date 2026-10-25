@@ -132,8 +132,8 @@ file.
 | `ml.model_path` | empty — no model | `APP_ML_MODEL_PATH` | The local SafeTensors file. A path that does not exist selects the disabled embedder, and the process still starts. |
 | `ml.tokenizer_path` | empty — the `vocab.txt` beside `ml.model_path` | `APP_ML_TOKENIZER_PATH` | The WordPiece vocabulary. Empty means the sibling of the weights, so an extracted sentence-transformers directory needs one line of configuration. |
 | `ml.dimension` | `384` | `APP_ML_DIMENSION` | The vector length the embedder must produce. It is a property of the model, not a tuning knob. |
-| `ml.timeout_seconds` | `2` | `APP_ML_TIMEOUT_SECONDS` | The budget for one embed or one re-rank. It may not exceed `app.limits.request_timeout_seconds`. |
-| `ml.candidate_limit` | `200` | `APP_ML_CANDIDATE_LIMIT` | The largest lexical candidate set a hybrid search re-ranks. It may not be smaller than `api.pagination.max_limit`. |
+| `ml.timeout_seconds` | `2` | `APP_ML_TIMEOUT_SECONDS` | The budget for **one inference**. It may not exceed `app.limits.request_timeout_seconds`. It does not bound the hybrid re-rank: the re-rank performs no inference. |
+| `ml.candidate_limit` | `200` | `APP_ML_CANDIDATE_LIMIT` | The largest lexical candidate set a hybrid search re-ranks — the **work bound** of one re-rank. It must be positive and at most 1,000, and it has no relation to the page size: a candidate set smaller than a page yields a well-formed short page. |
 
 ### `messages.toml`
 
@@ -201,8 +201,10 @@ them is an error, not a warning:
 - the password policy has a minimum of at least twelve characters and a maximum
   that is at least the minimum;
 - `ml.dimension` is positive, `ml.timeout_seconds` is positive and no longer
-  than the request timeout, `ml.backend` is `flex` or `deterministic`, and
-  `ml.candidate_limit` is positive and at least `api.pagination.max_limit`.
+  than the request timeout, `ml.backend` is `flex` or `deterministic`,
+  `ml.candidate_limit` is positive and at most 1,000
+  (`MAX_ML_CANDIDATE_LIMIT`), and there is no relation between
+  `ml.candidate_limit` and `api.pagination.max_limit`.
 
 A missing *model file* is deliberately **not** in that list: it selects the
 disabled embedder, and the three endpoints answer `200` with lexical results or

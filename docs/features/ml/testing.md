@@ -68,7 +68,7 @@ first, because `ADR-0008` §9 forbids the product from storing anything else.
 | `lexical_mode_returns_a_null_score` | Every lexical hit has `score` `null`, and the answer is not degraded. |
 | `hybrid_returns_a_score_for_every_hit` | Two embedded candidates produce two hits, each with a numeric score in `[0,1]`. |
 | `hybrid_orders_by_score_then_note_id` | One note outranks two notes planted with the same vector; the tie is ordered by `note_id` ascending, so the order is total. |
-| `hybrid_never_returns_more_than_the_candidate_limit` | Six matching notes with `ml.candidate_limit` at 3 yield at most three items and a `total` of exactly 3. A three-note corpus could not prove the bound. |
+| `hybrid_never_returns_more_than_the_candidate_limit` | Six matching notes with `ml.candidate_limit` at 3 yield at most three items and a `total` of exactly 3, while the request asks for the configured maximum page of 100. The answer is a **short page**: three items, true `total`, `has_more: false`. A three-note corpus could not prove the bound, and a page bound of 3 could not prove the short page. |
 | `a_note_without_an_embedding_is_not_returned_by_hybrid` | A lexical hit with no vector is absent from hybrid and its absence is not a zero score; the `total` counts the scored candidates. |
 | `semantic_search_returns_the_callers_notes` | A query matching neither note lexically still returns both embedded notes and no unembedded one. |
 | `the_search_pagination_bounds_are_applied` | The configured default, an in-range limit, a clamp above the maximum, a non-positive limit falling back, and an offset past the end returning an empty page. |
@@ -232,7 +232,7 @@ The start-up selection rule — the only place the
 | `a_non_positive_candidate_limit_is_refused` | A candidate limit of zero or less is refused. |
 | `a_zero_ml_dimension_is_refused` | A dimension of zero is refused. |
 | `an_ml_timeout_above_the_request_timeout_is_refused` | The inference budget may not exceed `app.limits.request_timeout_seconds`. |
-| `the_candidate_limit_must_be_at_least_the_max_page_size` | A candidate limit below `api.pagination.max_limit` is refused, because a candidate set smaller than one page makes page two impossible. |
+| `the_candidate_limit_is_bounded_above` | A candidate limit of 1,001 is refused naming `ml.candidate_limit`; 1,000 is accepted; **3 is accepted too**, because a candidate set below the page size is a work bound, not an error ([`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) §12.5). |
 
 ### 3.2 On disk and passing — `src/ml/`
 

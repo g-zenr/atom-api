@@ -153,8 +153,8 @@ can act without reading the source; the source is the enforced copy.
 | `ml.model_path` | empty — no model | `APP_ML_MODEL_PATH` | A path to a local SafeTensors file. When it is set and the file is absent, the embedder is `disabled`; **start-up still succeeds** (§1.6). |
 | `ml.tokenizer_path` | empty — the `vocab.txt` beside `ml.model_path` | `APP_ML_TOKENIZER_PATH` | A path to the WordPiece vocabulary. Unset means the sibling of the weights ([`ADR-0008`](../decisions/ADR-0008-local-pure-rust-ml.md) §10). A missing vocabulary is the disabled state, not a start-up failure. |
 | `ml.dimension` | `384` | `APP_ML_DIMENSION` | Must be positive. It is a property of the model rather than a tuning knob. |
-| `ml.timeout_seconds` | `2` | `APP_ML_TIMEOUT_SECONDS` | Must be positive and at most `app.limits.request_timeout_seconds`: the budget is spent inside a request and may not outlast it. |
-| `ml.candidate_limit` | `200` | `APP_ML_CANDIDATE_LIMIT` | Must be positive and **at least `api.pagination.max_limit`**. A candidate set smaller than one page would make page two impossible. |
+| `ml.timeout_seconds` | `2` | `APP_ML_TIMEOUT_SECONDS` | Must be positive and at most `app.limits.request_timeout_seconds`: the budget is spent inside a request and may not outlast it. It bounds **one inference**; it does not bound the hybrid re-rank, which performs no inference. |
+| `ml.candidate_limit` | `200` | `APP_ML_CANDIDATE_LIMIT` | Must be positive and at most `MAX_ML_CANDIDATE_LIMIT`, **1,000**. It is the **work bound** of one re-rank — the re-rank is the one part of a search no timeout covers — and it has no relation to the page size: a candidate set smaller than a page is a well-formed short page. |
 
 The seven settings are the whole configuration surface of the local
 machine-learning feature
@@ -239,7 +239,7 @@ rule below stops it **before** the socket is bound.
 | The password policy has a positive minimum and a maximum that is at least the minimum. | `validate_settings` in `src/config/validation.rs`. |
 | The password minimum is at least twelve characters. | `validate_settings` in `src/config/validation.rs`, as `MIN_PASSWORD_LENGTH`. See *The floors that are not settings* in §1.3. |
 | The clock-skew allowance is positive and at most five minutes. | `validate_settings` in `src/config/validation.rs`, as `MAX_CLOCK_SKEW_SECONDS`. See *The floors that are not settings* in §1.3. |
-| `ml.dimension` is positive, `ml.timeout_seconds` is positive and not longer than the request timeout, and `ml.candidate_limit` is positive and at least `api.pagination.max_limit`. | `validate_ml` in `src/config/validation.rs`. A candidate set smaller than a page would make page two impossible. |
+| `ml.dimension` is positive, `ml.timeout_seconds` is positive and not longer than the request timeout, and `ml.candidate_limit` is positive and at most `MAX_ML_CANDIDATE_LIMIT` (1,000). | `validate_ml` in `src/config/validation.rs`. The two settings bound different things: the timeout bounds one inference, and the re-rank performs none, so the candidate limit is the re-rank's only bound. A candidate set smaller than a page is a well-formed short page, not an error. |
 | `ml.backend` is `flex` or `deterministic`. | The `MlBackend` type in `src/config/settings.rs`, for the file layer, and `MlBackend::parse` in `src/config/loader.rs`, for the environment layer. |
 | The database can be reached, and the pending migrations can be applied. | `src/main.rs`, before the listener is bound. |
 

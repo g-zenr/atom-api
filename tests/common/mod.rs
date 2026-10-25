@@ -227,18 +227,19 @@ pub async fn test_state_with_a_missing_model() -> AppState {
     state_with(config).await
 }
 
-/// A test state with the deterministic embedder and explicit bounds.
+/// A test state with the deterministic embedder and an explicit candidate bound.
 ///
-/// `candidate_limit` bounds the hybrid candidate set; `max_limit` is the page
-/// bound of the shared pagination envelope. `ml.candidate_limit` may not be
-/// smaller than `api.pagination.max_limit` (§7 of the architecture), so the two
-/// values in a test that lowers the candidate bound must be chosen together.
+/// `candidate_limit` bounds the hybrid candidate set, which is a **work** bound.
+/// It is deliberately not tied to `api.pagination.max_limit`: a candidate set
+/// smaller than a page is a well-formed short page, not a configuration error
+/// ([`ADR-0008`](../../docs/decisions/ADR-0008-local-pure-rust-ml.md) §12.5). The
+/// page bound is therefore left at its configured value, so a test that lowers
+/// the candidate bound proves the short page the product actually produces
+/// rather than one produced by lowering the page as well.
 #[cfg(feature = "ml")]
-pub async fn test_state_with_candidate_limit(candidate_limit: i64, max_limit: i64) -> AppState {
+pub async fn test_state_with_candidate_limit(candidate_limit: i64) -> AppState {
     let mut config = test_config_with_ml(true, MlBackend::Deterministic);
 
-    config.api.pagination.default_limit = max_limit;
-    config.api.pagination.max_limit = max_limit;
     config.ml.candidate_limit = candidate_limit;
 
     state_with(config).await

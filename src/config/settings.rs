@@ -403,7 +403,7 @@ pub struct MlSettings {
     /// The vector length the embedder must produce.
     #[serde(default = "default_ml_dimension")]
     pub dimension: usize,
-    /// The budget for one embed or one re-rank.
+    /// The budget for one inference.
     #[serde(
         default = "default_ml_timeout",
         deserialize_with = "seconds",

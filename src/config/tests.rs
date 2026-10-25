@@ -976,20 +976,30 @@ fn the_ml_backend_is_one_of_the_supported_values() {
 }
 
 #[test]
-fn the_candidate_limit_must_be_at_least_the_max_page_size() {
-    // `api.pagination.max_limit` is 100 in the base configuration, so 99 is
-    // one row short of a page: page two could never be filled.
-    let error = loader_with_secrets(&[("APP_ML_CANDIDATE_LIMIT", "99")])
+fn the_candidate_limit_is_bounded_above() {
+    // The re-rank performs no inference, so `ml.timeout_seconds` does not bound
+    // it. `MAX_ML_CANDIDATE_LIMIT` is the only ceiling it has.
+    let error = loader_with_secrets(&[("APP_ML_CANDIDATE_LIMIT", "1001")])
         .load()
-        .expect_err("a candidate set smaller than a page is refused");
+        .expect_err("a candidate limit above the ceiling is refused");
 
     assert_invalid(error, "ml.candidate_limit");
 
-    // A limit equal to the page maximum is accepted, and so is the default.
-    let config = loader_with_secrets(&[("APP_ML_CANDIDATE_LIMIT", "100")])
+    // The ceiling itself is accepted: the bound is inclusive.
+    let config = loader_with_secrets(&[("APP_ML_CANDIDATE_LIMIT", "1000")])
         .load()
-        .expect("a candidate limit equal to the page maximum must be accepted");
-    assert_eq!(config.ml.candidate_limit, 100);
+        .expect("a candidate limit at the ceiling must be accepted");
+    assert_eq!(config.ml.candidate_limit, 1_000);
+
+    // A candidate set below the page size is accepted. A page is a presentation
+    // bound and a candidate set is a work bound, so the two are unrelated: a
+    // ranked set shorter than the page size is a well-formed short page with the
+    // true total and `has_more: false` (`src/pagination.rs`), and
+    // ADR-0008 §12.5 withdrew the rule that tied them together.
+    let config = loader_with_secrets(&[("APP_ML_CANDIDATE_LIMIT", "3")])
+        .load()
+        .expect("a candidate limit below the page size must be accepted");
+    assert_eq!(config.ml.candidate_limit, 3);
 }
 
 #[test]

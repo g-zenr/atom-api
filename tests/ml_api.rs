@@ -706,14 +706,20 @@ async fn hybrid_orders_by_score_then_note_id() {
 /// `ML-R05`: the hybrid re-rank is bounded by `ml.candidate_limit`.
 ///
 /// Six notes match lexically and all six are embedded, so a response that
-/// returned all of them would overflow the bound. The page bound is set to the
-/// same value as the candidate bound, because the configuration refuses a
-/// candidate limit below the maximum page size.
+/// returned all of them would overflow the bound. The candidate bound is 3
+/// while the page bound stays at its configured maximum (100), and the request
+/// asks for that maximum page. The answer is therefore a **short page**: three
+/// items, a true `total` of 3, and `has_more: false`. A page is a presentation
+/// bound and a candidate set is a work bound, so neither constrains the other
+/// ([`ADR-0008`](../../docs/decisions/ADR-0008-local-pure-rust-ml.md) §12.5).
 #[tokio::test]
 async fn hybrid_never_returns_more_than_the_candidate_limit() {
     const CANDIDATES: i64 = 3;
+    // The shipped `api.pagination.max_limit`, deliberately larger than the
+    // candidate bound: the page is where the truncation would be invisible.
+    const PAGE: i64 = 100;
 
-    let state = test_state_with_candidate_limit(CANDIDATES, CANDIDATES).await;
+    let state = test_state_with_candidate_limit(CANDIDATES).await;
     let db = state.db.clone();
     let app = app(state);
     let user = register_user(&app, "ml-hybrid-bound").await;
@@ -739,7 +745,7 @@ async fn hybrid_never_returns_more_than_the_candidate_limit() {
     let response = search(
         &app,
         &user.access_token,
-        "?limit=3",
+        &format!("?limit={PAGE}"),
         json!({ "query": "kubernetes", "mode": "hybrid" }),
     )
     .await;
@@ -762,7 +768,25 @@ async fn hybrid_never_returns_more_than_the_candidate_limit() {
         total, CANDIDATES,
         "six notes match lexically, so the candidate set must be full: {body}"
     );
-    assert_eq!(hit_ids(&body).len(), 3, "the page is full as well: {body}");
+    assert_eq!(
+        hit_ids(&body).len(),
+        usize::try_from(CANDIDATES).expect("the candidate bound is a small positive number"),
+        "the page carries every scored candidate: {body}"
+    );
+
+    // The page asked for is larger than the ranked set, and that is well formed:
+    // the applied limit is reported unchanged, `total` is the true count, and
+    // `has_more` is false because nothing is left after this page.
+    assert_eq!(
+        body["pagination"]["limit"].as_i64(),
+        Some(PAGE),
+        "the applied page size must be the one asked for: {body}"
+    );
+    assert_eq!(
+        body["pagination"]["has_more"],
+        json!(false),
+        "a short page has nothing after it: {body}"
+    );
 }
 
 /// A candidate the model has never seen is **not** returned by hybrid.
