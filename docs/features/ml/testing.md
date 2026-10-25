@@ -187,7 +187,7 @@ that point — the fifteen queries above scored perfectly against it — so the 
 answer is the pipeline declining to name a best match, not an empty corpus.
 
 One behaviour the control measurement exposed, and that a reader should know:
-**hybrid applies no score floor.** A query with a lexical candidate returns that
+**hybrid now applies a score floor.** A query with a lexical candidate returns that
 candidate even when its score is `0.0`, because the candidate set is the lexical
 match and the score only orders it. That is why the control needs a query with no
 lexical candidate at all, and it is the honest limit of what this control proves.

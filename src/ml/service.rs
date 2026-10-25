@@ -209,6 +209,10 @@ impl MlService {
     /// size that is milliseconds; it is deliberately not an indexed
     /// nearest-neighbour query
     /// ([`ADR-0008`](../../docs/decisions/ADR-0008-local-pure-rust-ml.md) §4).
+    ///
+    /// A row whose similarity is zero is not returned: see [`is_match`]. The
+    /// filter runs before `total` is taken, so the envelope counts exactly the
+    /// hits the client can receive.
     async fn semantic(
         &self,
         owner: Uuid,
@@ -222,7 +226,8 @@ impl MlService {
             .note_vectors(owner, self.embedder.model_id())
             .await?;
 
-        let scored = rank(&stored, query, self.embedder.dimension());
+        let mut scored = rank(&stored, query, self.embedder.dimension());
+        scored.retain(|hit| is_match(hit.score));
         let total = count(&scored);
         let page = slice(scored, limit, offset);
 
@@ -247,6 +252,12 @@ impl MlService {
     /// without an embedding is **not** returned: a score of zero would bury a
     /// note that has simply never been embedded, and a `null` score in a mode
     /// defined by its scores would make the item shape two-shaped.
+    ///
+    /// The same rule then drops a candidate that *has* an embedding where the
+    /// two vectors are orthogonal or opposed — the score is exactly zero, which
+    /// is the absence of a similarity rather than a weak one ([`is_match`]).
+    /// The lexical candidate set is only the pool to re-rank; it is not itself
+    /// evidence of a semantic match.
     async fn hybrid(
         &self,
         owner: Uuid,
@@ -271,7 +282,8 @@ impl MlService {
             )
             .await?;
 
-        let scored = rank(&stored, query, self.embedder.dimension());
+        let mut scored = rank(&stored, query, self.embedder.dimension());
+        scored.retain(|hit| is_match(hit.score));
         let total = count(&scored);
         let page = slice(scored, limit, offset);
 
@@ -684,6 +696,30 @@ pub fn score(left: &[f32], right: &[f32]) -> Option<f64> {
     cosine(left, right).map(|value| value.clamp(0.0, 1.0))
 }
 
+/// Whether a similarity is evidence of a match at all.
+///
+/// A cosine at or below zero means the two vectors are orthogonal (or opposed):
+/// they share no direction, so the row carries no similarity to the query. The
+/// zero is not a weak score; it is the **absence** of one. Publishing it would
+/// turn "nothing in this corpus resembles the query" into a confident-looking
+/// best match, which is worse than an empty page with `total: 0`
+/// (`docs/features/ml/testing.md` §2.7 records the `ML-R09` control that
+/// exposed it).
+///
+/// `semantic` and `hybrid` drop these hits. `lexical` does not call this and is
+/// unchanged: it has no score, and every full-text match is a real hit.
+///
+/// The cut is exactly zero and deliberately **not** a positive threshold. A
+/// cosine of `0.01` and a cosine of `0.9` come from the same arithmetic, and no
+/// quality evaluation exists to say which positive value would separate a
+/// relevant note from an irrelevant one — the fifteen-query fixture measures
+/// plumbing, not retrieval quality. Picking a positive number would invent a
+/// product rule. Zero is the one boundary the geometry itself defines: the
+/// point where the two vectors stop pointing in the same direction.
+fn is_match(value: f64) -> bool {
+    value > 0.0
+}
+
 /// The text a note is embedded from.
 ///
 /// The title carries the subject and the body the detail, and the notes
@@ -783,6 +819,53 @@ mod tests {
         // tolerance, never an exact equality.
         assert!((score(&a, &a).expect("comparable") - 1.0).abs() < 1e-9);
         assert_eq!(score(&a, &opposite), Some(0.0));
+    }
+
+    #[test]
+    fn a_similarity_at_or_below_zero_is_not_a_match() {
+        // Orthogonal and opposed vectors carry no similarity: they must be
+        // dropped rather than published as a `0.0` hit. `-0.0` is included
+        // because `f64` distinguishes it from `0.0` by bit pattern only.
+        assert!(!is_match(0.0));
+        assert!(!is_match(-0.0));
+        assert!(!is_match(-1.0));
+
+        // Any positive similarity is a match. The cut is zero, not a positive
+        // threshold nobody measured.
+        assert!(is_match(f64::MIN_POSITIVE));
+        assert!(is_match(0.0001));
+        assert!(is_match(1.0));
+    }
+
+    #[test]
+    fn the_published_total_counts_only_hits_that_score_above_zero() {
+        // The filter runs before `count`, so the envelope cannot claim a hit
+        // the page does not hold.
+        let scored = vec![
+            ScoredNote {
+                id: Uuid::from_u128(1),
+                score: 0.4,
+            },
+            ScoredNote {
+                id: Uuid::from_u128(2),
+                score: 0.0,
+            },
+            ScoredNote {
+                id: Uuid::from_u128(3),
+                score: 0.05,
+            },
+        ];
+
+        let published: Vec<ScoredNote> = scored
+            .into_iter()
+            .filter(|hit| is_match(hit.score))
+            .collect();
+
+        assert_eq!(count(&published), 2);
+        assert!(
+            published.iter().all(|hit| hit.score > 0.0),
+            "a zero-scored hit must not survive the filter"
+        );
     }
 
     #[test]

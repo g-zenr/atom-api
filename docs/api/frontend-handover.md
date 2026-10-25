@@ -741,7 +741,7 @@ On a degraded response, every score is `null`. Do not sort client-side by
 | Applied mode | `pagination.total` |
 | ------------ | ------------------ |
 | `lexical` (including degraded) | the number of matching notes |
-| `hybrid` | the size of the candidate set, bounded by `ml.candidate_limit` — **not** "every relevant note" |
+| `hybrid` | the number of hits whose published score is greater than zero, bounded by `ml.candidate_limit` — **not** "every relevant note" |
 | `semantic` | the number of the caller's notes that have an embedding |
 
 This is [`conventions.md`](conventions.md) §17.2. Presenting the hybrid `total`

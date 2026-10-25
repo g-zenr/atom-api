@@ -3616,13 +3616,37 @@ async fn every_operation_with_a_documented_validation_failure_is_a_422() {
 
 #[tokio::test]
 async fn a_job_applications_body_over_the_limit_is_refused() {
-    // A body limit far below a real company, so the refusal is about size and
-    // not about validation.
+    // A body limit far below a real application, so the refusal is about size
+    // and not about validation.
     let state = test_state_with_body_limit(256).await;
     let app = app(state);
     let user = register_user(&app, "jobs-body-limit").await;
 
-    let response = post_company(&app, &user.access_token, company_body(&"c".repeat(400))).await;
+    // A real employer, so the oversized body cannot be refused for naming a
+    // company that does not exist.
+    let company = create_company(&app, &user.access_token, "Acme").await;
+    let company_id = company["id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("a company carries an id: {company}"))
+        .to_string();
+
+    let oversized = json!({
+        "company_id": company_id,
+        "role_title": "Backend engineer",
+        "description": "d".repeat(400),
+    });
+    let response = post_application(&app, &user.access_token, oversized).await;
     let body = response.expect_status(StatusCode::PAYLOAD_TOO_LARGE);
     assert_error(&body, "payload_too_large");
+
+    // The control: the same route, the same caller and a body inside the limit
+    // is accepted, so the `413` above is the transport bound and not a route
+    // that refuses this shape.
+    let response = post_application(
+        &app,
+        &user.access_token,
+        json!({ "company_id": company_id, "role_title": "Backend engineer" }),
+    )
+    .await;
+    response.expect_status(StatusCode::CREATED);
 }

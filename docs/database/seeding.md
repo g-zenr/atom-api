@@ -746,7 +746,7 @@ an equivalent implementation; the comparison above is the specified one because
 it also catches a table the list has never heard of.
 
 **What `V6` guarantees, exactly.** One direction only: every base table in
-`public` must be named by `SEEDED_TABLES`. It is a completeness check on the
+`public` must be named by `USER_TABLES`. It is a completeness check on the
 constant, not on the run, and it does not compare the constant with the
 `--reset` statement list or with the insert list. A table added to the constant
 and nowhere else therefore still passes: the run would neither insert its rows
@@ -1004,7 +1004,7 @@ implementable, and it does not change the contract.
   supported.
 - **The schema.** The seeder only writes tables that exist. Adding a table
   without extending the seeder is an incomplete chain. `V6` (§7.6) fails the
-  run while the table is missing from `SEEDED_TABLES`; it does not check the
+  run while the table is missing from `USER_TABLES`; it does not check the
   inserts or the delete order, so a table named in the constant and nowhere
   else still passes. [`../roadmap.md`](../roadmap.md) states the rule.
 
@@ -1029,3 +1029,13 @@ implementable, and it does not change the contract.
   model for §3.4.
 - [`../api/conventions.md`](../api/conventions.md) — the money and pagination
   conventions the seeded data is shaped to demonstrate.
+
+### Correction (2026-10-25) - the `G3` ordering is now tested
+
+Section 9.1 said the ordering "is implemented in the binary but no test
+distinguishes it". That is no longer true.
+`the_foreign_account_guard_runs_before_the_migration_step` creates a database with
+a hand-made `users` table and **no** `_sqlx_migrations`, proves the guard refuses,
+and proves the migration table is still absent afterwards - then a control run on
+the same database shows the migration step is reached once the guard is satisfied.
+That control is what makes the absence meaningful rather than accidental.

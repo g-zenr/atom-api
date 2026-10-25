@@ -17,6 +17,15 @@
 //! assertions are restricted to the two seeded ids, never to a table-wide
 //! `COUNT(*)`.
 //!
+//! **The one exception is the ordering test.** `A-C-S1-7` says the `G3`
+//! preflight runs before `sqlx::migrate!`, and the shared database cannot show
+//! that: it is migrated before the test starts, so "no migration was applied"
+//! is true for every run that ever happens there. That test therefore creates a
+//! database of its own with a hand-made `users` table and no `_sqlx_migrations`,
+//! asserts that the seeder refuses, and asserts that the table is *still*
+//! absent afterwards — a statement only a run that refused before migrating can
+//! leave true.
+//!
 //! **The tests are serialised, within this binary and against a second copy of
 //! the suite.** They share one deterministic dataset in one database, and one
 //! of them deliberately makes an insert fail. Two seeder processes overlapping
@@ -33,12 +42,14 @@
 pub mod common;
 
 use std::process::Command;
+use std::str::FromStr;
 
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::{DateTime, Utc};
 use sqlx::Connection;
+use sqlx::PgConnection;
 use sqlx::PgPool;
-use sqlx::postgres::PgPoolOptions;
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use uuid::Uuid;
 
 /// The binary under test.
@@ -339,6 +350,197 @@ async fn migrated_pool() -> PgPool {
         .expect("the migrations must apply to the test database");
 
     pool
+}
+
+// ---------------------------------------------------------------------------
+// A scratch database, for the one test the shared one cannot carry
+//
+// `A-C-S1-7` is a statement about the *order* of two steps, so proving it needs
+// a database that has not been migrated yet. `atom_test` always has been, which
+// is why the ordering was unprovable there: every comparison of
+// `_sqlx_migrations` before and after a refused run compares a full table with
+// itself.
+// ---------------------------------------------------------------------------
+
+/// The administration connection options of the suite.
+fn admin_options() -> PgConnectOptions {
+    PgConnectOptions::from_str(&common::test_database_url())
+        .expect("the test database url must parse")
+}
+
+/// The URL of a database whose name this suite may create and drop.
+///
+/// `G2` admits an exact name or a `_dev` / `_test` / `_local` suffix, so the
+/// suffix goes last; the `uuid` keeps two runs — or two copies of the suite —
+/// from colliding. The whole name contains `test`, which is the rule the
+/// harness applies to the suite and which this suite applies to what it creates.
+fn scratch_database_url(name: &str) -> String {
+    let base = common::test_database_url();
+    let (prefix, _) = base
+        .rsplit_once('/')
+        .expect("the test database url names a database");
+    format!("{prefix}/{name}")
+}
+
+/// A database this test created, dropped when it leaves scope.
+///
+/// Cleanup is a `Drop` implementation, not a call at the end of the test: an
+/// assertion that fails aborts the test, and a scratch database left behind
+/// would be inherited by the next run. `Drop` cannot await, so the removal owns
+/// a single-threaded runtime on a thread of its own — the same arrangement
+/// `tests/claims_schema.rs` uses, and it works while the test is unwinding.
+struct ScratchDatabase {
+    name: String,
+    admin: PgConnectOptions,
+    url: String,
+}
+
+impl ScratchDatabase {
+    /// The URL of the scratch database itself.
+    fn url(&self) -> &str {
+        &self.url
+    }
+
+    /// Opens one connection to the scratch database.
+    async fn connect(&self) -> PgConnection {
+        PgConnection::connect(&self.url)
+            .await
+            .expect("the scratch database must be reachable")
+    }
+}
+
+impl Drop for ScratchDatabase {
+    fn drop(&mut self) {
+        let admin = self.admin.clone();
+        let name = self.name.clone();
+
+        let cleanup = std::thread::spawn(move || {
+            let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            else {
+                return;
+            };
+
+            runtime.block_on(async move {
+                let _ = drop_scratch_database(&admin, &name).await;
+            });
+        });
+
+        let _ = cleanup.join();
+    }
+}
+
+/// Drops a database through a connection to the administration database.
+///
+/// `WITH (FORCE)` disconnects anything still attached (PostgreSQL 13 and later;
+/// this project's floor is 14). The statement is built by `format('%I')` in the
+/// server and the name is a **bound parameter**, so no identifier is ever
+/// concatenated in Rust — a bind is impossible in `DROP DATABASE`, but a bound
+/// name passed through the server's own quoting is the next best thing.
+async fn drop_scratch_database(admin: &PgConnectOptions, name: &str) -> Result<(), sqlx::Error> {
+    let mut connection = PgConnection::connect_with(admin).await?;
+
+    let statement: String =
+        sqlx::query_scalar("SELECT format('DROP DATABASE IF EXISTS %I WITH (FORCE)', $1)")
+            .bind(name)
+            .fetch_one(&mut connection)
+            .await?;
+
+    sqlx::query(&statement).execute(&mut connection).await?;
+
+    Ok(())
+}
+
+/// Creates an empty database whose name is unique to this run.
+async fn create_scratch_database() -> ScratchDatabase {
+    let admin = admin_options();
+    let name = format!("atom_g3_{}_test", Uuid::new_v4().simple());
+    let url = scratch_database_url(&name);
+
+    assert!(
+        name.ends_with("_test") && name.contains("test"),
+        "a database this suite creates must pass G2 and look disposable"
+    );
+
+    let mut connection = PgConnection::connect_with(&admin)
+        .await
+        .expect("the administration database must be reachable");
+
+    // As above: the identifier is quoted by the server, from a bound value.
+    let statement: String = sqlx::query_scalar("SELECT format('CREATE DATABASE %I', $1)")
+        .bind(&name)
+        .fetch_one(&mut connection)
+        .await
+        .expect("the scratch database name must be QUOTE_IDENT-able");
+
+    sqlx::query(&statement)
+        .execute(&mut connection)
+        .await
+        .expect("the atom role must be allowed to create a scratch database");
+
+    ScratchDatabase { name, admin, url }
+}
+
+/// Creates the one table `G3` reads, and one account outside the seeded set.
+///
+/// The guard is `SELECT COUNT(*) FROM users WHERE id <> ALL($1)`, so `id` is the
+/// only column it needs: the hand-made table is enough to make the preflight
+/// refuse, which is all this test asks of it. The database stays unmigrated.
+async fn plant_bare_users_table(scratch: &ScratchDatabase) -> Uuid {
+    let mut connection = scratch.connect().await;
+
+    sqlx::query("CREATE TABLE users (id uuid PRIMARY KEY)")
+        .execute(&mut connection)
+        .await
+        .expect("the hand-made users table must be created");
+
+    let foreign = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id) VALUES ($1)")
+        .bind(foreign)
+        .execute(&mut connection)
+        .await
+        .expect("the foreign account must be inserted");
+
+    foreign
+}
+
+/// The base tables in `public` of the scratch database.
+///
+/// A migration is DDL, so this list is the second observation of the same fact
+/// `_sqlx_migrations` records: before any migration it holds exactly the table
+/// the test created, and after one it holds the schema.
+async fn scratch_tables(scratch: &ScratchDatabase) -> Vec<String> {
+    let mut connection = scratch.connect().await;
+
+    sqlx::query_scalar(
+        "SELECT table_name::text FROM information_schema.tables \
+         WHERE table_schema = 'public' AND table_type = 'BASE TABLE' \
+         ORDER BY table_name",
+    )
+    .fetch_all(&mut connection)
+    .await
+    .expect("the scratch database catalog must be readable")
+}
+
+/// Whether `_sqlx_migrations` exists in the scratch database.
+async fn scratch_is_migrated(scratch: &ScratchDatabase) -> bool {
+    let mut connection = scratch.connect().await;
+
+    sqlx::query_scalar("SELECT to_regclass('_sqlx_migrations') IS NOT NULL")
+        .fetch_one(&mut connection)
+        .await
+        .expect("the scratch database must be probeable")
+}
+
+/// The accounts in the scratch database, by id.
+async fn scratch_user_ids(scratch: &ScratchDatabase) -> Vec<Uuid> {
+    let mut connection = scratch.connect().await;
+
+    sqlx::query_scalar("SELECT id FROM users ORDER BY id")
+        .fetch_all(&mut connection)
+        .await
+        .expect("the hand-made users table must be readable")
 }
 
 /// The row counts of the seeded dataset, restricted to the two seeded accounts.
@@ -665,6 +867,108 @@ async fn the_seeder_refuses_a_database_that_holds_foreign_rows() {
         seeded_row_counts(&pool).await,
         counts_before,
         "a refused run must not insert a seeded row"
+    );
+}
+
+/// `A-C-S1-7`: the foreign-account guard runs **before** the migration step.
+///
+/// This is the test [`the_seeder_refuses_a_database_that_holds_foreign_rows`]
+/// cannot be. That one starts from `atom_test`, which is already migrated, so
+/// "a refused run did not apply a migration" compares a table with itself and
+/// is true by construction. Here the database has never seen a migration: a
+/// hand-made `users` table is all `G3` needs — the guard is one
+/// `SELECT COUNT(*) FROM users WHERE id <> ALL($1)` — so the absence of
+/// `_sqlx_migrations` *after* a refusal is a fact only a run that refused
+/// before migrating can produce.
+///
+/// The control at the end removes the other explanation: if the migration step
+/// were never reached in this database for any reason, the flag-alone run would
+/// not create the table either.
+#[tokio::test]
+async fn the_foreign_account_guard_runs_before_the_migration_step() {
+    // No `seeder_lock`: this test shares nothing with the rest of the suite. The
+    // database is its own, the name is unique to this run, and no row of
+    // `atom_test` is read or written.
+    let scratch = create_scratch_database().await;
+    let foreign = plant_bare_users_table(&scratch).await;
+
+    // The premise. Without it the assertion after the refusal proves nothing,
+    // which is exactly the defect this test exists to replace.
+    assert!(
+        !scratch_is_migrated(&scratch).await,
+        "the scratch database must start without a migration table"
+    );
+    assert_eq!(
+        scratch_tables(&scratch).await,
+        vec!["users".to_string()],
+        "the scratch database must hold the hand-made table and nothing else"
+    );
+
+    let run = run_with(&["--profile", "minimal"], Some(scratch.url()), Some("dev"));
+    let output = run.require_refusal("a database holding an account outside the seeded set");
+
+    // The refusal must be `G3` and not something else that happened to fail: it
+    // names the guard's own sentence and the flag that admits the database.
+    assert!(
+        output.contains("outside the seeded set"),
+        "the refusal must be the foreign-account guard\n{output}"
+    );
+    assert!(
+        output.contains("--allow-non-empty"),
+        "a G3 refusal must name the flag that admits the database\n{output}"
+    );
+    assert!(
+        !output.contains("postgres://"),
+        "a G3 refusal must not print the URL\n{output}"
+    );
+
+    // The claim. `_sqlx_migrations` is created by `sqlx::migrate!` before it
+    // applies anything, so its presence here would mean the migration step ran
+    // first and the preflight did not hold the ordering.
+    assert!(
+        !scratch_is_migrated(&scratch).await,
+        "a G3 refusal must leave no migration table: the preflight runs before \
+         sqlx::migrate! (A-C-S1-7). A migration table after the refusal means the \
+         DDL came first.\n{output}"
+    );
+
+    // And no other DDL either: a migration would have added its tables.
+    assert_eq!(
+        scratch_tables(&scratch).await,
+        vec!["users".to_string()],
+        "a refused run must send the target no DDL at all\n{output}"
+    );
+
+    // Nothing deleted, nothing inserted: the hand-made row is the only account,
+    // and the two seeded ids are not there.
+    assert_eq!(
+        scratch_user_ids(&scratch).await,
+        vec![foreign],
+        "a refused run must leave the database exactly as it was, row for row"
+    );
+    assert!(
+        !seeded_user_ids().contains(&foreign),
+        "the fixture account must not be one of the seeded ids"
+    );
+
+    // The control. `--allow-non-empty` satisfies the same guard on the same
+    // database, and the run then reaches the migration step: the table appears.
+    // Whether the migrations themselves succeed against a pre-existing `users`
+    // table is not this test's business - only that the step was entered.
+    let admitted = run_with(
+        &["--profile", "minimal", "--allow-non-empty"],
+        Some(scratch.url()),
+        Some("dev"),
+    );
+    let admitted_output = admitted.output();
+    assert!(
+        !admitted_output.contains("atom-seed: refused:"),
+        "the flag admits the database, so the run must get past every guard\n{admitted_output}"
+    );
+    assert!(
+        scratch_is_migrated(&scratch).await,
+        "once the guard is satisfied the migration step must run; if even this run \
+         leaves no migration table, the absence above would not be about ordering\n{admitted_output}"
     );
 }
 

@@ -724,6 +724,14 @@ async fn hybrid_never_returns_more_than_the_candidate_limit() {
     let app = app(state);
     let user = register_user(&app, "ml-hybrid-bound").await;
 
+    // Every note matches lexically *and* scores above zero, so the candidate
+    // set is full of hits and the bound is the only thing that can shorten the
+    // page. A planted vector the query scores at zero would be dropped before
+    // the bound applied, and the case would pass for the wrong reason.
+    let basis = query_vector("kubernetes");
+    let perpendicular = perpendicular_to(&basis);
+    let matched = mix(&basis, &perpendicular, 0.5);
+
     for index in 0..6 {
         let note_id = create_note(
             &app,
@@ -732,14 +740,7 @@ async fn hybrid_never_returns_more_than_the_candidate_limit() {
             "a canary release behind a feature flag",
         )
         .await;
-        plant_vector(
-            &db,
-            user.id,
-            "note",
-            note_id,
-            &query_vector(&format!("note-{index}")),
-        )
-        .await;
+        plant_vector(&db, user.id, "note", note_id, &matched).await;
     }
 
     let response = search(
@@ -793,7 +794,11 @@ async fn hybrid_never_returns_more_than_the_candidate_limit() {
 ///
 /// The alternative — a zero score — would bury the note, and a `null` score in
 /// a mode defined by its scores would make the hit two-shaped
-/// (`architecture.md` §4.2).
+/// (`architecture.md` §4.2). The same rule now covers a note that **has** a
+/// vector and no similarity with the query, so the two planted vectors here are
+/// real matches: the claim is that the unembedded note is the one that is
+/// missing, which needs the other two to be returned for a reason the score
+/// states.
 #[tokio::test]
 async fn a_note_without_an_embedding_is_not_returned_by_hybrid() {
     let state = test_state_with_deterministic_ml().await;
@@ -805,8 +810,24 @@ async fn a_note_without_an_embedding_is_not_returned_by_hybrid() {
     let second = create_note(&app, &user, "Kubernetes upgrade", "the control plane").await;
     let unembedded = create_note(&app, &user, "Kubernetes notes", "never embedded").await;
 
-    plant_vector(&db, user.id, "note", first, &query_vector("first")).await;
-    plant_vector(&db, user.id, "note", second, &query_vector("second")).await;
+    let basis = query_vector("kubernetes");
+    let perpendicular = perpendicular_to(&basis);
+    plant_vector(
+        &db,
+        user.id,
+        "note",
+        first,
+        &mix(&basis, &perpendicular, 0.7),
+    )
+    .await;
+    plant_vector(
+        &db,
+        user.id,
+        "note",
+        second,
+        &mix(&basis, &perpendicular, 0.4),
+    )
+    .await;
 
     let response = search_mode(&app, &user.access_token, "kubernetes", "hybrid").await;
     let body = response.expect_status(StatusCode::OK);
@@ -827,6 +848,90 @@ async fn a_note_without_an_embedding_is_not_returned_by_hybrid() {
     );
 }
 
+/// `ML-R09`: a candidate with **no** semantic similarity is not a hit.
+///
+/// `hybrid` takes its candidate set from the lexical search and re-ranks it, so
+/// a note can match the words and share no direction with the query at all. The
+/// cosine is then zero, and zero is the **absence** of a similarity rather than
+/// a weak one: publishing it would turn "nothing here resembles the query" into
+/// a confident-looking best match with `score: 0.0`
+/// (`docs/features/ml/testing.md` §2.7).
+///
+/// The planted vector is the query vector negated, so the fixture states the
+/// sign it is setting up instead of hoping a hashed vector lands near zero: the
+/// cosine is `-1`, the published value would be the clamp at `0.0`, and the row
+/// must be dropped instead. `lexical` mode is asserted in the same case, because
+/// it is the mode the rule must **not** change: it has no score, and every
+/// full-text match is a real hit.
+#[tokio::test]
+async fn a_hybrid_hit_with_no_similarity_is_not_returned() {
+    let state = test_state_with_deterministic_ml().await;
+    let db = state.db.clone();
+    let app = app(state);
+    let user = register_user(&app, "ml-hybrid-no-similarity").await;
+
+    let query = "kubernetes";
+
+    // The note matches the query lexically: the word is in its title, so it is
+    // a candidate of the hybrid re-rank.
+    let note_id = create_note(&app, &user, "Kubernetes rollout", "the canary release").await;
+
+    let basis = query_vector(query);
+    let opposed: Vec<f32> = basis.iter().map(|value| -value).collect();
+    assert!(
+        dot(&basis, &opposed) < -0.99,
+        "the fixture must plant a vector opposed to the query, so the cosine is negative and \
+         the published score would clamp to zero"
+    );
+    plant_vector(&db, user.id, "note", note_id, &opposed).await;
+
+    // Hybrid: the lexical candidate is re-ranked, scores no similarity, and is
+    // dropped. An empty page with a zero total, not one hit at `0.0`.
+    let response = search_mode(&app, &user.access_token, query, "hybrid").await;
+    let body = response.expect_status(StatusCode::OK);
+
+    assert_search_response(&body, "hybrid", "hybrid", false, None);
+    assert!(
+        hits(&body).is_empty(),
+        "a candidate whose cosine is zero must not be published as a `0.0` hit: {body}"
+    );
+    assert_eq!(
+        body["pagination"]["total"], 0,
+        "the total counts the hits the page can hold, so it must not count a dropped one: {body}"
+    );
+
+    // Semantic: the same rule, on the same row, without the lexical filter.
+    let response = search_mode(&app, &user.access_token, query, "semantic").await;
+    let body = response.expect_status(StatusCode::OK);
+    assert!(
+        hits(&body).is_empty(),
+        "semantic mode must drop the same zero-similarity row: {body}"
+    );
+    assert_eq!(
+        body["pagination"]["total"], 0,
+        "the semantic total must agree with its empty page: {body}"
+    );
+
+    // Lexical is unchanged. It never computes a similarity, so the note it
+    // matches is returned, with the `null` score the mode publishes.
+    let response = search_mode(&app, &user.access_token, query, "lexical").await;
+    let body = response.expect_status(StatusCode::OK);
+    assert_eq!(
+        hit_ids(&body),
+        vec![note_id.to_string()],
+        "lexical mode must still return the note it matches: {body}"
+    );
+    assert_eq!(
+        body["pagination"]["total"], 1,
+        "lexical mode ranks nothing and drops nothing: {body}"
+    );
+    assert_eq!(
+        scores(&body),
+        vec![None],
+        "a lexical hit carries no score, whatever vector the note has: {body}"
+    );
+}
+
 #[tokio::test]
 async fn semantic_search_returns_the_callers_notes() {
     let state = test_state_with_deterministic_ml().await;
@@ -838,11 +943,29 @@ async fn semantic_search_returns_the_callers_notes() {
     let second = create_note(&app, &user, "Groceries", "milk, bread, coffee").await;
     create_note(&app, &user, "Unembedded", "no vector at all").await;
 
-    plant_vector(&db, user.id, "note", first, &query_vector("first")).await;
-    plant_vector(&db, user.id, "note", second, &query_vector("second")).await;
-
     // A query that matches neither note lexically: semantic mode is a scan of
-    // the caller's embeddings, not a text search.
+    // the caller's embeddings, not a text search. Both planted vectors point
+    // the query's way, because a stored vector with no positive similarity is
+    // dropped rather than returned as a `0.0` hit.
+    let basis = query_vector("zeppelin");
+    let perpendicular = perpendicular_to(&basis);
+    plant_vector(
+        &db,
+        user.id,
+        "note",
+        first,
+        &mix(&basis, &perpendicular, 0.7),
+    )
+    .await;
+    plant_vector(
+        &db,
+        user.id,
+        "note",
+        second,
+        &mix(&basis, &perpendicular, 0.4),
+    )
+    .await;
+
     let response = search_mode(&app, &user.access_token, "zeppelin", "semantic").await;
     let body = response.expect_status(StatusCode::OK);
 
@@ -2322,6 +2445,13 @@ async fn a_hybrid_score_is_the_cosine_of_the_planted_vectors() {
 /// could not reach it, and a pipeline that returned the right note for the
 /// wrong reason would fail the identifier comparison.
 ///
+/// The `total` is the one number the score floor changed. The fifteen vectors
+/// are unrelated texts, so roughly half of the cross-similarities are negative;
+/// those rows share no direction with the query and are dropped rather than
+/// published as `0.0`. The case therefore derives the expected total from the
+/// vectors it planted instead of asserting the fixture count, and independently
+/// asserts that every published hit scores above zero.
+///
 /// The control at the end is the other half of the claim. The account holds
 /// fifteen vectors that the queries above scored perfectly, so an empty answer
 /// to a query nothing was planted for is the pipeline declining to invent a
@@ -2377,12 +2507,14 @@ async fn the_fixture_queries_find_the_expected_notes() {
 
     // The identifier of each planted note travels with the pair, so the case
     // can name the note it expects rather than a title that happens to look
-    // right.
+    // right. The vector travels with it too: the expected `total` below is
+    // derived from the vectors, not copied from the fixture count.
     let mut planted = Vec::with_capacity(fixtures.len());
     for (query, title) in fixtures {
         let note_id = create_note(&app, &user, title, "a fixture note").await;
-        plant_vector(&db, user.id, "note", note_id, &query_vector(query)).await;
-        planted.push((query, title, note_id));
+        let vector = query_vector(query);
+        plant_vector(&db, user.id, "note", note_id, &vector).await;
+        planted.push((query, title, note_id, vector));
     }
 
     assert_eq!(
@@ -2391,7 +2523,7 @@ async fn the_fixture_queries_find_the_expected_notes() {
         "every fixture note must have a vector, or the case proves nothing"
     );
 
-    for (query, title, note_id) in &planted {
+    for (query, title, note_id, _) in &planted {
         let response = search(
             &app,
             &user.access_token,
@@ -2402,10 +2534,27 @@ async fn the_fixture_queries_find_the_expected_notes() {
         let body = response.expect_status(StatusCode::OK);
 
         assert_search_response(&body, "semantic", "semantic", false, None);
+
+        // The fifteen vectors are unrelated texts, so the cosine between the
+        // query and any *other* fixture note is as likely to be negative as
+        // positive. A row at or below zero shares nothing with the query and is
+        // dropped rather than published as a `0.0` hit, so the total is the
+        // number of planted notes this query scores above zero — which the
+        // fixture computes from its own vectors instead of asserting a constant
+        // the rule no longer produces.
+        let basis = query_vector(query);
+        let expected_total = planted
+            .iter()
+            .filter(|(_, _, _, vector)| dot(&basis, vector) > 0.0)
+            .count();
         assert_eq!(
             body["pagination"]["total"],
-            i64::try_from(planted.len()).expect("the fixture count fits"),
-            "the semantic total counts every embedded note: {body}"
+            i64::try_from(expected_total).expect("the count fits an i64"),
+            "the semantic total counts the planted notes this query scores above zero: {body}"
+        );
+        assert!(
+            expected_total >= 1,
+            "the query's own note scores 1, so the expectation is never vacuous"
         );
 
         let page = hits(&body);
@@ -2413,6 +2562,16 @@ async fn the_fixture_queries_find_the_expected_notes() {
             !page.is_empty(),
             "the query {query:?} must return a page: {body}"
         );
+
+        for hit in &page {
+            let published = hit["score"]
+                .as_f64()
+                .unwrap_or_else(|| panic!("a semantic hit carries a score: {hit}"));
+            assert!(
+                published > 0.0,
+                "a semantic hit with no similarity must be dropped, not published: {hit}"
+            );
+        }
 
         // The expected note, first. The identifier is the identity of the note;
         // the title only makes a failure readable.

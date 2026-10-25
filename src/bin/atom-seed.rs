@@ -94,26 +94,82 @@ const ARGON2_PARALLELISM: u32 = 1;
 /// hang the process for the operating system's connect timeout.
 const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Every table the seeder handles: the nine it inserts into,
-/// `refresh_sessions`, which `--reset` deletes but the seeder never inserts, and
-/// `embeddings`, which no seed profile writes yet but which `--reset` must
-/// purge before the notes and applications it belongs to are deleted.
+/// One user table the seeder owns: its name, and the statement `--reset` runs
+/// to empty it.
 ///
-/// `V6` compares this list with the schema and fails the run when a table
-/// exists that the list does not name. That is what makes "add a table, extend
-/// the seeder" enforceable.
-const SEEDED_TABLES: [&str; 11] = [
-    "application_events",
-    "companies",
-    "embeddings",
-    "expense_claims",
-    "expense_items",
-    "job_applications",
-    "notes",
-    "projects",
-    "refresh_sessions",
-    "tasks",
-    "users",
+/// The name and the statement are one entry on purpose. [`USER_TABLES`] is the
+/// **only** list: `reset_seeded_rows` executes `delete` in this order and
+/// `verify_table_list` (`V6`) compares the schema against `name`. A table
+/// cannot therefore be named in one place and missing from the other, which was
+/// the residual gap recorded in `docs/database/seeding.md` §7.6: `V6` asserted
+/// `schema ⊆ the constant` while the delete order was a second, hand-written
+/// list, so a table added to the constant and nowhere else passed verification
+/// and its rows survived `--reset`, re-attaching to the re-inserted parent
+/// through the deterministic ids (`A-C-S1-10`).
+struct UserTable {
+    /// The `public` base table name, as `information_schema.tables` reports it.
+    name: &'static str,
+    /// The parameterised `DELETE` that removes the two accounts' rows.
+    ///
+    /// It is static text, never assembled: the only bound parameter is `$1`,
+    /// the two seeded ids.
+    delete: &'static str,
+}
+
+/// Every user table the seeder handles, in `--reset` delete order.
+///
+/// The order is foreign-key safe: a child precedes the parent it references.
+/// `tasks` is reached through `projects` because the table has no `user_id`
+/// column, and `users` is last because every other row references it.
+///
+/// `refresh_sessions` is deleted but never inserted; `embeddings` is purged
+/// before the notes and applications it belongs to are deleted.
+const USER_TABLES: [UserTable; 11] = [
+    UserTable {
+        name: "application_events",
+        delete: "DELETE FROM application_events WHERE user_id = ANY($1)",
+    },
+    UserTable {
+        name: "embeddings",
+        delete: "DELETE FROM embeddings WHERE user_id = ANY($1)",
+    },
+    UserTable {
+        name: "expense_items",
+        delete: "DELETE FROM expense_items WHERE user_id = ANY($1)",
+    },
+    UserTable {
+        name: "expense_claims",
+        delete: "DELETE FROM expense_claims WHERE user_id = ANY($1)",
+    },
+    UserTable {
+        name: "job_applications",
+        delete: "DELETE FROM job_applications WHERE user_id = ANY($1)",
+    },
+    UserTable {
+        name: "companies",
+        delete: "DELETE FROM companies WHERE user_id = ANY($1)",
+    },
+    UserTable {
+        name: "refresh_sessions",
+        delete: "DELETE FROM refresh_sessions WHERE user_id = ANY($1)",
+    },
+    UserTable {
+        name: "notes",
+        delete: "DELETE FROM notes WHERE user_id = ANY($1)",
+    },
+    UserTable {
+        name: "tasks",
+        delete: "DELETE FROM tasks \
+                 WHERE project_id IN (SELECT id FROM projects WHERE user_id = ANY($1))",
+    },
+    UserTable {
+        name: "projects",
+        delete: "DELETE FROM projects WHERE user_id = ANY($1)",
+    },
+    UserTable {
+        name: "users",
+        delete: "DELETE FROM users WHERE id = ANY($1)",
+    },
 ];
 
 /// The one-line reset warning, printed before the first delete (A-C-S1-9).
@@ -930,57 +986,24 @@ fn refuse_foreign_accounts(foreign: i64, allow_non_empty: bool) -> Result<(), Fa
 
 /// Deletes every row owned by the two seeded accounts, in foreign-key order.
 ///
-/// Each statement is static and each predicate is `user_id = ANY($1)` or a
-/// subquery over it. `tasks` is reached through `projects` because the table
-/// has no `user_id` column.
+/// The order and every statement come from [`USER_TABLES`], the same list `V6`
+/// verifies against the schema, so the reset cannot cover fewer tables than the
+/// run admits. Each predicate is `user_id = ANY($1)` or a subquery over it;
+/// `tasks` is reached through `projects` because the table has no `user_id`
+/// column.
 async fn reset_seeded_rows(
     connection: &mut PgConnection,
     seed_ids: &[Uuid],
 ) -> Result<(), Failure> {
-    let statements = [
-        (
-            "embeddings",
-            "DELETE FROM embeddings WHERE user_id = ANY($1)",
-        ),
-        (
-            "application_events",
-            "DELETE FROM application_events WHERE user_id = ANY($1)",
-        ),
-        (
-            "expense_items",
-            "DELETE FROM expense_items WHERE user_id = ANY($1)",
-        ),
-        (
-            "expense_claims",
-            "DELETE FROM expense_claims WHERE user_id = ANY($1)",
-        ),
-        (
-            "job_applications",
-            "DELETE FROM job_applications WHERE user_id = ANY($1)",
-        ),
-        ("companies", "DELETE FROM companies WHERE user_id = ANY($1)"),
-        (
-            "refresh_sessions",
-            "DELETE FROM refresh_sessions WHERE user_id = ANY($1)",
-        ),
-        ("notes", "DELETE FROM notes WHERE user_id = ANY($1)"),
-        (
-            "tasks",
-            "DELETE FROM tasks \
-             WHERE project_id IN (SELECT id FROM projects WHERE user_id = ANY($1))",
-        ),
-        ("projects", "DELETE FROM projects WHERE user_id = ANY($1)"),
-        ("users", "DELETE FROM users WHERE id = ANY($1)"),
-    ];
-
-    for (entity, sql) in statements {
-        sqlx::query(sql)
+    for table in &USER_TABLES {
+        sqlx::query(table.delete)
             .bind(seed_ids)
             .execute(&mut *connection)
             .await
             .map_err(|error| {
                 Failure::failed(format!(
-                    "could not delete the seeded {entity}: {}",
+                    "could not delete the seeded {}: {}",
+                    table.name,
                     describe_database_error(&error)
                 ))
             })?;
@@ -2189,6 +2212,12 @@ async fn verify_documented_credentials(
 }
 
 /// `V6`: the delete list names every user table that exists.
+///
+/// The comparison is against [`USER_TABLES`], which is also what `--reset`
+/// executes, so "named" and "deleted" are the same set by construction. A table
+/// that exists in `public` but is absent from the list fails the run and names
+/// the table (A-C-S1-10). The reverse case — a list entry with no table — fails
+/// earlier, when `--reset` executes its statement.
 async fn verify_table_list(connection: &mut PgConnection) -> Result<(), Failure> {
     let tables: Vec<String> = sqlx::query_scalar(
         "SELECT table_name::text FROM information_schema.tables \
@@ -2206,7 +2235,7 @@ async fn verify_table_list(connection: &mut PgConnection) -> Result<(), Failure>
     })?;
 
     for table in tables {
-        if !SEEDED_TABLES.contains(&table.as_str()) {
+        if !USER_TABLES.iter().any(|known| known.name == table) {
             return Err(verification_failure(format!(
                 "V6 delete-list coverage: the table {table:?} is not in the seeder's table list"
             )));
@@ -2848,6 +2877,60 @@ mod tests {
         }
         if SEEDED_USERS.len() != 2 {
             return Err("the seeder must always create exactly two accounts".to_string());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn the_user_table_list_is_the_reset_order_and_each_statement_targets_it() -> Result<(), String>
+    {
+        // The order is foreign-key safe and is what `--reset` executes.
+        // `verify_table_list` reads the same list, so this test is what keeps
+        // the list itself honest: a new table must arrive with its own
+        // statement, in a position whose children precede it.
+        const EXPECTED: [&str; 11] = [
+            "application_events",
+            "embeddings",
+            "expense_items",
+            "expense_claims",
+            "job_applications",
+            "companies",
+            "refresh_sessions",
+            "notes",
+            "tasks",
+            "projects",
+            "users",
+        ];
+
+        let names: Vec<&str> = USER_TABLES.iter().map(|table| table.name).collect();
+        if names != EXPECTED {
+            return Err(format!(
+                "the reset order is {names:?}, not the documented {EXPECTED:?}"
+            ));
+        }
+
+        let mut seen = std::collections::HashSet::new();
+        for table in &USER_TABLES {
+            if !seen.insert(table.name) {
+                return Err(format!("the table {:?} appears twice", table.name));
+            }
+
+            let prefix = format!("DELETE FROM {} ", table.name);
+            if !table.delete.starts_with(&prefix) {
+                return Err(format!(
+                    "the statement for {:?} does not target it: {:?}",
+                    table.name, table.delete
+                ));
+            }
+
+            // One bound parameter, the seeded ids, and no interpolation.
+            if table.delete.matches("$1").count() != 1 {
+                return Err(format!(
+                    "the statement for {:?} does not bind exactly one parameter: {:?}",
+                    table.name, table.delete
+                ));
+            }
         }
 
         Ok(())
