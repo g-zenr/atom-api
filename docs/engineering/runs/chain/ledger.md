@@ -121,7 +121,7 @@ step deliberately, and the rows are renamed only between runs.
 | D3.S3 | Seeder: companies and applications | **done** | `57788a6` | Landed in `J1` as `S3`: companies 5/12/18, applications 1/20/40, events 1/50/100. |
 | D4 | Local ML | **done** (rows 10-11 outstanding) | `bfd1288`, `c28b353`, `a4d33a3`, `ba198ff`, `ba91008` | Spike measured, ADR finalised, migration `0006`, module, three operations, degradation and seeder flag. 481 tests at the close-out; **`ML-R02` is unmet** (no Burn encoder) so the feature is `Implemented`, not `Verified`. |
 | D4.S4 | Seeder: embeddings | **done** | `ba198ff` | `--with-embeddings` uses the deterministic embedder, never a network call; `--reset` purges `embeddings`; `SEEDED_TABLES` names the table. |
-| D5 | Hardening and handover | **in progress** (H1/H2/H4 done; H3/H5/H6 outstanding) | `c2f9bad` | Whole-surface contract sweep and ownership sweep, plus the frontend handover. 504 tests. Performance (H3), the final review (H5) and the close (H6) did not run. |
+| D5 | Hardening and handover | **done** (H5 verdict outstanding; S5 needs a CI run) | `c2f9bad`..`d90cb6d` | `H1` contract sweep (51/51), `H2` ownership sweep (32/32), `H3` performance (`docs/database/performance.md`, 20k rows), `H4` frontend handover, `H6` tag `phase-2-complete`. `H5`: one verdict issued, FAIL on documentation, all findings fixed, re-verdict not yet recorded. `S5` needs a CI database. |
 | D5.S5 | Seeder: CI smoke and final proof | pending | — | Runs the seeder against the CI database and asserts the counts. |
 
 A day is one paste of [prompt.md](prompt.md). A chain is one row above.
