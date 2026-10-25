@@ -62,6 +62,12 @@ pub async fn search_notes(
 ///
 /// A match has no lexical fallback: an unavailable model is `409`, and an
 /// inference that overruns `ml.timeout_seconds` is `408`. Neither is a `500`.
+///
+/// `matches` holds only hits with a **positive** score, the same rule `semantic`
+/// and `hybrid` apply: a note whose vector is orthogonal or opposed to the
+/// application shares no direction with it and is not a match. When nothing
+/// qualifies the answer is `200` with `matches: []`, not a `0.0` hit and not a
+/// `404`: the application exists, the ranking simply found nothing.
 #[utoipa::path(
     post,
     path = "/api/v1/job-applications/{application_id}/match",
@@ -70,7 +76,7 @@ pub async fn search_notes(
     params(("application_id" = Uuid, Path, description = "Job application identifier")),
     request_body = MatchRequest,
     responses(
-        (status = 200, description = "The notes ranked against the application, best first.", body = crate::ml::dto::MatchResponse),
+        (status = 200, description = "The notes ranked against the application, best first. `matches` contains only hits with a positive score, and is empty when no note qualifies.", body = crate::ml::dto::MatchResponse),
         (status = 400, description = "The request is malformed.", body = crate::error::ErrorBody),
         (status = 401, description = "Authentication is required.", body = crate::error::ErrorBody),
         (status = 404, description = "The resource does not exist or is not owned by the caller.", body = crate::error::ErrorBody),

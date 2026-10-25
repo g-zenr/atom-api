@@ -65,6 +65,30 @@ implementations, the table, the endpoints with their status codes, the
 degradation rule, the test names and the files each agent owned. Everything in it
 is built.
 
+**Correction (2026-10-25, the H3 performance measurement).** The semantic search
+was measured at `dim = 384` over 20 000 rows, and it is neither as cheap nor as
+well-bounded as §4.3 and §7 said. The numbers, the plan and the thresholds are
+in [`../../database/performance.md`](../../database/performance.md) §3.5, §4 and
+§6; the decision is
+[`ADR-0010`](../../decisions/ADR-0010-semantic-search-scan-bound.md). Three
+sentences in this document changed because of it:
+
+- **§4.3** said the scan "is linear in the caller's embedding count" and that at
+  a personal corpus size "that is milliseconds". It is 177–292 ms at 8 100 live
+  vectors, and its SQL cost is linear in the **table**, because above ~4 000
+  vectors per owner the planner stops using
+  `embeddings_user_id_source_type_model_id_idx` and scans.
+- **§7** and **§11** now name the volume up to which that cost is accepted
+  (100 000 rows in `embeddings`, 50 000 note vectors for one owner) instead of
+  saying only that it is "bounded by the corpus".
+- **The `work_mem` cliff is operational, not architectural**: the sort spills at
+  ~2 700 vectors with the measured 4 MB, and the same statement then costs 5×.
+  It is recorded in
+  [`../../architecture/deployment.md`](../../architecture/deployment.md) §7.1.
+
+Nothing else about the feature changes. The modes, the degradation rule, the
+storage, the ownership predicates and the contract are as they were.
+
 ## 1. Responsibilities
 
 | Module | Responsibility | Exists |
@@ -345,9 +369,34 @@ POST /notes/search   {"query":"…","mode":"semantic"}
   └─ 200
 ```
 
-The scan is linear in the caller's embedding count. At a personal corpus size
-that is milliseconds; it is not an indexed nearest-neighbour query, and §9 of
-the specification says so.
+The scan is exact, and it is the feature's one unbounded path. Its measured cost
+at `dim = 384` is **177–292 ms** for 8 100 live note vectors in a 20 000-row
+table, and the plan is a parallel sequential scan plus an `external merge` sort —
+not the 6–13 ms bitmap scan that
+[`schema.md`](../../database/schema.md) §11.6 measured at `dim = 2`
+([`performance.md`](../../database/performance.md) §3.5, §6).
+
+Two properties follow from the measurement, and both correct earlier text in this
+document:
+
+- **The SQL cost is linear in the `embeddings` table, not in the caller's
+  vectors.** Above about 4 000 note vectors per owner the planner stops choosing
+  `embeddings_user_id_source_type_model_id_idx`, because the `vector` column is
+  in neither index and an index scan would fetch every matching row from a 39 MB
+  heap at random. The other owner's rows are read inside the executor and never
+  returned; ownership is unchanged
+  ([`performance.md`](../../database/performance.md) §5.2,
+  [`ADR-0005`](../../decisions/ADR-0005-ownership-enforced-in-sql.md)).
+- **The request's memory is linear in the caller's vectors.** A 384-element
+  `REAL[]` is 1 536 bytes, so 8 100 vectors is ~12 MB held in `rank`'s input
+  until the sort is done, per concurrent request.
+
+`pagination.total` counts every scored row, so the statement cannot be narrowed
+to one page: an exact total needs every vector. `semantic` is therefore not an
+indexed nearest-neighbour query, and §9 of the specification says so. Its bound
+is not a configuration value either: the volume up to which this cost is
+accepted, and what is done past it, is
+[`ADR-0010`](../../decisions/ADR-0010-semantic-search-scan-bound.md).
 
 ### 4.4 Matching
 
@@ -466,12 +515,19 @@ It did, until
 rule on the grounds that its justification was false and that it left the work
 bound unbounded above.
 
-**`semantic` mode is the exception, and it is bounded by the corpus, not by
-these settings.** It scores every embedding the caller has
+**`semantic` mode is the exception, and it is bounded by the volume of the
+table, not by these settings.** It scores every embedding the caller has
 ([`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) §4), so
 `candidate_limit` does not apply to it and `ml.timeout_seconds` bounds only its
 query embed. That is the accepted cost of having no vector index, and it is a
-limitation of §11, not a gap in the validation.
+limitation of §11, not a gap in the validation. It is also the one path where
+the measurement, not the configuration, sets the limit: 177–292 ms for 8 100
+vectors at 20 000 rows, and acceptable while `embeddings` holds fewer than
+100 000 rows and no owner holds more than 50 000 note vectors
+([`ADR-0010`](../../decisions/ADR-0010-semantic-search-scan-bound.md)). An
+operator who raises `work_mem` changes this number by up to 5× without changing
+anything in this table; that is
+[`../../architecture/deployment.md`](../../architecture/deployment.md) §7.1.
 
 **The reindex is bounded by the request timeout, not by `ml.timeout_seconds`.**
 It embeds one text per source that is not already current, so its wall clock is
@@ -566,6 +622,9 @@ The reason is in the same ADR amendment.
 
 - [`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) — local,
   pure-Rust inference with Burn and `flex`, and `REAL[]` instead of pgvector.
+- [`ADR-0010`](../../decisions/ADR-0010-semantic-search-scan-bound.md) — the
+  measured cost of `semantic` search, accepted up to a named volume, and why it
+  is not given an index.
 - [`ADR-0005`](../../decisions/ADR-0005-ownership-enforced-in-sql.md) —
   ownership as a SQL predicate, including for derived data.
 - [`ADR-0001`](../../decisions/ADR-0001-modular-monolith.md) — why inference
@@ -578,6 +637,22 @@ The reason is in the same ADR amendment.
 - **No index, so no recall beyond the candidate set.** The hybrid mode cannot
   find a note the lexical query missed. This is the price of avoiding the
   extension, and it is stated in the specification.
+- **`semantic` search costs `O(rows in embeddings)` and holds `O(the owner's
+  vectors)` of memory.** 177–292 ms for 8 100 vectors at 20 000 rows, with the
+  plan reading the whole table above ~4 000 vectors per owner. The bound is
+  volume, not configuration: accepted to 100 000 rows in `embeddings` and 50 000
+  note vectors for one owner, then revisited
+  ([`ADR-0010`](../../decisions/ADR-0010-semantic-search-scan-bound.md)). The
+  unhelpful description this replaces — "linear in the caller's embedding
+  count" — is what made the cost look safe before it was measured.
+- **The sort, not the scan, sets the first cliff.** With `work_mem = 4 MB` the
+  `ORDER BY source_id` spills at ~2 700 vectors and the same statement goes from
+  14–16 ms to 75–123 ms. It is a database setting
+  ([`../../architecture/deployment.md`](../../architecture/deployment.md) §7.1).
+  The `ORDER BY` itself is redundant — `rank` re-sorts with a total order, so the
+  SQL order never reaches the response — which makes its removal the first thing
+  to try when the volume line is approached; `ADR-0010` names it and does not
+  authorise it.
 - **The candidate set is the *newest* lexical matches, not the best ones.** The
   candidate query reuses the notes order, `created_at DESC, id DESC`, because
   that is the order `lexical` mode publishes and a second ordering would make

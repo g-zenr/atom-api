@@ -874,18 +874,19 @@ column comparison rather than an array length computed per row.
 | Name | Definition | Why |
 | ---- | ---------- | --- |
 | `embeddings_user_id_source_model_unique_idx` | `UNIQUE INDEX (user_id, source_type, source_id, model_id)` | The re-embed conflict target (`ML-R04`, `ML-R07`), the delete-by-source lookup, and any owner-scoped scan: `user_id` is the leading column, so a query that names another owner cannot use it to read this owner's rows. |
-| `embeddings_user_id_source_type_model_id_idx` | `INDEX (user_id, source_type, model_id)` | The search pipeline filters the caller's rows by source type and model id before it reads the vectors (`ML-R05`). The unique index cannot seek on `model_id` before `source_id`, so this is a different access path, not a duplicate. |
+| `embeddings_user_id_source_type_model_id_idx` | `INDEX (user_id, source_type, model_id)` | The search pipeline filters the caller's rows by source type and model id before it reads the vectors (`ML-R05`). The unique index cannot seek on `model_id` before `source_id`, so this is a different access path, not a duplicate. It is the plan the semantic scan uses up to about 4 000 note vectors per owner; above that the planner scans the table instead, because the `vector` column is in neither index (*Measured access paths* below, and [`performance.md`](performance.md) §4). |
 
 `(user_id, source_type)` is a prefix of both indexes. A lookup by `source_id`
 alone is always written with `user_id` in front of it, because every statement
 is owner-scoped.
 
-**Measured access paths.** The two indexes were exercised on a scratch database
-created from `0001`-`0006` (PostgreSQL 18.1), filled with 40 000 synthetic rows
-of `dim = 2` for one owner and analysed. Every statement shape the feature is
-written against was an index scan, not a sequential scan. The plan and the
-buffer counts were identical on three runs; the durations moved by a factor of
-two between them, so they are given as a range rather than as a figure:
+**Measured access paths.** Two measurements exist, and they disagree about the
+**plan**, because they were taken at different vector dimensions. This section
+records both; the second is authoritative for what the feature costs.
+
+The first was taken on a scratch database created from `0001`-`0006`
+(PostgreSQL 18.1), filled with 40 000 synthetic rows of `dim = 2` for one owner
+and analysed:
 
 | Statement shape | Plan | Buffers | Duration |
 | --------------- | ---- | ------- | -------- |
@@ -894,22 +895,59 @@ two between them, so they are given as a range rather than as a figure:
 | The reindex skip check: the full unique tuple | `Index Scan using embeddings_user_id_source_model_unique_idx` | 4 shared | 0.03-0.05 ms |
 | The purge in the source delete: `user_id`, `source_type`, `source_id` | `Index Scan using embeddings_user_id_source_model_unique_idx`, the three-column prefix | 6 shared | 0.05-0.06 ms |
 
-Two honest qualifications. On the empty table the planner chooses a sequential
-scan, because a handful of rows are cheaper to read than an index; the plans
-above are what the same statements become once there are rows to find. And the
-corpus is `dim = 2` against the model's 384: the buffer and row counts are the
-finding, not the byte size of the array. The 6-13 ms of the semantic scan is the
-honest cost of the design in §9 of the specification: it is a linear scan of the
-caller's rows, not an indexed nearest-neighbour query, and it is a scan *of the
-owner's rows* rather than of the table.
+The second measurement is [`performance.md`](performance.md) §3.5: 20 000 rows at
+`dim = 384`, the dimension the model actually produces, split between two owners,
+`work_mem = 4 MB`. The heap is **39 MB**, not the few hundred kilobytes that
+`dim = 2` produces, and that is what changes the plan:
+
+| Statement | `dim = 2`, 40 000 rows | `dim = 384`, 20 000 rows |
+| --------- | ---------------------- | ------------------------ |
+| The semantic scan | `Bitmap Index Scan`, 17 index of 834 buffers, 6.3-12.8 ms for 20 001 rows | **`Parallel Seq Scan` + `external merge` sort**, 5 387-6 135 shared + 983-1 573 temp buffers, **177-292 ms** for 8 100 live rows |
+| The search pipeline (`source_id = ANY(…)`) | `Index Scan`, 4 buffers | Not re-measured; it reads at most `ml.candidate_limit` rows by key, so the heap size does not change its shape |
+| The reindex skip check | `Index Scan`, 4 buffers | Not re-measured; keyed by the full unique tuple |
+| The purge in the source delete | `Index Scan`, 6 buffers | Not re-measured; keyed by the three-column prefix |
+
+**The `dim = 2` figure does not generalise, and this section used to say it
+did.** The `vector` column is in neither index, so a scan that uses
+`embeddings_user_id_source_type_model_id_idx` must then fetch every matching row
+from the heap — at `dim = 2` that heap is tiny and the bitmap plan wins; at
+`dim = 384` it is 39 MB of array data and the planner prefers one sequential
+pass. The transition is visible in [`performance.md`](performance.md) §4: the
+bitmap scan is still chosen at **3 000** note vectors per owner and is **not** at
+**4 000**. The table above is a measurement of a statement shape; it is not a
+measurement of what semantic search costs.
+
+Three honest qualifications:
+
+1. On the empty table the planner chooses a sequential scan, because a handful of
+   rows are cheaper to read than an index. The plans above are what the same
+   statements become once there are rows to find.
+2. At `dim = 384`, from about 4 000 note vectors per owner upward, the semantic
+   scan is a **sequential scan of the whole `embeddings` table** and returns only
+   the caller's rows. It reads other owners' rows physically; it never returns
+   one. That distinction is a performance property, not an ownership defect —
+   the predicate is in the statement, and [`performance.md`](performance.md)
+   §5.2 records the control query that proves it.
+3. The semantic scan's **first** cliff is not the index but the `ORDER BY` in
+   `NOTE_VECTORS`: the sort spills out of `work_mem` at about 2 700 vectors per
+   owner and the statement goes from 14-16 ms to 75-123 ms. That is a server
+   setting, not a schema property; the operational note is
+   [`../architecture/deployment.md`](../architecture/deployment.md) §7.1.
+
+The cost of the semantic scan, and the volume up to which it is accepted, are
+[`ADR-0010`](../decisions/ADR-0010-semantic-search-scan-bound.md). The table
+above exists to support it, not to replace it.
 
 The two indexes are not duplicates of each other. The unique index is the
 arbiter for `ON CONFLICT (user_id, source_type, source_id, model_id)` and serves
 every lookup that names a source; the three-column index is the one the semantic
-scan uses, because it can seek on `model_id` where the unique index cannot. A
-query with no `source_id` predicate — semantic mode — is the statement that
-needs the second one, and dropping it turns that scan into a filter over every
-embedding the owner has.
+scan uses **while it is chosen**, because it can seek on `model_id` where the
+unique index cannot. A query with no `source_id` predicate — semantic mode — is
+the statement that needs the second one: below the threshold it is the access
+path, and dropping it would turn that scan into a filter over every embedding the
+owner has. Above the threshold the planner already scans the table, so the index
+buys nothing for that statement there — it is 160 kB and it is still the right
+index to keep, but it is not what makes the volume scan cheap.
 
 #### Ownership and deletion
 

@@ -23,8 +23,15 @@
 //! * peak RSS, before and after the run;
 //! * the output's L2 norm (it must be 1: ADR-0008 §9);
 //! * bit-exact determinism for one input and a difference for another;
-//! * a five-text, three-query retrieval check — the smallest evidence that the
-//!   vectors mean something. It is **not** `ML-R09`'s fifteen-query evaluation.
+//! * the `ML-R09` quality evaluation — fifteen query/expected-text pairs planted
+//!   as embeddings of the expected texts, the observed rank and cosine of every
+//!   expected text, the pass count, the top-1 cosine of each query against a
+//!   fixed threshold ladder, and a negative control that no planted text
+//!   answers. It reports the numbers; it does not tune a threshold to them.
+//!
+//! A query the encoder gets wrong is printed as `MISS` and counted as a miss.
+//! That is a finding about the model, and suppressing it by choosing easier
+//! pairs would make the table worthless.
 //!
 //! The numbers this prints are what `ml.timeout_seconds` and
 //! `ml.candidate_limit` have to be judged against.
@@ -43,29 +50,92 @@ const DIMENSION: usize = 384;
 /// The model file the development machine has, if `ATOM_ML_MODEL` is unset.
 const DEFAULT_MODEL: &str = r"C:\Users\Renz\.cache\huggingface\hub\models--sentence-transformers--all-MiniLM-L6-v2\snapshots\c9745ed1d9f207416be6d2e6f8de32d1f16199bf\model.safetensors";
 
-/// Five short note-shaped texts and the query each one should answer.
-const EVALUATION: [(&str, &str); 5] = [
-    (
-        "The Berlin conference trip was reimbursed in full.",
-        "How do I file an expense claim for travel?",
-    ),
-    (
-        "The quarterly estimated tax payment is due next week.",
-        "When do I need to pay my taxes?",
-    ),
-    (
-        "Interview notes from the platform infrastructure team.",
-        "What did the infrastructure team say in the interview?",
-    ),
-    (
-        "We need to buy a standing desk and a monitor arm.",
-        "Which desk should I buy for the home office?",
-    ),
-    (
-        "Design ideas for the personal workspace search interface.",
-        "Ideas for improving search in my notes app",
-    ),
+/// One evaluation pair: the query a person types, and the note it must find.
+///
+/// The query is a **paraphrase**, not a fragment of the text: a pair whose query
+/// shares its wording with the note would be answered by any lexical overlap
+/// and would measure nothing. The pairs are ordinary workspace notes, chosen
+/// because they are what the product stores, not because they are easy.
+struct Pair {
+    query: &'static str,
+    expected: &'static str,
+}
+
+/// The fifteen `ML-R09` pairs, planted as the embeddings of their expected
+/// texts.
+const EVALUATION: [Pair; 15] = [
+    Pair {
+        query: "How do I claim back my travel expenses?",
+        expected: "The Berlin conference trip was reimbursed in full once I submitted the receipts.",
+    },
+    Pair {
+        query: "When do I need to pay my taxes?",
+        expected: "The quarterly estimated tax payment is due on the fifteenth of the month.",
+    },
+    Pair {
+        query: "What did the infrastructure team ask in the interview?",
+        expected: "Interview notes from the platform infrastructure team: they asked about Kubernetes and incident response.",
+    },
+    Pair {
+        query: "Which furniture should I buy for working from home?",
+        expected: "We need to buy a standing desk and a monitor arm for the home office.",
+    },
+    Pair {
+        query: "Ideas for improving search in my notes app",
+        expected: "Design ideas for the personal workspace search interface: three modes and a relevance score.",
+    },
+    Pair {
+        query: "How do I safely deploy a canary release?",
+        expected: "Canary release checklist: roll out to one percent of traffic, watch the error rate, then promote.",
+    },
+    Pair {
+        query: "Who is on call this weekend?",
+        expected: "On-call rotation: the platform team takes the week and the data team takes the weekend.",
+    },
+    Pair {
+        query: "How should I write a postmortem for an outage?",
+        expected: "Incident postmortem template: timeline, root cause, and the action items that follow.",
+    },
+    Pair {
+        query: "How do I negotiate a higher salary offer?",
+        expected: "Salary negotiation: the recruiter's first offer is below the band, so ask for the range.",
+    },
+    Pair {
+        query: "What equipment do I need to work from home comfortably?",
+        expected: "Remote work setup: a monitor, a proper chair, and a separate room for calls.",
+    },
+    Pair {
+        query: "How do I change a table without downtime?",
+        expected: "Database migration plan: add the column as nullable, backfill it, then enforce the constraint.",
+    },
+    Pair {
+        query: "How do I stop clients from overloading the API?",
+        expected: "API rate limiting: a token bucket per key with a burst of twenty requests.",
+    },
+    Pair {
+        query: "Which metrics should the monitoring dashboard show?",
+        expected: "Observability dashboard: latency, error rate and saturation on one screen.",
+    },
+    Pair {
+        query: "What refactoring work is still outstanding?",
+        expected: "Technical debt backlog: the checkout module needs a rewrite before the next release.",
+    },
+    Pair {
+        query: "What evidence do I need for a promotion?",
+        expected: "Promotion case: evidence of scope, impact, and the last two review cycles.",
+    },
 ];
+
+/// The fixed threshold ladder the run reports every query against.
+///
+/// These are candidates, not a tuning grid: the point of the table is to show
+/// which of them the data separates, so a number can be chosen from evidence
+/// rather than invented. The ladder is not adjusted after a run.
+const CANDIDATE_THRESHOLDS: [f64; 7] = [0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50];
+
+/// A query unrelated to every planted text: the control that decides whether a
+/// threshold is a threshold or a formality.
+const NEGATIVE_CONTROL: &str = "the mating call of a humpback whale";
 
 fn main() -> ExitCode {
     println!("ATOM M3 bench — Burn 0.22 / flex / CPU / six-layer MiniLM");
@@ -125,7 +195,7 @@ fn run() -> Result<(), String> {
 
     measure_forward_pass(&embedder)?;
     check_determinism(&embedder)?;
-    check_quality(&embedder)?;
+    evaluate_retrieval(&embedder)?;
 
     println!();
     println!("peak RSS at the end: {}", rss_label());
@@ -248,59 +318,227 @@ fn check_determinism(embedder: &BurnEmbedder) -> Result<(), String> {
     }
 }
 
-/// The smallest quality evidence: embed five texts and three queries, and check
-/// whether each query's nearest neighbour is the text a person would expect.
-fn check_quality(embedder: &BurnEmbedder) -> Result<(), String> {
+/// The `ML-R09` quality evaluation: fifteen queries against fifteen planted
+/// texts, the rank every expected text reached, and the threshold evidence.
+fn evaluate_retrieval(embedder: &BurnEmbedder) -> Result<(), String> {
     println!();
-    println!("quality: five texts, each query's nearest neighbour");
+    println!("ML-R09 quality — fifteen queries against the real encoder");
+    println!();
 
-    let texts: Vec<&str> = EVALUATION.iter().map(|(text, _)| *text).collect();
-    let mut vectors = Vec::with_capacity(texts.len());
-    for text in &texts {
-        vectors.push(embedder.embed(text).map_err(|error| error.to_string())?);
+    let planted: Vec<&str> = EVALUATION.iter().map(|pair| pair.expected).collect();
+    let mut corpus = Vec::with_capacity(planted.len());
+    for text in &planted {
+        corpus.push(
+            embedder
+                .embed(text)
+                .map_err(|error| format!("cannot embed a planted text: {error}"))?,
+        );
     }
 
-    let mut matched = 0;
-    let mut total = 0;
+    println!(
+        "corpus: {} planted texts, dimension {}",
+        planted.len(),
+        embedder.dimension()
+    );
+    println!();
+    println!(
+        "{:>3}  {:<40}  {:<40}  {:>5}  {:>8}  {:>8}  result",
+        "#", "query", "expected text", "rank", "cosine", "top-1"
+    );
 
-    for (index, (_, query)) in EVALUATION.iter().enumerate() {
-        let query_vector = embedder.embed(query).map_err(|error| error.to_string())?;
+    let mut passes = 0_usize;
+    let mut top_scores: Vec<f64> = Vec::with_capacity(EVALUATION.len());
+    let mut misses: Vec<String> = Vec::new();
 
-        let mut ranked: Vec<(f64, &str)> = vectors
+    for (index, pair) in EVALUATION.iter().enumerate() {
+        let query = embedder
+            .embed(pair.query)
+            .map_err(|error| format!("cannot embed the query {:?}: {error}", pair.query))?;
+        let ranked = rank_planted(&corpus, &query);
+
+        let Some(&(top_index, top)) = ranked.first() else {
+            return Err("the ranking over the planted corpus is empty".to_string());
+        };
+
+        let expected_index = planted
             .iter()
-            .zip(&texts)
-            .map(|(vector, text)| {
-                cosine(&query_vector, vector)
-                    .map(|score| (score, *text))
-                    .unwrap_or((f64::NEG_INFINITY, *text))
-            })
-            .collect();
-        ranked.sort_by(|left, right| right.0.total_cmp(&left.0));
+            .position(|text| *text == pair.expected)
+            .ok_or_else(|| format!("the expected text of query {} is not planted", index + 1))?;
 
-        let (score, nearest) = ranked[0];
-        let expected = EVALUATION
-            .get(index)
-            .map(|(text, _)| *text)
-            .unwrap_or_default();
-        let hit = nearest == expected;
+        let Some(position) = ranked
+            .iter()
+            .position(|(planted_index, _)| *planted_index == expected_index)
+        else {
+            return Err(format!(
+                "the expected text of query {} did not survive the ranking",
+                index + 1
+            ));
+        };
+
+        let Some(&(_, value)) = ranked.get(position) else {
+            return Err("the ranked position is out of range".to_string());
+        };
+
+        let hit = position == 0 && top_index == expected_index;
         if hit {
-            matched += 1;
+            passes += 1;
+        } else {
+            misses.push(format!(
+                "query {:?}: rank 1 was {:?} at {top:.4}, expected {:?} at rank {} ({value:.4})",
+                pair.query,
+                planted.get(top_index).copied().unwrap_or_default(),
+                pair.expected,
+                position + 1
+            ));
         }
-        total += 1;
+
+        top_scores.push(top);
 
         println!(
-            "query {:?}\n  nearest: {:?} (cosine {score:.4})\n  expected: {:?} — {}",
-            query,
-            truncate(nearest, 60),
-            truncate(expected, 60),
-            if hit { "match" } else { "MISS" }
+            "{:>3}  {:<40}  {:<40}  {:>5}  {:>8.4}  {:>8.4}  {}",
+            index + 1,
+            truncate(pair.query, 40),
+            truncate(pair.expected, 40),
+            position + 1,
+            value,
+            top,
+            if hit { "pass" } else { "MISS" }
         );
     }
 
     println!();
-    println!("quality: {matched}/{total} queries returned the expected nearest text");
+    println!("pass: {passes}/{} at rank 1", EVALUATION.len());
+
+    let min_positive = top_scores
+        .iter()
+        .copied()
+        .reduce(f64::min)
+        .ok_or_else(|| "no query was scored".to_string())?;
+    let max_positive = top_scores
+        .iter()
+        .copied()
+        .reduce(f64::max)
+        .ok_or_else(|| "no query was scored".to_string())?;
+    let mean_positive = top_scores.iter().sum::<f64>() / top_scores.len() as f64;
+
+    println!("top-1 cosine: min {min_positive:.4}, max {max_positive:.4}, mean {mean_positive:.4}");
+
+    // The negative control is embedded and ranked exactly like a query, so its
+    // top-1 is the score a threshold has to sit above.
+    let control_vector = embedder
+        .embed(NEGATIVE_CONTROL)
+        .map_err(|error| format!("cannot embed the negative control: {error}"))?;
+    let control_ranked = rank_planted(&corpus, &control_vector);
+    let Some(&(control_index, control_top)) = control_ranked.first() else {
+        return Err("the negative control produced no ranking".to_string());
+    };
+
+    println!();
+    println!("threshold behaviour — each query's top-1 against a fixed ladder");
+    println!(
+        "{:>9}  {:>13}  {:>13}  separates",
+        "threshold", "queries above", "control above"
+    );
+
+    let mut supported: Option<f64> = None;
+    for threshold in CANDIDATE_THRESHOLDS {
+        let above = top_scores
+            .iter()
+            .filter(|score| **score > threshold)
+            .count();
+        let control_above = control_top > threshold;
+        let separates = above == EVALUATION.len() && !control_above;
+
+        if separates {
+            supported = Some(threshold);
+        }
+
+        println!(
+            "{:>9.2}  {:>6}/{}  {:>13}  {}",
+            threshold,
+            above,
+            EVALUATION.len(),
+            if control_above { "yes" } else { "no" },
+            if separates { "yes" } else { "no" }
+        );
+    }
+
+    println!();
+    println!("negative control: {NEGATIVE_CONTROL:?}");
+    println!(
+        "  nearest planted text: {:?}",
+        truncate(planted.get(control_index).copied().unwrap_or_default(), 60)
+    );
+    println!("  top-1 cosine: {control_top:.4}");
+
+    if control_top > 0.0 {
+        println!(
+            "  the 0.0 floor does not remove it: its similarity is positive, so only a threshold excludes it"
+        );
+    } else {
+        println!("  the 0.0 floor removes it: its similarity is at or below zero");
+    }
+
+    match supported {
+        Some(threshold) => println!(
+            "  against {threshold:.2}: {}",
+            if control_top > threshold {
+                "ABOVE the threshold — the control fails"
+            } else {
+                "below the threshold — the control passes"
+            }
+        ),
+        None => println!("  no candidate threshold separates it from the positives"),
+    }
+
+    println!();
+    println!(
+        "separation band: control top-1 {control_top:.4} < threshold < lowest positive top-1 {min_positive:.4}"
+    );
+    match supported {
+        Some(threshold) => println!(
+            "threshold supported by this run: {threshold:.2} — all {} positives are above it and the control is below it",
+            EVALUATION.len()
+        ),
+        None => println!(
+            "threshold supported by this run: none of the candidates — no ladder value lies inside the band"
+        ),
+    }
+
+    if !misses.is_empty() {
+        println!();
+        println!(
+            "the encoder missed {} of {} queries:",
+            misses.len(),
+            EVALUATION.len()
+        );
+        for miss in &misses {
+            println!("  {miss}");
+        }
+    }
 
     Ok(())
+}
+
+/// Ranks every planted vector against one query, highest cosine first.
+///
+/// The order is total — the score, then the planted index — so a tie is broken
+/// the way the service breaks one and a reported rank is reproducible.
+fn rank_planted(corpus: &[Vec<f32>], query: &[f32]) -> Vec<(usize, f64)> {
+    let mut scored: Vec<(usize, f64)> = corpus
+        .iter()
+        .enumerate()
+        .filter_map(|(index, vector)| cosine(query, vector).map(|value| (index, value)))
+        .collect();
+
+    scored.sort_by(|left, right| {
+        right
+            .1
+            .total_cmp(&left.1)
+            .then_with(|| left.0.cmp(&right.0))
+    });
+
+    scored
 }
 
 /// One hundred short, note-shaped texts, the same shape the spike used so the

@@ -343,6 +343,15 @@ impl MlService {
     /// A match has no lexical fallback, so an unavailable model is a `409` and
     /// an inference that overruns the budget is a `408`: nothing honest can be
     /// returned in either case.
+    ///
+    /// The same score floor `semantic` and `hybrid` apply applies here: a note
+    /// whose similarity is at or below zero is **not** a match ([`is_match`]),
+    /// exactly as in a search. Otherwise an application the caller's corpus
+    /// shares no direction with would be answered with a `0.0` hit, which is
+    /// the one shape this endpoint must not publish. The filter runs before the
+    /// `limit`, so a dropped note does not consume one of the requested slots,
+    /// and `matches: []` with `200` is the answer when nothing qualifies — a
+    /// match has no envelope, and an empty list is well-formed.
     pub async fn match_application(
         &self,
         owner: Uuid,
@@ -380,8 +389,7 @@ impl MlService {
             .note_vectors(owner, self.embedder.model_id())
             .await?;
 
-        let mut scored = rank(&stored, &vector, self.embedder.dimension());
-        scored.truncate(usize::try_from(limit).unwrap_or(0));
+        let scored = ranked_matches(rank(&stored, &vector, self.embedder.dimension()), limit);
 
         let ids: Vec<Uuid> = scored.iter().map(|hit| hit.id).collect();
         let notes = self.notes.find_many_owned(owner, &ids).await?;
@@ -615,6 +623,23 @@ fn slice(scored: Vec<ScoredNote>, limit: i64, offset: i64) -> Vec<ScoredNote> {
     scored.into_iter().skip(start).take(size).collect()
 }
 
+/// The notes a match publishes: the hits that carry a similarity, up to `limit`.
+///
+/// The filter precedes the cut deliberately. `limit` bounds the number of
+/// **matches**, so a note that is dropped must not consume a slot another note
+/// would have filled; truncating first would answer a shorter list than the
+/// request allows for no reason the client can see.
+fn ranked_matches(scored: Vec<ScoredNote>, limit: i64) -> Vec<ScoredNote> {
+    let mut matched: Vec<ScoredNote> = scored
+        .into_iter()
+        .filter(|hit| is_match(hit.score))
+        .collect();
+
+    matched.truncate(usize::try_from(limit).unwrap_or(0));
+
+    matched
+}
+
 /// Rounds a similarity to the published four decimals.
 fn round_score(value: f64) -> f64 {
     (value * SCORE_SCALE).round() / SCORE_SCALE
@@ -706,8 +731,9 @@ pub fn score(left: &[f32], right: &[f32]) -> Option<f64> {
 /// (`docs/features/ml/testing.md` §2.7 records the `ML-R09` control that
 /// exposed it).
 ///
-/// `semantic` and `hybrid` drop these hits. `lexical` does not call this and is
-/// unchanged: it has no score, and every full-text match is a real hit.
+/// `semantic`, `hybrid` and `match` drop these hits. `lexical` does not call
+/// this and is unchanged: it has no score, and every full-text match is a real
+/// hit.
 ///
 /// The cut is exactly zero and deliberately **not** a positive threshold. A
 /// cosine of `0.01` and a cosine of `0.9` come from the same arithmetic, and no
@@ -835,6 +861,72 @@ mod tests {
         assert!(is_match(f64::MIN_POSITIVE));
         assert!(is_match(0.0001));
         assert!(is_match(1.0));
+    }
+
+    #[test]
+    fn a_match_drops_a_zero_scored_note_without_consuming_the_limit() {
+        // The defect this closes: a note whose similarity is zero was published
+        // as a match with `score: 0.0`, which is a confident-looking answer
+        // that says the two texts share nothing.
+        let scored = vec![
+            ScoredNote {
+                id: Uuid::from_u128(1),
+                score: 0.4,
+            },
+            ScoredNote {
+                id: Uuid::from_u128(2),
+                score: 0.0,
+            },
+            ScoredNote {
+                id: Uuid::from_u128(3),
+                score: -0.0,
+            },
+            ScoredNote {
+                id: Uuid::from_u128(4),
+                score: 0.2,
+            },
+            ScoredNote {
+                id: Uuid::from_u128(5),
+                score: 0.1,
+            },
+        ];
+
+        let published = ranked_matches(scored, 2);
+
+        assert_eq!(
+            published.len(),
+            2,
+            "the limit bounds the matches published, not the rows considered"
+        );
+        assert!(
+            published.iter().all(|hit| hit.score > 0.0),
+            "a zero-scored note must never be a match"
+        );
+        assert_eq!(published[0].id, Uuid::from_u128(1));
+        assert_eq!(
+            published[1].id,
+            Uuid::from_u128(4),
+            "the dropped notes must not push a positive note out of the limit"
+        );
+    }
+
+    #[test]
+    fn a_match_with_nothing_above_zero_publishes_an_empty_list() {
+        // `matches: []` with `200` is the honest answer: a match has no
+        // envelope to carry a `total`, and an empty list is well-formed.
+        let scored = vec![
+            ScoredNote {
+                id: Uuid::from_u128(1),
+                score: 0.0,
+            },
+            ScoredNote {
+                id: Uuid::from_u128(2),
+                score: -0.0,
+            },
+        ];
+
+        assert!(ranked_matches(scored, 10).is_empty());
+        assert!(ranked_matches(Vec::new(), 10).is_empty());
     }
 
     #[test]

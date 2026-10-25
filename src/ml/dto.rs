@@ -169,7 +169,10 @@ pub struct MatchHit {
     pub note_id: Uuid,
     /// The note title.
     pub title: String,
-    /// The cosine similarity in `[0,1]`, rounded to four decimals.
+    /// The cosine similarity in `[0,1]`, rounded to four decimals. A published
+    /// match always has a score above zero: a note whose similarity is at or
+    /// below zero carries no resemblance to the application and is not
+    /// returned.
     pub score: f64,
 }
 
@@ -181,7 +184,8 @@ pub struct MatchResponse {
     /// The mode that was applied.
     pub mode: MatchMode,
     /// The ranked notes, `score DESC, note id ASC`, bounded by the request's
-    /// `limit`. Not paginated.
+    /// `limit`. Not paginated. Only notes scoring above zero appear, so an
+    /// application nothing resembles answers with an empty list.
     pub matches: Vec<MatchHit>,
 }
 

@@ -1514,12 +1514,19 @@ async fn a_match_ranks_the_callers_notes() {
             "Rust and PostgreSQL experience",
         )
         .await;
+        // Planted with the application's own embedding text, so every note has a
+        // cosine of exactly 1.0 against it. The previous fixture hashed
+        // "note-{index}", which happened to score positive or negative by
+        // accident - and once `match` gained the positive-score floor, two of
+        // the three were dropped and the count assertion failed on a correct
+        // implementation. The similarity is now a property of the fixture, not
+        // a coin flip.
         plant_vector(
             &db,
             user.id,
             "note",
             note_id,
-            &query_vector(&format!("note-{index}")),
+            &query_vector("Backend engineer\nRust, PostgreSQL and a local model"),
         )
         .await;
         embedded.push(note_id.to_string());

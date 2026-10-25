@@ -123,6 +123,11 @@ file.
 | `database.acquire_timeout_seconds` | `5` | `DATABASE_ACQUIRE_TIMEOUT_SECS` | Must not be zero: a zero value would mean "wait forever". |
 | `database.connect_timeout_seconds` | `10` | `DATABASE_CONNECT_TIMEOUT_SECS` | Must not be zero. Without a bound, an unreachable database hangs the process before it binds a port. |
 
+One **server-side** setting belongs to this table's subject but not to this
+table: PostgreSQL's `work_mem` decides whether the semantic search's sort spills,
+and the same statement costs 14–16 ms or 75–123 ms depending on it. The API
+cannot read or set it; it is the operator's, and it is §7.1.
+
 #### The floors that are not settings
 
 Five settings have a bound that a deployment may not cross. The bound is a
@@ -295,13 +300,13 @@ internal:
   every rule in §1.4, where a bad setting is a start-up failure. A model is an
   optional artifact, so its absence is a supported state, not a misconfiguration
   (`ML-R02`, `ML-R06`).
-- **The Burn encoder is implemented and measured (ADR-0008 §12).** `ml.enabled = true` with
-  `ml.backend = flex` still yields the `disabled` embedder, whatever artifacts
-  are present, because the six-layer encoder and the WordPiece tokenizer that
-  [`../features/ml/architecture.md`](../features/ml/architecture.md) §12.3
-  describes do not exist. The endpoints, the storage, the ownership predicates
-  and the degradation rule do, and they are what
-  [`../features/ml/status.md`](../features/ml/status.md) records.
+- **The Burn encoder exists and is measured (ADR-0008 §12.1).** `ml.enabled = true`
+  with `ml.backend = flex` selects the Burn encoder and the WordPiece tokenizer
+  when both artifacts load; a missing or unreadable artifact selects `disabled`
+  with `model_missing`, and start-up still succeeds — the rule above. What
+  remains outstanding is the feature's quality evaluation, not the code path:
+  [`../features/ml/status.md`](../features/ml/status.md) is the record, and the
+  requirement states are not restated here.
 - **Adding one of the seven means all seven places in one change**, as
   [`../../AGENTS.md`](../../AGENTS.md) §4.11 requires: the file in `config/`, the
   typed structure, the loader, the validation, `.env.example`, the reference
@@ -448,6 +453,7 @@ The API does not enforce most of these itself. They are operator obligations.
 | 14 | **Size the pool, the timeouts and the body limit for the deployment.** | The production overlay sets `database.max_connections` to 20 and the request timeout to 30 s. The base files hold the body limit (1 MiB) and the acquire and connect timeouts. Keep the body limit at or below 4 MiB: a larger setting is refused at start-up, because the extractor applies an independent 4 MiB backstop. See §4. |
 | 15 | **Keep the session prune grace at its default, or raise it — never shorten it below the floor.** | `app.sessions.prune_grace_seconds` is the window in which the row of an expired session is kept, so that a token that expired recently is still recognised as *expired*. The floor is one hour. |
 | 16 | **Set the clock-skew allowance to what the hosts actually need.** | `APP_ACCESS_TOKEN_CLOCK_SKEW_SECONDS` is 30 s by default. Hosts that drift by more than that see unexplained `401` responses. |
+| 17 | **Know the database server's `work_mem` before quoting a search latency.** | The `semantic` sort spills above ~2 700 note vectors at 4 MB and the same statement then costs 5× (14–16 ms → 75–123 ms). It is a PostgreSQL setting, not an API setting, and the API cannot read or change it. See §7.1. |
 
 `config/environments/production.toml` exists and is applied whenever
 `APP_ENV=production`. It changes five settings: the log filter, the request
@@ -603,8 +609,9 @@ restart the process.
 | Horizontal | The API is stateless apart from the in-process rate limiter, so several instances can serve the same database. The rate limiter's budget is then multiplied by the number of instances. |
 | Vertical | One Tokio task per connection. The pool size (`database.max_connections`, 10 by default and 20 in the production overlay) bounds the concurrency against the database. |
 | The database | The pool is the bottleneck. `database.acquire_timeout_seconds` bounds how long a request waits for a connection; a request that cannot get one fails with `database_error`. |
-| CPU | The dominant cost is Argon2id, which is deliberately expensive. It is bounded by the password length cap and by the rate limit. |
-| Memory | The connection pool, the in-flight bodies (capped at `APP_MAX_BODY_BYTES` each) and the rate limiter's map, which is swept of expired clients at most once per window and therefore holds only the clients of the last two windows. |
+| The database, semantic search | `semantic` mode adds one statement whose cost is linear in the **`embeddings` table**, not in the caller's result: 177–292 ms for 8 100 vectors at 20 000 rows ([`../database/performance.md`](../database/performance.md) §3.5). `hybrid` is the bounded alternative, capped by `ml.candidate_limit`; `semantic` is bounded by volume rather than by configuration, and [`ADR-0010`](../decisions/ADR-0010-semantic-search-scan-bound.md) accepts that to 100 000 rows. See §7.1 for the one server setting that changes it. |
+| CPU | The dominant cost is Argon2id, which is deliberately expensive. It is bounded by the password length cap and by the rate limit. With `ml.enabled = true` one inference is 88 ms on the reference machine ([`../decisions/ADR-0008-local-pure-rust-ml.md`](../decisions/ADR-0008-local-pure-rust-ml.md) §12.1). |
+| Memory | The connection pool, the in-flight bodies (capped at `APP_MAX_BODY_BYTES` each) and the rate limiter's map, which is swept of expired clients at most once per window and therefore holds only the clients of the last two windows. A `semantic` search additionally holds the caller's vectors in the request: 1 536 bytes each, so ~12 MB at 8 100 vectors, per concurrent request. |
 
 **The rate limiter is the one component that does not scale horizontally.**
 It is per process, in memory, and its key is the peer address of the
@@ -613,6 +620,60 @@ request carries the proxy's address and the budget is shared by every
 caller. A multi-instance deployment therefore needs edge rate limiting. Both
 are recorded in [`../engineering/known-issues.md`](../engineering/known-issues.md)
 KI-001 and KI-003.
+
+### 7.1 The database setting the API depends on: `work_mem`
+
+One PostgreSQL setting changes this API's latency by a factor of five, and it is
+**not** in `config/`. An operator who tunes the API and not the database will
+spend a long time looking in the wrong place.
+
+- **What it affects.** The `semantic` search's statement ends with
+  `ORDER BY e.source_id` over the caller's note vectors, and each row is a
+  384-element `REAL[]` of about 1.5 kB (`NOTE_VECTORS`,
+  [`../../src/ml/repository.rs`](../../src/ml/repository.rs)). 8 100 vectors is
+  about 12 MB of sort input.
+- **The cliff.** With `work_mem = 4 MB` — the value the measurements used — the
+  sort stops fitting at about **2 700 vectors per owner** and becomes an
+  `external merge` with temporary files. Across that point the same statement
+  goes from **14–16 ms to 75–123 ms**
+  ([`../database/performance.md`](../database/performance.md) §4). The
+  177–292 ms at 20 000 rows includes that spill; a deployment with a larger
+  `work_mem` pays less of it.
+- **How to raise it.** Scope it to the API's role or database, not to the
+  server:
+
+  ```sql
+  ALTER ROLE atom SET work_mem = '16MB';
+  ```
+
+  16 MB holds roughly 10 000 vectors of 1.5 kB. `work_mem` is **per sort node
+  per connection**, so a server-wide change multiplies memory for every
+  connection of every application on that server, while the API's own pool is 10
+  connections by default and 20 in the production overlay
+  (`database.max_connections`).
+- **Why there is no `database.work_mem` setting.** It is a property of the
+  database and its host, not of the API's configuration. Issuing a
+  per-transaction `SET work_mem` from the API would be a planner hint with a
+  configuration key in front of it, and it would make latency depend on
+  connection-pool bookkeeping rather than on the server. `AGENTS.md` §4.11's rule
+  does not apply: it governs a value **the API** resolves, and this one is
+  resolved by PostgreSQL.
+- **Record it with any benchmark.** A semantic-search latency quoted without
+  `work_mem` is not reproducible across the spill point.
+  [`../database/performance.md`](../database/performance.md) §2.1 records the
+  server settings for exactly this reason.
+- **It is latency, not behaviour.** The same rows match and the same rows are
+  returned at either setting, and ownership is unaffected. Nothing here is
+  allowed to become a correctness claim.
+- **The sort is removable, and that is a code change.** The statement orders by
+  `source_id`, and the ranking in Rust re-sorts with a total order
+  ([`../../src/ml/service.rs`](../../src/ml/service.rs)), so the `ORDER BY`
+  decides nothing about the response. Removing it is named in
+  [`ADR-0010`](../decisions/ADR-0010-semantic-search-scan-bound.md) and is not
+  authorised by it. Until that change lands, `work_mem` is the knob.
+
+The accepted cost of the semantic scan, and the volume at which this stops being
+acceptable, are [`ADR-0010`](../decisions/ADR-0010-semantic-search-scan-bound.md).
 
 ## 8. What is **not** implemented yet
 

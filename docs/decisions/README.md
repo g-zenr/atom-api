@@ -1,7 +1,7 @@
 # ATOM — architecture decision records
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-25
 > **Owner:** maintained by the `architect` agent
 
 An architecture decision record (ADR) records **one** decision, the options
@@ -121,6 +121,7 @@ and a unique identifier, and that every relative link in the tree resolves.
 | [ADR-0007](ADR-0007-money-representation.md) | Money is `NUMERIC(19,4)` and a JSON string | Accepted | 2026-10-24 |
 | [ADR-0008](ADR-0008-local-pure-rust-ml.md) | Machine learning is local and pure Rust | Accepted | 2026-10-24 |
 | [ADR-0009](ADR-0009-receipt-references.md) | A receipt is a reference, not an uploaded file | Accepted | 2026-10-24 |
+| [ADR-0010](ADR-0010-semantic-search-scan-bound.md) | Semantic search keeps its corpus-bound scan, accepted up to a named volume | Accepted | 2026-10-25 |
 
 ## 5. Related documents
 
