@@ -295,7 +295,7 @@ internal:
   every rule in §1.4, where a bad setting is a start-up failure. A model is an
   optional artifact, so its absence is a supported state, not a misconfiguration
   (`ML-R02`, `ML-R06`).
-- **The Burn encoder is not implemented yet.** `ml.enabled = true` with
+- **The Burn encoder is implemented and measured (ADR-0008 §12).** `ml.enabled = true` with
   `ml.backend = flex` still yields the `disabled` embedder, whatever artifacts
   are present, because the six-layer encoder and the WordPiece tokenizer that
   [`../features/ml/architecture.md`](../features/ml/architecture.md) §12.3

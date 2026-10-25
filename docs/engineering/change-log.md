@@ -42,6 +42,123 @@ define the target state. The requirements live in
 
 ## Entries
 
+### ATOM-CHANGE-20261025-002 - `ml.candidate_limit` gains a ceiling and loses its floor
+
+**Date:** 2026-10-25 (UTC)
+**Type:** Fix
+**Author:** The ATOM engineering team - the orchestrator with the `rust-backend` subagent.
+**Status:** Complete - **chain `D4.M8`**
+
+#### Summary
+
+`validate_ml` refused an `ml.candidate_limit` below `api.pagination.max_limit`,
+on the false premise that a candidate set smaller than one page would make page
+two impossible. It does not: `Pagination::new` computes `has_more` from the real
+total, so a ranked set shorter than the page size is a well-formed short page.
+The floor is replaced by a ceiling of **1,000** (`MAX_ML_CANDIDATE_LIMIT`), which
+is the bound the re-rank actually needed. The two defaults did not move: `2` and
+`200`.
+
+#### Reason
+
+The re-rank performs no inference, so `ml.timeout_seconds` — which bounds **one
+inference** — does not bound it. With the old rule, `ml.candidate_limit` was the
+re-rank's only bound and had **no upper bound at all**: the setting was accepted
+at ten million ([`ADR-0008`](../decisions/ADR-0008-local-pure-rust-ml.md) §12.5).
+The floor's own maximum of 1,000 was inherited by accident from
+`MAX_PAGINATION_LIMIT`, which bounds the *page*, not the candidate set. A page is
+a presentation bound; a candidate set is a work bound.
+
+#### Affected features and files
+
+| Feature | Area | Files |
+| ------- | ---- | ----- |
+| ML | Configuration validation | `src/config/validation.rs` |
+| ML | Settings documentation | `src/config/settings.rs` |
+| ML | Configuration files and reference tables | `config/ml.toml`, `.env.example`, `config/README.md`, `docs/architecture/deployment.md` |
+| ML | Tests | `src/config/tests.rs`, `tests/common/mod.rs`, `tests/ml_api.rs` |
+| ML | Status and test inventory | `docs/features/ml/status.md`, `docs/features/ml/testing.md` |
+
+#### Requirements and decisions referenced
+
+| Reference | Subject |
+| --------- | ------- |
+| [`ADR-0008`](../decisions/ADR-0008-local-pure-rust-ml.md) §12.2, §12.5 | The re-rank has no inference, and the floor is replaced by a ceiling |
+| [`project-truth.md`](../project-truth.md) §18.3 `ML-R05` | The bounded hybrid re-rank |
+
+#### Architectural impact
+
+None beyond the validation rule. No route, handler, DTO, table or request path
+changed. `MAX_ML_CANDIDATE_LIMIT` sits beside `MAX_PAGINATION_LIMIT` in
+`src/config/validation.rs` because it is the same character of value: a hard
+ceiling on a configurable quantity, not a deployment policy, and therefore not a
+setting (`AGENTS.md` §4.11).
+
+#### Compatibility impact
+
+**None to a client.** No status code, field, error code or default changed, and
+no response shape moved: a short page was already the published behaviour
+([`../features/ml/api.md`](../features/ml/api.md) §2.3). A *configuration* that
+set `ml.candidate_limit` above 1,000 now fails at start-up, which is the point of
+the change; the shipped value, 200, is unaffected.
+
+#### Security implications
+
+None removed. One resource bound was added: one hybrid request can no longer ask
+the re-rank for an unbounded amount of CPU or memory. The ceiling is enforced at
+start-up, before the socket is bound, and the value is reported in the error
+without any secret.
+
+#### Checks and results
+
+Run from the repository root on Windows, `TEST_DATABASE_URL` pointing at
+`atom_test`:
+
+| Command | Result |
+| ------- | ------ |
+| `cargo fmt --all` | applied |
+| `cargo check --all-targets --locked` | `0` |
+| `cargo clippy --all-targets --all-features --locked -- -D warnings` | `0` |
+| `cargo test --all-targets --locked` | `0` - 504 tests, unchanged in count |
+| `scripts/gate.ps1` | `fmt` 0, `clippy` 0, `test` 0, `nodefault` 0, `docs` 0, `strict` 0 |
+
+#### Manual verification
+
+Against `atom_dev`, with `ml.enabled = true`, `ml.backend = deterministic` and
+`ml.candidate_limit = 3`: six notes containing "kubernetes", a reindex that
+embedded all six, then a hybrid search with `limit=100`. The answer was **`200`**
+with **3 items**, `total` 3, `limit` 100, `offset` 0, `has_more: false`,
+`degraded: false` - a well-formed short page. A start-up with
+`APP_ML_CANDIDATE_LIMIT=1001` exited `1` with
+`error: environment variable ml.candidate_limit has invalid value 1001: expected
+at most 1000 candidate rows`. The server was stopped and `atom_dev` re-seeded to
+`minimal`.
+
+#### Review findings
+
+No independent review has been performed on this change set. The next
+`code-reviewer` pass over `D4.M8` is the review of record.
+
+#### Documentation
+
+`docs/features/ml/architecture.md` §7 and
+[`ADR-0008`](../decisions/ADR-0008-local-pure-rust-ml.md) §12 already recorded the
+decision; this change makes the code match them. Updated here:
+`config/ml.toml`, `.env.example`, `config/README.md` (§3 and §6),
+`docs/architecture/deployment.md` (§1.3 and §1.4),
+`docs/features/ml/status.md` (§5 correction) and
+`docs/features/ml/testing.md` (the renamed unit case and the new short-page
+assertion). **No OpenAPI change was needed**: no endpoint or response shape
+moved.
+
+#### Links
+
+[`ADR-0008`](../decisions/ADR-0008-local-pure-rust-ml.md) §12,
+[`../features/ml/architecture.md`](../features/ml/architecture.md) §7,
+[`../features/ml/status.md`](../features/ml/status.md) §5,
+[`../features/ml/testing.md`](../features/ml/testing.md),
+[`../architecture/deployment.md`](../architecture/deployment.md) §1.3.
+
 ### ATOM-CHANGE-20261025-001 - The first executable gate verdict, and its repairs
 
 **Date:** 2026-10-25 (UTC)

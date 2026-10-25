@@ -368,4 +368,22 @@ impossible. It is not - `Pagination::new` computes `has_more` from the real
 total, and a short page is well-formed. The consequence is that the re-rank,
 which `ml.timeout_seconds` does not bound, has **no upper bound at all**: the
 setting is accepted at ten million. The rule should be a ceiling of 1,000, not a
-floor. That change is `D4.M8` and is not yet applied.
+floor. That change is `D4.M8`, and it **is applied** (2026-10-25):
+
+- `MAX_ML_CANDIDATE_LIMIT = 1_000` is declared in `src/config/validation.rs`
+  beside `MAX_PAGINATION_LIMIT`, and `validate_ml` refuses a value above it
+  through the existing `ConfigError::Invalid` shape. The floor is gone: nothing
+  in `src/` or `config/` relates `ml.candidate_limit` to
+  `api.pagination.max_limit` any more.
+- `the_candidate_limit_is_bounded_above` proves 1,001 refused naming
+  `ml.candidate_limit`, 1,000 accepted, and 3 accepted — a candidate set below
+  the page size is a work bound, not an error.
+- `hybrid_never_returns_more_than_the_candidate_limit` no longer lowers the page
+  bound to obey the old rule. With `ml.candidate_limit = 3` and the page bound
+  left at its configured 100, a `limit=100` hybrid search answers **`200`** with
+  **3 items**, `total` 3 and `has_more: false` — a well-formed short page.
+- The four descriptions (`config/ml.toml`, `.env.example`, `config/README.md`,
+  `docs/architecture/deployment.md`) now say that `ml.timeout_seconds` bounds one
+  inference and that `ml.candidate_limit` is a work bound with a ceiling of
+  1,000 and no relation to the page size. **The defaults did not move: `2` and
+  `200`.**
