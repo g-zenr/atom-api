@@ -294,3 +294,48 @@ The build cost the `ml` feature already imposes is `KI-022` in
 | [`../../database/seeding.md`](../../database/seeding.md) | The seeder's `--with-embeddings` contract, `S4`. |
 | [`../../decisions/ADR-0008-local-pure-rust-ml.md`](../../decisions/ADR-0008-local-pure-rust-ml.md) | The local, pure-Rust decision; §8 the measured result, §9 normalisation, §10 the tokenizer, §11 the fallback. |
 | [`../../engineering/change-log.md`](../../engineering/change-log.md) | `ATOM-CHANGE-20261024-010`, including its Correction block: the numbers and their three caveats. |
+
+## 5. The encoder, measured (2026-10-25)
+
+The six-layer Burn encoder and its WordPiece tokenizer are built, and
+`src/bin/atom-ml-bench.rs` measured the real forward pass in `--release` on this
+machine. `ML-R02` is therefore **met**: embeddings are produced by Burn v0.22 on
+the `flex` backend from the local SafeTensors file, with masked mean pooling and
+unit-length output.
+
+| Measurement | Value |
+| ----------- | ----- |
+| 1 text, mean | 88.0 ms (28.8 min, 210.0 max) |
+| 10 texts, mean per text | 111.6 ms |
+| 100 texts, mean per text | 112.6 ms - **11.3 s total** |
+| Worst case, 256 tokens | **804 ms** mean (775 min, 834 max) |
+| Peak RSS | 183.8 MiB |
+| Determinism | identical input twice -> identical vector; different input differs |
+| Semantic quality | **5 of 5 queries returned the expected nearest text**, cosine 0.31-0.64 |
+
+The spike's 0.02 ms per text was a lookup and a projection; the encoder is
+roughly **5 600 times** more expensive. That number was a floor, and this is the
+real cost.
+
+### The measured cost invalidates two shipped defaults
+
+This is recorded as a finding, not absorbed into a quietly changed setting:
+
+- `ml.timeout_seconds` defaults to **2 s**, and `ml.candidate_limit` to **200**.
+  At 112 ms per text a 200-candidate re-rank needs **22 seconds**, and even the
+  `api.pagination.max_limit` of 100 needs 11.3 s. The defaults cannot both stand
+  with a hybrid search that completes.
+- A single 256-token text costs 804 ms, so a two-candidate worst case already
+  exceeds the 2 s budget.
+
+Either `ml.candidate_limit` drops to roughly **15** at the current timeout, or
+`ml.timeout_seconds` rises toward the 30 s request timeout and the candidate
+limit comes down with it. Both are accepted-contract changes - they are
+`api.md` and `conventions.md` numbers - so they need a decision and an ADR
+amendment, not an implementation tweak. Until then, a hybrid request over a large
+candidate set will hit the timeout and **degrade to lexical results with `200`**,
+which is the behaviour `ML-R06` defines and the tests assert.
+
+`ML-R09`'s fifteen-query fixture evaluation remains outstanding; the 5-of-5 result
+above is the smallest evidence that the vectors are meaningful, not that
+evaluation.
