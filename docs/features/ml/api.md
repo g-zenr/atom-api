@@ -14,13 +14,13 @@ the API root. The general rules are in
 ## 0. Implementation status
 
 The contract below is implemented: the three operations are mounted, and
-`ROUTE_TABLE` and the document agree on **51** operations. Read from the working
+`ROUTE_TABLE` and the document agree on **54** operations. Read from the working
 tree on 2026-10-26:
 
 | Check | Result |
 | ----- | ------ |
 | An ML path in `ROUTE_TABLE` and in `api_routes()` | All three |
-| The published surface, as pinned by `tests/openapi_contract.rs` | **51** operations |
+| The published surface, as pinned by `tests/openapi_contract.rs` | **54** operations |
 | `src/ml/handlers.rs`, `service.rs`, `dto.rs`, `repository.rs` | Present |
 | The `embeddings` table | Present (migration `0006`) |
 
@@ -345,5 +345,5 @@ shared pagination parameters, and its body carries only `query` and `mode`.
 A contract test asserts the published parameter set and that no second
 pagination parameter appears in the body schema.
 
-The document describes **51** operations, and the inventory in
+The document describes **54** operations, and the inventory in
 [`../../api/README.md`](../../api/README.md) lists the three ML paths among them.

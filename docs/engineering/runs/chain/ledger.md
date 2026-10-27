@@ -1593,7 +1593,7 @@ the feature card and the stale-statement sweep).
 | 1 | The migration, applied to a scratch database | **Pass** - `api_keys` with three named `CHECK`s, `UNIQUE (key_hash)`, `api_keys_user_id_idx`, `ON DELETE CASCADE`; duplicate digest `23505`; bad prefix, bad digest, empty and 101-character name all `23514`; cascade proven; both nullable stamps null-then-set |
 | 2 | `cargo fmt --all -- --check` | **Pass** (`0`) |
 | 3 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | **Pass** (`0`) |
-| 4 | `cargo test --all-targets --locked` | **Pass** (`0`) - **535 passed, 0 failed** on Windows; 537 on CI, which runs the two unix-only `shutdown` cases |
+| 4 | `cargo test --all-targets --locked` | **Pass** (`0`) - **536 passed, 0 failed** on Windows; 538 on CI, which runs the two unix-only `shutdown` cases |
 | 5 | `cargo check --no-default-features --all-targets --locked` | **Pass** (`0`) |
 | 6 | `cargo run --bin atom-docs` and `-- --strict` | **Pass** - `OK (0 warning(s))` |
 | 7 | `scripts/gate.ps1` | **All gates passed.** (all six `0`) |
@@ -1601,11 +1601,15 @@ the feature card and the stale-statement sweep).
 | 9 | Hand-run on `atom_dev` | **Pass** - create `201` (secret printed once, 69 characters), `GET /auth/me` with the key `200` for the same account, listing `200` with no secret, revoke `204`, the key afterwards `401`, second `DELETE` `204`, foreign or unknown id `404`, `atom_deadbeef` `401` and not `500`, `422` naming `name`, a disabled account's key `403` with the same envelope as its JWT |
 | 10 | Break-and-restore | **Pass** - three expectations inverted and observed red, restored and observed green (`a_revoked_key_is_unauthorized`, `the_listing_never_contains_a_secret`, `CONTRACT_OPERATIONS`) |
 | 11 | The integration the chain exists for | **Pass** - the local API behind a Cloudflare quick tunnel; an n8n Header-Auth credential holding a key; a webhook-triggered workflow on the deployed n8n reached `GET /api/v1/claims?status=approved` and returned `{"reached_atom":true,"approved_claims":0,"claims_on_page":0}`; n8n recorded execution `4` as `status=success mode=webhook finished=True` |
-| 12 | An independent `code-reviewer` over the diff | **Not run yet** when this row was written |
-| 13 | A `quality-gate` verdict | **Not run yet** when this row was written |
+| 12 | An independent `code-reviewer` over the diff | **FAIL on documentation**, three reads, no code defect found: eleven current-surface "51 operations" claims, then eight further stale figures, then one. Every finding repaired. No read of the final tree exists |
+| 13 | A `quality-gate` verdict | **PASS** - six gates `0`, 54 operations asserted in both directions, the contract cases present and none ignored, the documents consistent, no secret in the diff |
+| 14 | The reviewer's advisory 2, the untested half of the throttle | **Closed** - `the_usage_statement_itself_refuses_a_second_write_within_the_hour` calls the repository directly and was proven red with the clause deleted, green with it restored |
 
-**Nothing is promoted to `Verified`.** Rows 12 and 13 are the two records that
-would do it, and this checkpoint cannot write them on its own authority.
+**Nothing is promoted to `Verified`.** Row 12 is the record that would do it and
+it is a FAIL, repaired but not re-read; writing `Verified` on the strength of my
+own repair is the false record this file exists to refuse. The code itself was
+read clean in the first pass and never found defective - what failed, three
+times, was the prose around the numbers.
 
 Two things the chain found that the contract had wrong, both corrected in place
 before any code existed: `A-C-K1-1` (a disabled account's key is `403`, not
@@ -1645,9 +1649,9 @@ scaffold committed earlier had the same defect.
 **State at the end of the K1 session (2026-10-27).** Branch `develop`, working
 tree carrying the `K1` change. **`K1` scoped API keys are `Implemented`**:
 migration `0007`, the three operations, the `atom_` branch in
-`AuthUser::from_request_parts`, 10 integration cases and 13 unit tests. The six
+`AuthUser::from_request_parts`, 11 integration cases and 13 unit tests. The six
 gates are `0` through `scripts/gate.ps1` and `cargo test --all-targets --locked`
-reports **535 passed, 0 failed** on Windows (537 on CI, where the two unix-only
+reports **536 passed, 0 failed** on Windows (538 on CI, where the two unix-only
 `shutdown` tests run). `migrations/` ends at `0007`; the surface is **54**
 operations. Nothing is `Verified`; see the `K1` checkpoint below.
 

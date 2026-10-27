@@ -54,8 +54,8 @@ documentation.
 [`ADR-0011`](../decisions/ADR-0011-api-keys.md), and its card is the single
 [`api-keys/status.md`](api-keys/status.md). It is `Implemented`:
 `migrations/0007_api_keys.sql`, `src/api_keys/` and the three published
-operations exist, with 10 cases in `tests/api_keys_api.rs` and 13 unit tests
-passing in the measured run of 2026-10-27 (535 passed, 0 failed, with the six
+operations exist, with 11 cases in `tests/api_keys_api.rs` and 13 unit tests
+passing in the measured run of 2026-10-27 (536 passed, 0 failed, with the six
 gates green). It is not `Verified`: no independent review of the diff and no
 quality-gate verdict is recorded. Its limitations — no scope, no expiry, an
 hourly `last_used_at` and a key that can mint another key — are recorded as

@@ -13,7 +13,7 @@ Chain `C-J1` (2026-10-24) added the schema: `migrations/0005_job_applications.sq
 and `src/job_applications/{mod,models}.rs`. Chains `C-J2`, `C-J3` and `C-J4`
 added the endpoint layer in one wave: `dto.rs`, `repository.rs`, `service.rs`,
 `handlers.rs`, the route registration, the state field and the OpenAPI entries.
-`/api/v1/openapi.json` describes **51 operations today**, fourteen of them this
+`/api/v1/openapi.json` describes **54 operations today** (51 before the API-keys change), fourteen of them this
 feature's; it described 48 when these chains landed. No migration changed: the schema `J1` wrote was sufficient, which is
 the outcome the plan predicted and is worth stating because it is the exception.
 

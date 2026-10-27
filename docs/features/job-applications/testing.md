@@ -183,11 +183,11 @@ The file groups its cases the way the contract does, and so does this section.
 
 The document is generated from the handlers, and the route table is declared
 independently, so they are held together by assertion. The published surface is
-`CONTRACT_OPERATIONS = 51` today; it was 48 when these chains landed.
+`CONTRACT_OPERATIONS = 54` today; it was 51 before the API-keys change and 48 when these chains landed.
 
 | Test | What it asserts | Serves |
 | ---- | --------------- | ------ |
-| `the_route_table_and_the_document_describe_the_same_operations` | The route table and the document describe the same operations **in both directions**, and the count is exactly 48. A job route the document omits, or an operation the router does not serve, fails here. | All nine, and `JOB-R08` in part. |
+| `the_route_table_and_the_document_describe_the_same_operations` | The route table and the document describe the same operations **in both directions**, and the count is exactly 54 today (48 when the chain landed). A job route the document omits, or an operation the router does not serve, fails here. | All nine, and `JOB-R08` in part. |
 | `every_route_in_the_table_is_served_by_the_router` | Every declared route is actually mounted. | All nine. |
 | `each_list_endpoint_publishes_its_filter_and_pagination_parameters_once` | `/api/v1/companies` publishes `limit`, `offset` and `search`; `/api/v1/job-applications` publishes the pagination pair, `status`, `company_id`, `search`, `applied_from` and `applied_to`; neither publishes a parameter twice. | `JOB-R01`, `JOB-R05`. |
 | `the_job_application_operations_publish_their_success_status` | The fourteen `(method, path, success status)` triples: three creates are `201`, seven reads and patches are `200`, four deletes are `204`; the table is asserted to hold fourteen rows, so a table that shrank cannot pass with fewer assertions. | All nine. |
@@ -241,7 +241,7 @@ without a database.
 | `JOB-R05` | §1 cases 5, 6; §2.5 (all eight); §3 `the_event_schemas_publish_no_updated_at`; §4 two event-kind and timezone tests. | Event pagination beyond `?limit=2`: `offset`, the clamp, an offset past the end. |
 | `JOB-R06` | §1 cases 5, 6; §2.1 `a_company_with_applications_cannot_be_deleted`, `a_company_can_be_deleted_once_its_applications_are_gone`; §2.5 `deleting_an_application_removes_its_events`; §2.4 the company move. | The delete/insert race (§6). |
 | `JOB-R07` | §2.4 both cross-link cases. | The `ON DELETE SET NULL` from a schema-level statement: the API case is the only evidence. |
-| `JOB-R08` | §3 `the_route_table_and_the_document_describe_the_same_operations` (the surface is pinned at 51 today, 48 when the chain landed) and `the_job_application_operations_publish_their_success_status` (the fourteen operations are named). | **The absence of generation is asserted by nothing.** No case checks it; the evidence today is a reading of the route table and the module's imports. |
+| `JOB-R08` | §3 `the_route_table_and_the_document_describe_the_same_operations` (the surface is pinned at 54 today, 51 before the API-keys change and 48 when the chain landed) and `the_job_application_operations_publish_their_success_status` (the fourteen operations are named). | **The absence of generation is asserted by nothing.** No case checks it; the evidence today is a reading of the route table and the module's imports. |
 | `JOB-R09` | §1 cases 4, 7; §2.1 `two_accounts_may_use_the_same_company_name`; §2.7 (all four); §2.8 `every_job_application_operation_is_not_found_for_another_account`, `every_job_application_operation_requires_a_credential`; §3 the route table. | — |
 
 Both flow cases (§8) also carry `JOB-R01`…`JOB-R07` and `JOB-R09`, each inside a
@@ -264,7 +264,7 @@ so that nobody reads the map in §5 as completeness.
 | **The application `description` bound.** | No case sends 10 001 characters. The validator is `bounded_text`, but no test names the field. |
 | **A blank `source` through the API.** | Refused by `required_text`, asserted only by the unit case. |
 | **`JOB-R08`'s absence of generation.** | Nothing asserts it. The strongest evidence is the pinned operation count and the fourteen named operations. |
-| **The flow layer's own gaps.** | `tests/job_applications_flow.rs` exists (§8) and closes composition, the delete chain and the ownership sweep. It does not close the gaps above: no `408`/`500` path, no concurrency, no pagination bound beyond one default page, and no seeded read through the API — the seeded rows are asserted by `tests/seeder.rs` instead. Its sweep is a hand-written list of thirteen attempts, so a new route fails the 48-operation pin in `tests/openapi_contract.rs` rather than this file. |
+| **The flow layer's own gaps.** | `tests/job_applications_flow.rs` exists (§8) and closes composition, the delete chain and the ownership sweep. It does not close the gaps above: no `408`/`500` path, no concurrency, no pagination bound beyond one default page, and no seeded read through the API — the seeded rows are asserted by `tests/seeder.rs` instead. Its sweep is a hand-written list of thirteen attempts, so a new route fails the 54-operation pin in `tests/openapi_contract.rs` rather than this file. |
 | **A recorded run of anything above.** | The five job files — endpoint, schema, flow, contract and seeder — exist without a quoted result. `Verified` requires that run. |
 
 ## 7. Conventions for a new test
@@ -318,7 +318,7 @@ asserted to number thirteen, so a sweep that quietly lost an attempt fails. The
 list is **not** derived from `ROUTE_TABLE`: a fifteenth job route would not fail
 this file. What fails then is
 `tests/openapi_contract.rs::the_route_table_and_the_document_describe_the_same_operations`,
-which pins the published surface at 48 and compares the route table with the
+which pins the published surface at 54 today and compares the route table with the
 document in both directions (§3). The sweep's own job is the `404`-not-`409`
 property — the company delete is a `409` for its owner and must stay a `404` for
 everyone else — and the untouched-owner-row property. The two collection reads it

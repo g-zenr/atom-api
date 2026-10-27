@@ -28,13 +28,13 @@ use atom_api::api::routes::{API_PREFIX, ROUTE_TABLE, UNVERSIONED_ROUTE_TABLE, op
 
 /// The number of operations the locked contract publishes.
 ///
-/// Fifty-two versioned operations - five authentication, six notes (five routes
-/// plus the scored search), five projects, five tasks, twelve claims (five claim
-/// routes, three item writes and four lifecycle actions), fourteen
-/// job-application operations (five company routes, five application routes and
-/// four event routes), three machine-learning operations (the match, the reindex
-/// and the scored search counted with notes) and three API-key operations (the
-/// create, the list and the revoke) - plus the two unversioned probes. The
+/// Fifty-two versioned operations - five authentication, three API-key (create,
+/// list, revoke), six under `/notes` (five note routes plus the scored search),
+/// five projects, five tasks, twelve claims (five claim routes, three item
+/// writes and four lifecycle actions), fourteen job-application operations (five
+/// company routes, five application routes and four event routes) and two
+/// machine-learning operations (the match and the reindex; the scored search is
+/// counted with the notes routes) - plus the two unversioned probes. The
 /// two-way comparison below cannot see an operation that was dropped from the
 /// table, the router and the document together, so the size of the agreed
 /// surface is pinned as well: the contract is that all 54 operations of

@@ -49,26 +49,29 @@ the reason limitation 1 in §4 is real.
 
 | Evidence | Result |
 | -------- | ------ |
-| [`../../../tests/api_keys_api.rs`](../../../tests/api_keys_api.rs) | **10 cases, all pass** in the run of 2026-10-27: returned once and never again, authentication, revoked, inactive account, foreign key, listing without a secret, malformed, cross-account management, the hourly stamp, and owner scoping. |
+| [`../../../tests/api_keys_api.rs`](../../../tests/api_keys_api.rs) | **11 cases, all pass** in the run of 2026-10-27: the ten cases the contract names (returned once and never again, authentication, revoked, inactive account, foreign key, listing without a secret, malformed, cross-account management, the hourly stamp, owner scoping) plus one repository-level case that proves the usage statement refuses a second write inside the hour on its own. |
 | Unit tests in `src/api_keys/` | **13 cases**: `secret.rs` 5, `models.rs` 3, `service.rs` 4, `dto.rs` 1. |
 | The contract assertions | `tests/contract_sweep.rs` and `tests/openapi_contract.rs` assert the three routes and pin the operation set at 54. |
 | The six gates | `scripts/gate.ps1`: all six at `0` on 2026-10-27. |
-| The suite | `cargo test --all-targets --locked`: **535 passed, 0 failed** on Windows at this tree. CI's Linux runner reports 537, because the two unix-only `shutdown` cases run there. |
+| The suite | `cargo test --all-targets --locked`: **536 passed, 0 failed** on Windows at this tree. CI's Linux runner reports 538, because the two unix-only `shutdown` cases run there. |
 
 A green suite is not a review. Nothing in this section is a reviewer's opinion
 of the code.
 
 ## 3. What `Verified` would need
 
-Exactly two records, and neither exists yet:
+Both records now exist, and they disagree, which is why the status is still
+`Implemented`:
 
-1. **An independent review of the diff** — the secret format and its hashing, the
-   middleware branch, the ownership predicates and the three status answers —
-   written into [`../../engineering/review-log.md`](../../engineering/review-log.md).
-2. **A quality-gate verdict** over the same tree, recorded in the same place, at
-   `0` on the six gates with the case counts above.
+1. **The quality-gate verdict** is **PASS** and is recorded in
+   [`../../engineering/review-log.md`](../../engineering/review-log.md) as
+   `ATOM-REVIEW-20261027-001`: six gates at `0`, 536 tests, 54 operations
+   asserted in both directions.
+2. **The independent review** of the diff is **FAIL on documentation**, three
+   reads, with no ownership, SQL, secret-handling or contract defect found in
+   the code. Every finding is repaired, and no read of the final tree exists.
 
-Until both are written down, the status is `Implemented` as
+Until that last read is written down, the status is `Implemented` as
 [`AGENTS.md`](../../../AGENTS.md) §6 defines it, and no document may say
 otherwise.
 

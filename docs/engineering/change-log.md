@@ -47,7 +47,7 @@ define the target state. The requirements live in
 **Date:** 2026-10-27 (UTC)
 **Type:** Feature - authentication
 **Author:** the orchestrator with the `database`, `rust-backend`, `test-engineer` and `docs` subagents.
-**Status:** Complete - **`Implemented`, not `Verified`.** The six gates are green and the feature is covered by ten integration cases and thirteen unit tests; no independent reviewer has read the diff yet.
+**Status:** Complete - **`Implemented`, not `Verified`.** The six gates are green and the feature is covered by eleven integration cases and thirteen unit tests. The `quality-gate` returned **PASS**; the `code-reviewer` read the diff three times and returned **FAIL on the documentation figures** each time, every finding is repaired, and no read of the final tree exists.
 
 #### Why
 
@@ -96,7 +96,7 @@ asserts that the two credential kinds return the *same envelope*.
 | ------- | ------ |
 | `cargo fmt --all -- --check` | `0` |
 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | `0` |
-| `cargo test --all-targets --locked` | `0` - **535 passed, 0 failed** on Windows (CI's Linux run adds the two unix-only `shutdown` tests, so it reports 537) |
+| `cargo test --all-targets --locked` | `0` - **536 passed, 0 failed** on Windows (CI's Linux run adds the two unix-only `shutdown` tests, so it reports 538) |
 | `cargo check --no-default-features --all-targets --locked` | `0` |
 | `cargo run --quiet --bin atom-docs` | `0` |
 | `cargo run --quiet --bin atom-docs -- --strict` | `0` |

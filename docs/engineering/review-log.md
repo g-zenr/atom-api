@@ -1,7 +1,7 @@
 # ATOM review log
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-25
+> **Last updated:** 2026-10-27
 > **Owner:** maintained by the `docs` agent
 
 The record of independent reviews of changes to the ATOM backend: what was
@@ -22,7 +22,15 @@ recorded.
 
 ## The entries so far
 
-Thirteen reviews have been performed:
+Fourteen reviews have been performed:
+
+- `ATOM-REVIEW-20261027-001`, the API-keys change (`K1`). The `quality-gate`
+  returned **PASS** (six gates `0`, 536 tests, 54 operations asserted in both
+  directions). The `code-reviewer` read the diff three times and returned
+  **FAIL on the documentation figures** each time - eleven stale "51 operations"
+  claims, then eight more stale figures, then one - while finding no ownership,
+  SQL, secret-handling or contract defect in the code. Every finding is repaired;
+  no read of the final tree exists, so the feature stays `Implemented`.
 
 - `ATOM-REVIEW-20261026-002`, the **re-gate** of `-011` over the whole Phase 2
   run. It executed `scripts/gate.ps1` itself (six gates `0`) and
@@ -180,6 +188,55 @@ happened.** The first real entry is below.
   answer.
 - [`../testing/verification-policy.md`](../testing/verification-policy.md) —
   the rules this log implements.
+
+---
+
+### ATOM-REVIEW-20261027-001 - Scoped API keys: PASS on execution, FAIL on the documentation figures
+
+**Date:** 2026-10-27 (UTC)
+**Reviewer:** the `code-reviewer` agent (read-only, three reads) and the `quality-gate` agent (read-only)
+**Change reviewed:** `dcda97f` and the repair working tree on top of it - the API-keys feature: `migrations/0007_api_keys.sql`, `src/api_keys/` (seven modules), the `atom_` branch in `AuthUser::from_request_parts`, three routes, ten contract cases, and the documentation that follows.
+
+#### The verdicts
+
+| Reader | Verdict | What it found |
+| ------ | ------- | ------------- |
+| `quality-gate` | **PASS** | Six gates `0`; 54 operations asserted in both directions; the ten contract cases present and none ignored; every current document consistent with the code; no secret in the diff |
+| `code-reviewer`, read 1 | **FAIL** | One blocking finding: eleven present-tense "51 operations" claims in the feature documents, against `CONTRACT_OPERATIONS = 54`. Six advisories |
+| `code-reviewer`, read 2 | **FAIL** | The eleven sites were repaired; eight further stale figures remained (`ml/testing.md` still pinning 51, three `48` references, two `537` unix totals, three "10 cases") |
+| `code-reviewer`, read 3 | **FAIL** | One figure remained: this change log's own status line said "ten integration cases" |
+
+**Nothing is promoted to `Verified`.** The code, the schema, the authorization predicates, the secret handling and the contract agreement were read clean in the first pass and never found defective; what kept failing was the prose around the numbers, and no read of the final tree exists. That is the same discipline `-001` and `-002` applied to Phase 2.
+
+#### What the gate confirmed as honest
+
+`powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\gate.ps1` - all six at `0`, including `cargo test --all-targets --locked` at **536 passed, 0 failed** on Windows. `CONTRACT_OPERATIONS = 54` in both test files; `ROUTE_TABLE` 52 + 2 unversioned; the three `/api-keys` paths in the generated document; `migrations/` ending at `0007`; the working tree clean and the diff free of any key, token, password or connection string.
+
+#### What the code review confirmed as sound
+
+- **Ownership, statement by statement.** `LIST_OWNED`, `COUNT_OWNED`, `REVOKE_OWNED` and `TOUCH_LAST_USED` all carry `user_id`; `INSERT_KEY` binds the owner as a value. `FIND_KEY_IDENTITY` is the one unscoped read, and the exception is justified: no caller identity exists before the credential is resolved, it binds a digest rather than returning one, and its result never reaches a response. A stored digest cannot be replayed as a credential, because `is_well_formed` requires `atom_` plus 64 hex and the digest has no prefix.
+- **The branch cannot steal a JWT or fail open.** A JWT's first segment is base64url JSON and never begins `atom_`; a malformed `atom_…` value is refused before hashing and before SQL; a revoked key and a disabled account both fail closed; the status split is exactly `A-C-K1-1`.
+- **The secret.** It exists in `GeneratedKey`, in `ApiKeyCreatedResponse` and nowhere else; `ApiKey` has no `key_hash` field, so no response type can select it; the only `tracing` call on the path logs a key id and an `AppError`.
+- **Layering.** No SQL outside `repository.rs`, no ownership comparison in `handlers.rs`, no `unwrap` or `expect` outside tests, no `#[allow]`, no concatenated SQL.
+- **Tests that can fail.** Every one of the ten contract cases goes red under a plausible regression - with the one exception that became advisory 2 below.
+
+#### Findings and their disposition
+
+| # | Severity | Finding | Disposition |
+| - | -------- | ------- | ----------- |
+| 1 | Blocking | Eleven current-surface "51 operations" claims across `features/ml/{status,api}.md` and `features/job-applications/{architecture,status,testing}.md`, plus eight further stale figures found in the following two reads | Repaired at every site: 54 with explicit history, the `536`/`538` split, and eleven API-keys cases. Counts of another suite's cases (the 51 in `job_applications_api`) were deliberately left alone |
+| 2 | Medium | The SQL half of the usage throttle was enforced by nothing that can fail: `last_used_is_recorded_once_an_hour` passes with the `AND (last_used_at ...)` clause deleted, because the service pre-check masks it | Closed: `the_usage_statement_itself_refuses_a_second_write_within_the_hour` calls `ApiKeyRepository::touch_last_used` directly and was proven red with the clause removed and green with it restored |
+| 3 | Low | No `tests/api_keys_schema.rs`; the three `CHECK`s, the `UNIQUE` and the cascade are proven by a recorded hand-run, not by a test | **Accepted, not fixed.** The contract did not name a schema test and the constraints were exercised on a scratch database; recorded here so the gap is not mistaken for coverage |
+| 4 | Low | `CONTRACT_OPERATIONS`' doc comment counted the scored search twice and summed to 53 | Repaired: the decomposition now sums to 52 |
+| 5 | Low | `implementation-status.md` quoted 10 `openapi_contract` cases while the counted split said 11 | Repaired |
+| 6 | Low | `ADR-0011` described the contract's superseded 68 without pointing at the amendment | Repaired: it now records that `A-C-K1-2` corrected 68 to 69 |
+| 7 | Low, pre-existing | A NUL byte in a text field passes `required_text` and is refused by PostgreSQL with `22021`, so it becomes a `500` rather than a `422`. Repo-wide, not introduced here | **Not fixed, recorded.** It belongs in `required_text`, not in `api_keys`, and changing a shared validator is its own change |
+
+#### Limitations of this review
+
+- The reviewer's shell was denied in all three reads, so it verified by reading the tree and counting from the files; the executing check is the `quality-gate`'s and the gate's own output.
+- The `quality-gate` could not run `cargo test --all-targets --locked` with the environment variable itself (its allow-list matches whole command strings); it ran `scripts/gate.ps1`, which sets it, and took the per-binary split from `-- --list`.
+- The live n8n integration recorded in the `K1` checkpoint is an external claim. It was performed and its execution id recorded, but it is not reproducible from this repository.
 
 ---
 

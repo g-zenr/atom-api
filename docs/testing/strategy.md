@@ -92,11 +92,11 @@ the real response. They are the only layer that can prove a SQL predicate, a
 database constraint or a `ON DELETE CASCADE` behaves as documented, and they
 are the layer that proves the HTTP contract.
 
-**Current size:** 292 integration test functions in seventeen files on a unix
-host, and 290 on Windows: the two tests in `tests/shutdown.rs` are unix-only,
+**Current size:** 293 integration test functions in seventeen files on a unix
+host, and 291 on Windows: the two tests in `tests/shutdown.rs` are unix-only,
 because they deliver a real signal. With the 245 unit-target tests (229 in the
-library, 3 in `atom-docs` and 13 in `atom-seed`) the whole suite is **537** on a
-unix host and **535** on Windows. Measured by `cargo test --all-targets
+library, 3 in `atom-docs` and 13 in `atom-seed`) the whole suite is **538** on a
+unix host and **536** on Windows. Measured by `cargo test --all-targets
 --locked` in the `K1` gate run on 2026-10-27; the per-file figures below are
 counted from the files.
 
@@ -121,11 +121,11 @@ counted), 481 at the D4 close-out, 483 at the first executable gate and 504 at
 `ATOM-REVIEW-20261024-011`. None of them is today's size. See §7 for the Phase 2
 layer map.
 
-**The `K1` run, 2026-10-27:** 292 integration test functions in seventeen files,
-290 of them on a Windows host because the two `shutdown` cases are unix-only;
-245 unit-target tests; a whole-suite count of **537** on a unix host and **535**
+**The `K1` run, 2026-10-27:** 293 integration test functions in seventeen files,
+291 of them on a Windows host because the two `shutdown` cases are unix-only;
+245 unit-target tests; a whole-suite count of **538** on a unix host and **536**
 on Windows, all passing. The split:
-`lib` 229, `atom-docs` 3, `atom-seed` 13, `api_keys_api` 10, `auth_api` 29,
+`lib` 229, `atom-docs` 3, `atom-seed` 13, `api_keys_api` 11, `auth_api` 29,
 `claims_api` 56, `claims_flow` 3, `claims_schema` 10, `contract_sweep` 2,
 `docs_route` 2, `job_applications_api` 51, `job_applications_flow` 2,
 `jobs_schema` 11, `list_query` 4, `ml_api` 41, `notes_api` 12,
@@ -461,7 +461,7 @@ visible before the code is written.
 
 **This is a record as well as a target.** The layer map below is the target; §7.2.1
 says what exists in the tree today. The `K1` gate run of 2026-10-27 is six gates
-green and **535 passed, 0 failed** on Windows (**537** on a unix host), and every
+green and **536 passed, 0 failed** on Windows (**538** on a unix host), and every
 Phase 2 suite executes. The earlier figures are history, not
 today's state: 296 at `ATOM-CHANGE-20261024-007`, 299 at
 `ATOM-CHANGE-20261024-008`, 481 at the D4 close-out, 483 at the first executable
@@ -507,7 +507,7 @@ sweep over thirteen addressed attempts on one mid-machine application. Unlike
 | Layer | Phase 2 responsibility | Where |
 | ----- | ---------------------- | ----- |
 | Unit | The transition tables, the money format, the URL validators, the embedder selection and the similarity function, the configuration defaults and validation | `src/reimbursements/`, `src/job_applications/`, `src/ml/`, `src/config/tests.rs` |
-| Integration | Every endpoint: happy path, `401`, `404` for another owner, `400` malformed id and body, `422` validation, every documented error code, the lists, the flow tests | `tests/claims_api.rs`, `tests/claims_flow.rs`, `tests/job_applications_api.rs`, `tests/job_applications_flow.rs`, `tests/ml_api.rs` — **41 ML cases, all executing** — and `tests/api_keys_api.rs` (`10` cases) |
+| Integration | Every endpoint: happy path, `401`, `404` for another owner, `400` malformed id and body, `422` validation, every documented error code, the lists, the flow tests | `tests/claims_api.rs`, `tests/claims_flow.rs`, `tests/job_applications_api.rs`, `tests/job_applications_flow.rs`, `tests/ml_api.rs` — **41 ML cases, all executing** — and `tests/api_keys_api.rs` (`11` cases) |
 | Contract | The route table against the document, the published parameter sets, the money and score schema types | `tests/openapi_contract.rs` |
 | Process | The seeder's guards and determinism | `tests/seeder.rs` |
 | Manual | The real model's retrieval quality and cost | Recorded in `docs/features/ml/status.md` |
@@ -525,7 +525,7 @@ the tree, so an empty layer is visible instead of assumed.
 | ------- | ------------- | ----------- |
 | Reimbursements | The **schema layer**: `tests/claims_schema.rs` applies `0004` and asserts the constraints, the composite ownership key, the cascades, the `SET NULL` and the four-decimal money scale. The **seeded claims**: two cases in `tests/seeder.rs` assert the profile counts and the total invariant on data the API did not write. The **endpoint layer**: 56 cases in `tests/claims_api.rs`. The **claim endpoints** cover create/read/patch/delete, the listing with its filters, pagination and order, money on the wire, the ignored `currency` and `status` fields, ownership with a second account, `400`/`413`/`422` mapping and the credential. The **item endpoints and the lifecycle** account for 21 of the 56 — the three item writes, the total recomputed after every one of them, the four-decimal input rule, the draft-only guard in every non-draft status, the five allowed edges and all fifteen refused ones, the reopen clearing both `submitted_at` and `decided_at`, the submit preconditions and `paid` as terminal. All twelve operations are also asserted to answer `401` without a credential. The **contract layer**: three cases in `tests/openapi_contract.rs` for the money schema types, the nullable `project_id` and the seven new operations' success statuses, with the surface pinned at 48 when that chain landed and at 54 today. The **unit layer**: ten tests inside `src/reimbursements/` and three money tests in `src/helpers/validation.rs`. The **flow layer**: three cases in `tests/claims_flow.rs` (committed at `02c5489`) — the journey from registration to payment, the ownership sweep (eleven claim-addressed operations on each of five statuses, 55 requests, each `404`; the list operation is asserted by its empty page and `total` 0, because it publishes `200` rather than `404`) and the seeded read. | Two caveats on the flow layer. The seeded case is **opportunistic**: it returns with a printed reason when `owner@atom.local` is absent, so the seeded surface is covered only on a database a seeder run has touched, and the seeded *size* is never asserted because the shared database carries whichever profile ran last. The seeder's five statuses and the endpoint's field rules therefore meet in one test only where a seeder run has happened; the sweep does not supply that, because it registers both of its own accounts. Also open: `a_claim_can_be_deleted_in_any_status` (so `REIMB-R11`'s "in any status" is unasserted) and five smaller rules with no HTTP case — the 1–500 item-description bound, a non-date `incurred_on`, a non-UUID `item_id`, a file body on the item route, and any concurrency case. The `408` and `500` paths are not asserted on a claims route. The suite is recorded at 296 in `ATOM-CHANGE-20261024-007` and at 299 in `ATOM-CHANGE-20261024-008`, but no `code-reviewer` or `quality-gate` row has been written for this chain, so nothing in the feature is promoted to `Verified`. |
 | Job applications | The **schema layer**: `tests/jobs_schema.rs` (11 cases, chain `C-J1`) creates a scratch database, applies `0001`-`0005` from empty, and asserts the functional unique index on `(user_id, LOWER(name))`, the trim check, the composite `job_applications_company_fk` that makes a cross-owner application unrepresentable, the `NO ACTION` company refusal together with the `DELETE FROM users` cascade it must not block, the `ON DELETE CASCADE` from an application to its events, the `user_id` cascades of all three tables, the three salary checks, four-decimal storage, and that the `job_application_status` enum refuses an unknown stage with `22P02` and no constraint name. The **seeded jobs**: one case in `tests/seeder.rs` asserts the `dev` counts (20 applications, 12 companies, 50 events), the deterministic ids, and the ownership and salary invariants of the seeded rows. The **endpoint layer**: 51 cases in `tests/job_applications_api.rs` (chains `C-J2`–`C-J4`) covering the five company, five application and four event operations — CRUD, both listings with their filters, order and pagination, the stage machine pair by pair (12 edges, 7 accepted no-ops, 30 refusals, the three terminal stages, and a refused move writing nothing else), the create accepting only `wishlist`, the company-delete refusal and the delete that follows it, the next-action task check and its `SET NULL`, the event order and the in-place `PATCH` with no `updated_at`, the salary rules, ownership on every verb, and a `401`/`400`/`404`/`413`/`422` sweep over all fourteen operations. The **contract layer**: four cases written or extended, with the surface pinned at 54 today (48 when that chain landed, 34 before it) — both directions of the route table, the fourteen success statuses, the published parameter sets of both job lists, and the three event schemas carrying no `updated_at`. The **unit layer**: eighteen tests in the module. The **flow layer**: two cases in `tests/job_applications_flow.rs` — the journey from registration to `offer` (stage path, next-action link, timeline, money, the terminal stage, the delete chain, both listings emptied) and the ownership sweep over thirteen addressed attempts, each `404` and never `409`, with the owner's rows byte-identical afterwards. | The flow layer has **no seeded read through the API**: unlike `tests/claims_flow.rs`, the seeded rows are asserted only by `tests/seeder.rs`. The sweep enumerates by hand and pins its list at thirteen attempts, so a new route is caught by the 51-operation pin in `tests/openapi_contract.rs`, not by this file. No run of either flow case is recorded. Within the endpoint layer, the application listing's pagination bounds (the clamp, an `offset` past the end), the event listing's `offset` and clamp, the length half of the two URL rules, the description bound, a blank `source` through the API, and any assertion that the feature generates no text are also unasserted; [`../features/job-applications/testing.md`](../features/job-applications/testing.md) §5–§6 lists them. No run of any job file is recorded: the feature is `Implemented`, not `Verified`. |
-| Local machine learning | **Written and executing.** `tests/ml_api.rs` holds **41 cases** covering the endpoint, degradation, ownership, match, reindex and contract layers - all 41 pass in the `K1` gate run of 2026-10-27 (535 passed, 0 failed; six gates at `0`). The **schema** (`migrations/0006_embeddings.sql`) has no test of its own and is exercised only through those cases. The **configuration** has seven cases in `src/config/tests.rs` (a file of 58) - the defaults, the environment override, the backend vocabulary, the candidate-limit ceiling, the dimension, the timeout ceiling and the removal of the old page-maximum relation - and they pass. `src/ml/` has **64 unit cases**, including six in `burn_embedder.rs` and fifteen in `tokenizer.rs`. | **A real-model run in CI.** The **encoder** is covered by unit cases and the manual `atom-ml-bench` record, but no CI case loads a model file. The **quality evaluation**: the fifteen-query fixture proves the plumbing only; the real-model run is the recorded manual benchmark in [`../features/ml/status.md`](../features/ml/status.md) §5, and its pair count is marked unverified there. The **seeder reset against embeddings**: `--reset` purges `embeddings`, but no case asserts that purge specifically. **Concurrency**: nothing runs two reindexes, or a reindex beside a search. The feature is `Implemented` and **not** `Verified`; `ML-R02` is met, and the missing half is the review of the encoder span and the re-gate. |
+| Local machine learning | **Written and executing.** `tests/ml_api.rs` holds **41 cases** covering the endpoint, degradation, ownership, match, reindex and contract layers - all 41 pass in the `K1` gate run of 2026-10-27 (536 passed, 0 failed; six gates at `0`). The **schema** (`migrations/0006_embeddings.sql`) has no test of its own and is exercised only through those cases. The **configuration** has seven cases in `src/config/tests.rs` (a file of 58) - the defaults, the environment override, the backend vocabulary, the candidate-limit ceiling, the dimension, the timeout ceiling and the removal of the old page-maximum relation - and they pass. `src/ml/` has **64 unit cases**, including six in `burn_embedder.rs` and fifteen in `tokenizer.rs`. | **A real-model run in CI.** The **encoder** is covered by unit cases and the manual `atom-ml-bench` record, but no CI case loads a model file. The **quality evaluation**: the fifteen-query fixture proves the plumbing only; the real-model run is the recorded manual benchmark in [`../features/ml/status.md`](../features/ml/status.md) §5, and its pair count is marked unverified there. The **seeder reset against embeddings**: `--reset` purges `embeddings`, but no case asserts that purge specifically. **Concurrency**: nothing runs two reindexes, or a reindex beside a search. The feature is `Implemented` and **not** `Verified`; `ML-R02` is met, and the missing half is the review of the encoder span and the re-gate. |
 
 A schema test is not an endpoint test, and neither is a claim test an item test.
 The reimbursement feature is `Implemented`: every one of its eleven
@@ -556,8 +556,8 @@ executing**. `tests/ml_api.rs` covers the endpoint, degradation, ownership,
 match, reindex and contract layers in 41 cases, the three operations are mounted,
 and the contract surface is pinned at 54. The module carries 64 unit cases, and
 the seeder cases pass with the `--with-embeddings` flag; the run is the `K1` gate
-run of 2026-10-27 (six gates at `0`, **535 passed, 0 failed** on
-Windows; 537 on a unix host). The feature is `Implemented` and **not**
+run of 2026-10-27 (six gates at `0`, **536 passed, 0 failed** on
+Windows; 538 on a unix host). The feature is `Implemented` and **not**
 `Verified`: `ML-R02` is met — the Burn encoder produces embeddings — and what is
 missing is the independent review of the encoder span and the re-gate. The
 real-model measurement is the manual `atom-ml-bench` record in
@@ -570,9 +570,9 @@ the status is [`../features/ml/status.md`](../features/ml/status.md).
 
 | Metric | Before Phase 2 | Target | Note |
 | ------ | -------------- | ------ | ---- |
-| Integration tests | 68 on Windows, 70 on a unix host | at least **218** | The Phase 2 target is **at least 150 new integration tests**. Exceeded: 290 on Windows today. |
+| Integration tests | 68 on Windows, 70 on a unix host | at least **218** | The Phase 2 target is **at least 150 new integration tests**. Exceeded: 291 on Windows today. |
 | Unit tests | 111 | at least 150 | The new modules bring their own unit tests; the target is a floor, not a ceiling. Exceeded: 229 in the library today. |
-| Whole suite | **179** on Windows, **181** on a unix host | **roughly 330** | 179 + 150 = 329. The two `shutdown` tests remain unix-only, so the platform difference stays. Exceeded: 535 on Windows today. |
+| Whole suite | **179** on Windows, **181** on a unix host | **roughly 330** | 179 + 150 = 329. The two `shutdown` tests remain unix-only, so the platform difference stays. Exceeded: 536 on Windows today. |
 
 The old figure of 177 in
 [`plan.md`](../engineering/runs/chain/plan.md) §4 is stale; the measured
@@ -605,9 +605,9 @@ ledger; this document does not carry a number it has not seen measured, and the
 number of names in a file is not a number of passing tests.
 
 The tree now holds, measured in the `K1` gate run of 2026-10-27: **229** library
-unit tests plus 3 in `atom-docs` and 13 in `atom-seed`, and **292** integration
-test functions (290 on Windows), a whole-suite count of **537** on a unix host
-and **535** on Windows. The Phase 2 floors in the table above — at least 218
+unit tests plus 3 in `atom-docs` and 13 in `atom-seed`, and **293** integration
+test functions (291 on Windows), a whole-suite count of **538** on a unix host
+and **536** on Windows. The Phase 2 floors in the table above — at least 218
 integration, at least 150 unit, roughly 330 in the whole suite — are exceeded.
 `C-J2`–`C-J4` contribute the 51 cases of
 `tests/job_applications_api.rs`, four cases written or extended in

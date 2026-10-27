@@ -22,6 +22,13 @@
 //!   assertion is a comparison between two stored instants, never a measured
 //!   duration.
 //!
+//! One test is not about an HTTP behaviour and does not appear in that list:
+//! `the_usage_statement_itself_refuses_a_second_write_within_the_hour` calls
+//! [`ApiKeyRepository::touch_last_used`] directly. The service already skips
+//! the statement when the stored stamp is fresh, so an HTTP test of the
+//! throttle passes whether or not the statement's own `AND` is there; only a
+//! repository-level test can fail on a predicate that was deleted.
+//!
 //! Two states cannot be produced through the API in this chain and are built
 //! with SQL against the same database, exactly as `tests/claims_api.rs` does: an
 //! inactive account (no endpoint deactivates one) and a stale `last_used_at` (no
@@ -35,6 +42,7 @@
 
 pub mod common;
 
+use atom_api::api_keys::repository::ApiKeyRepository;
 use axum::Router;
 use axum::http::{Method, StatusCode};
 use chrono::{DateTime, Duration, Utc};
@@ -873,6 +881,129 @@ async fn last_used_is_recorded_once_an_hour() {
         fresh > stale + Duration::minutes(90),
         "the first use after the hour must record a new instant: the stamp was {stale}, and it \
          reads {fresh}. A throttle longer than an hour, or none at all, produces this."
+    );
+    assert!(
+        fresh >= first,
+        "the stamp must only move forward: first {first}, now {fresh}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// I5 - the statement itself is the throttle, under concurrency
+// ---------------------------------------------------------------------------
+
+/// The usage statement refuses a second write on its own, without help.
+///
+/// The service skips the stamp when `KeyIdentity::needs_usage_stamp` says the
+/// stored instant is fresh, so an HTTP test of the throttle passes even if the
+/// statement's `AND (last_used_at IS NULL OR last_used_at < NOW() - INTERVAL '1
+/// hour')` clause is deleted: the service's pre-check masks it. That clause is
+/// what makes the throttle hold when two requests read the row before either
+/// writes it, which is the guarantee `docs/database/schema.md` §11.7 and the
+/// statement's own comment rely on, so it is tested where nothing else can
+/// stand in for it - the repository.
+///
+/// Three observations on the same row: the first write happens; the second,
+/// with no clock movement and no service in the path, affects **zero rows**;
+/// after the stamp is moved two hours back with SQL the write happens again.
+/// The assertion is on the returned boolean (which is `rows_affected > 0`) and
+/// on the stored instant, never on a measured duration.
+#[tokio::test]
+async fn the_usage_statement_itself_refuses_a_second_write_within_the_hour() {
+    let state = test_state().await;
+    let db = state.db.clone();
+    let app = app(state);
+    let user = register_user(&app, "key-usage-statement").await;
+
+    // The key is created through the API, so the row is the one the product
+    // writes; only the usage statement is called directly.
+    let created = create_key(&app, &user.access_token, "hot key").await;
+    let key_id = id_of(&created);
+    let row_id = Uuid::parse_str(&key_id)
+        .unwrap_or_else(|error| panic!("`{key_id}` must be a UUID: {error}"));
+
+    let repository = ApiKeyRepository::new(db.clone());
+
+    // The stamp is unset, so the predicate admits this write.
+    assert!(
+        repository
+            .touch_last_used(row_id, user.id)
+            .await
+            .expect("the first usage statement must succeed"),
+        "a key that has never been used must be stamped by the first use"
+    );
+
+    let first: Option<DateTime<Utc>> =
+        sqlx::query_scalar("SELECT last_used_at FROM api_keys WHERE id = $1")
+            .bind(row_id)
+            .fetch_one(&db)
+            .await
+            .expect("the stamp must be readable");
+    let first = first.unwrap_or_else(|| panic!("the first use must record a stamp for {key_id}"));
+
+    // Immediately again, with nothing between the two calls: the row carries a
+    // stamp from this hour, so the predicate admits no row and the statement
+    // reports that. This is the assertion that fails when the clause is
+    // deleted - the write would land and this would be `true`.
+    assert!(
+        !repository
+            .touch_last_used(row_id, user.id)
+            .await
+            .expect("the second usage statement must succeed"),
+        "the usage statement must refuse a second write inside the hour on its own: {key_id} was \
+         already stamped at {first}. A `true` here means the statement wrote twice, which is the \
+         concurrency guarantee gone."
+    );
+
+    let unchanged: Option<DateTime<Utc>> =
+        sqlx::query_scalar("SELECT last_used_at FROM api_keys WHERE id = $1")
+            .bind(row_id)
+            .fetch_one(&db)
+            .await
+            .expect("the stamp must be readable");
+    assert_eq!(
+        unchanged,
+        Some(first),
+        "a refused write must leave the stored stamp untouched"
+    );
+
+    // Two hours back, so the predicate admits the row again. The stamp is
+    // written by SQL because no endpoint writes it and waiting an hour is not a
+    // test.
+    sqlx::query("UPDATE api_keys SET last_used_at = NOW() - INTERVAL '2 hours' WHERE id = $1")
+        .bind(row_id)
+        .execute(&db)
+        .await
+        .expect("the stale stamp must be written");
+
+    let stale: Option<DateTime<Utc>> =
+        sqlx::query_scalar("SELECT last_used_at FROM api_keys WHERE id = $1")
+            .bind(row_id)
+            .fetch_one(&db)
+            .await
+            .expect("the stale stamp must be readable");
+    let stale = stale.unwrap_or_else(|| panic!("the stale stamp must be set for {key_id}"));
+
+    assert!(
+        repository
+            .touch_last_used(row_id, user.id)
+            .await
+            .expect("the third usage statement must succeed"),
+        "once the stamp is older than the hour the statement must write again: it was {stale}"
+    );
+
+    let fresh: Option<DateTime<Utc>> =
+        sqlx::query_scalar("SELECT last_used_at FROM api_keys WHERE id = $1")
+            .bind(row_id)
+            .fetch_one(&db)
+            .await
+            .expect("the stamp must be readable");
+    let fresh = fresh.unwrap_or_else(|| panic!("the third use must record a stamp for {key_id}"));
+
+    assert!(
+        fresh > stale + Duration::minutes(90),
+        "the stamp must move forward to now when the hour has passed: it was {stale}, and it \
+         reads {fresh}"
     );
     assert!(
         fresh >= first,

@@ -46,7 +46,7 @@ and the boundary they sit on is described in
 below means an `Authorization: Bearer` credential, which is either a user access
 token or an API key. The three are mounted in `api_routes()` and published in
 the document (`src/api_keys/handlers.rs`). **A run of `tests/api_keys_api.rs` is
-recorded**: its 10 cases pass in the measured run of 2026-10-27 (535 passed,
+recorded**: its 11 cases pass in the measured run of 2026-10-27 (536 passed,
 0 failed, with the six gates green), and the three routes are asserted by
 `tests/contract_sweep.rs` and `tests/openapi_contract.rs`. That is evidence
 about the cases; the feature is still `Implemented` and not `Verified`, because
@@ -56,7 +56,7 @@ no independent review of the diff and no quality-gate verdict is recorded yet.
 degrade as their contract says: a scored search returns lexical results with
 `200` when `ml.enabled` is `false` (the default), a match and a reindex return
 `409`. The suite ran green: 41 cases in `tests/ml_api.rs` pass in the measured
-run of 2026-10-27 (535 passed, 0 failed, with the six gates green). The feature
+run of 2026-10-27 (536 passed, 0 failed, with the six gates green). The feature
 is `Implemented` and not `Verified`, because no reviewer has read the encoder span
 and the re-gate of `ATOM-REVIEW-20261024-011` returned FAIL on documentation. The missing half is the
 review, not `ML-R02`: `embedder::select` returns a `BurnEmbedder` when both

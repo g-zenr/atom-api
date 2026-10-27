@@ -26,7 +26,7 @@ hits.
 | Unit, the module | `src/ml/*.rs` | **Yes** — 64 cases: `burn_embedder.rs` 6, `deterministic.rs` 5, `dto.rs` 7, `embedder.rs` 11, `hash_vector.rs` 6, `service.rs` 14, `tokenizer.rs` 15 | 64 |
 | Unit, the configuration | `src/config/tests.rs` | **Seven ML cases** in a file of 58: the defaults, the environment override, the backend vocabulary, the candidate-limit ceiling, the dimension, the timeout ceiling and the guarantee that the old page-maximum relation is gone. **All seven pass.** | 7 |
 | Seeder | `tests/seeder.rs` | **21 cases**, including `the_seeder_writes_embeddings_only_with_the_flag`. `src/bin/atom-seed.rs` implements `--with-embeddings`. | 21, one ML-specific |
-| Contract | `tests/openapi_contract.rs` | Pins the surface at **51**; the route table and the document now describe the same 51. | 0 ML cases |
+| Contract | `tests/openapi_contract.rs` | Pins the surface at **54** today (51 before the API-keys change); the route table and the document describe the same 54. | 0 ML cases |
 | Manual | this document, §5 | **Recorded:** `atom-ml-bench`, 2026-10-25 (status.md §5); not a CI gate. | — |
 
 **Every automated case passes.** The 41 `ml_api` cases, the 64 module cases, the

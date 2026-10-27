@@ -58,8 +58,8 @@ ATOM authenticates a machine client with a **per-user, revocable API key**.
 rendered as 64 lower-case hexadecimal characters. `atom_` is **five** characters,
 so a secret is **69** characters. The length is derived from the byte count in
 `src/api_keys/secret.rs` (`KEY_PREFIX.len() + SECRET_BYTES * 2`) rather than
-written down, because the 256 bits are what the hashing argument below rests on;
-the locked contract `C-K1` writes 68, which counts `atom_` as four characters.
+written down, because the 256 bits are what the hashing argument below rests on.
+The contract's first draft wrote 68; amendment `A-C-K1-2` corrected it to 69.
 The `atom_` prefix is what distinguishes the credential from a JWT — a JWT's
 first segment is base64url-encoded JSON, which never begins with `atom_` — and it
 is how the authenticated extractor routes the value. It is presented in the same

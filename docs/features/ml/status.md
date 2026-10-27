@@ -50,7 +50,7 @@ Read from the working tree on 2026-10-26. The feature is committed: the spike at
 | `MlService` in `AppState` | Exists, built from `crate::ml::embedder::select(&config.ml)` | `src/state.rs` |
 | Migration `0006_embeddings.sql` and the `embeddings` table | Exists: the table, its three `CHECK`s and its two indexes | `migrations/0006_embeddings.sql`; [`../../database/schema.md`](../../database/schema.md) §11.6 |
 | The seven `ml.*` settings | Exist: `config/ml.toml`, `MlSettings`, the loader, the `APP_ML_*` overrides and `.env.example` | `config/ml.toml`, `src/config/`, `.env.example` |
-| The three operations | **Mounted and published.** `ROUTE_TABLE` declares them and `api_routes()` serves them; the surface is 51 operations. | `src/api/routes.rs`, `tests/openapi_contract.rs` |
+| The three operations | **Mounted and published.** `ROUTE_TABLE` declares them and `api_routes()` serves them; the surface is 54 operations. | `src/api/routes.rs`, `tests/openapi_contract.rs` |
 | The embedding purge on delete | Exists: `notes` and `job_applications` delete their embeddings in the statement that deletes the source | `src/notes/repository.rs`, `src/job_applications/repository.rs` |
 | `tests/ml_api.rs` | Exists: **41 cases**, `#![cfg(feature = "ml")]`. **All 41 pass** (run of 2026-10-26, §1.5). | `tests/ml_api.rs`; [`testing.md`](testing.md) §2 |
 | Unit tests in `src/ml/` | **64 cases**, including six in `burn_embedder.rs` and fifteen in `tokenizer.rs`. | `src/ml/*.rs` |
@@ -155,7 +155,7 @@ The two `tests/shutdown.rs` cases are unix-only, so a unix host reports **513**.
 `D0`–`D5` measured the six gates at `0` and **504** tests on Windows
 (`ATOM-REVIEW-20261024-011`), with 40 `ml_api` cases at that point (41 today).
 Those are history: the **511** figure above is the 2026-10-26 measurement, and
-the suite has since grown to **535** (2026-10-27, the API-keys chain: 10
+the suite has since grown to **536** (2026-10-27, the API-keys chain: 11
 `api_keys_api` cases and 13 unit tests in `src/api_keys/`).
 
 Scores are compared with a tolerance (`1e-4`) rather than for equality: `vector`
@@ -382,7 +382,7 @@ The build cost the `ml` feature already imposes is `KI-022` in
 | [`api.md`](api.md) | The three endpoints with their request and response shapes, status codes, error cases and the degradation contract. |
 | [`testing.md`](testing.md) | The 41 cases that exist, what each proves, and the honest gaps. |
 | [`../../testing/strategy.md`](../../testing/strategy.md) | The layers, and which layer proves which ML property. |
-| [`../../api/README.md`](../../api/README.md) | The published surface, now 51 operations. |
+| [`../../api/README.md`](../../api/README.md) | The published surface, now 54 operations. |
 | [`../../api/conventions.md`](../../api/conventions.md) | The search modes and the degradation rule, §17. |
 | [`../../database/schema.md`](../../database/schema.md) | The `embeddings` table, §11.6. |
 | [`../../database/seeding.md`](../../database/seeding.md) | The seeder's `--with-embeddings` contract, `S4`. |
