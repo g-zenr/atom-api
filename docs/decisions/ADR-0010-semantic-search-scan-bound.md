@@ -25,7 +25,7 @@ ORDER BY e.source_id
 ```
 
 It has no `LIMIT`. The ranking is done in Rust by `rank`
-(`src/ml/service.rs:561`), which sorts the whole result with a total order —
+(`src/ml/service.rs`, `fn rank`), which sorts the whole result with a total order —
 score, then note id — so **the SQL `ORDER BY` does not decide the response**.
 `pagination.total` counts every scored row above the similarity floor, so the
 statement cannot be narrowed to a page either: an exact `total` needs every

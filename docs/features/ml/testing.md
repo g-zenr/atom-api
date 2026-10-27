@@ -1,7 +1,7 @@
 # Local machine learning — testing
 
 > **Status:** Implemented
-> **Last updated:** 2026-10-25
+> **Last updated:** 2026-10-26
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-ML-001`](specification.md)
 
@@ -12,30 +12,33 @@ is in [`../../testing/strategy.md`](../../testing/strategy.md) §7.
 
 ## 0. What is on disk today
 
-Read from the working tree on 2026-10-25. The feature is committed: the spike at
+Read from the working tree on 2026-10-26. The feature is committed: the spike at
 `bfd1288`, the finalised ADR at `a4d33a3`, the module, schema, three operations
-and seeder flag at `ba198ff`, and the close-out at `ba91008`. The only
-The two `#[allow(clippy::cast_possible_truncation)]` attributes in `src/ml/burn_embedder.rs`
-were removed and committed in `505a189`; zero suppressions remain in `src/` or
-`tests/`, and the tree is clean.
+and seeder flag at `ba198ff`, the close-out at `ba91008`, and the removal of the
+two `#[allow(clippy::cast_possible_truncation)]` attributes in
+`src/ml/burn_embedder.rs` at `505a189`. `grep "allow(" src/ tests/` returns no
+hits.
 
 | Layer | File | On disk | ML cases |
 | ----- | ---- | ------- | -------- |
-| Integration | `tests/ml_api.rs` | **Yes** — 40 cases, `#![cfg(feature = "ml")]` | 40 |
+| Integration | `tests/ml_api.rs` | **Yes** — 41 cases, `#![cfg(feature = "ml")]` | 41 |
 | Test harness | `tests/common/mod.rs` | **Yes** — `test_state_with_deterministic_ml`, `test_state_with_ml_disabled`, `test_state_with_a_missing_model`, `test_state_with_candidate_limit` | support only |
-| Unit, the module | `src/ml/*.rs` | **Yes** — 39 cases across `deterministic.rs`, `dto.rs`, `embedder.rs`, `hash_vector.rs` and `service.rs` | 39 |
-| Unit, the configuration | `src/config/tests.rs` | **Seven ML cases** exist: the defaults, the environment override, the backend vocabulary, the candidate-limit floor, the dimension, the timeout ceiling and the candidate-limit relation to the page maximum. **All seven pass.** | 7 |
-| Seeder | `tests/seeder.rs` | **20 cases**, including `the_seeder_writes_embeddings_only_with_the_flag`. `src/bin/atom-seed.rs` implements `--with-embeddings`. | 20, one ML-specific |
+| Unit, the module | `src/ml/*.rs` | **Yes** — 64 cases: `burn_embedder.rs` 6, `deterministic.rs` 5, `dto.rs` 7, `embedder.rs` 11, `hash_vector.rs` 6, `service.rs` 14, `tokenizer.rs` 15 | 64 |
+| Unit, the configuration | `src/config/tests.rs` | **Seven ML cases** in a file of 58: the defaults, the environment override, the backend vocabulary, the candidate-limit ceiling, the dimension, the timeout ceiling and the guarantee that the old page-maximum relation is gone. **All seven pass.** | 7 |
+| Seeder | `tests/seeder.rs` | **21 cases**, including `the_seeder_writes_embeddings_only_with_the_flag`. `src/bin/atom-seed.rs` implements `--with-embeddings`. | 21, one ML-specific |
 | Contract | `tests/openapi_contract.rs` | Pins the surface at **51**; the route table and the document now describe the same 51. | 0 ML cases |
-| Manual | this document, §5 | **Not run** | — |
+| Manual | this document, §5 | **Recorded:** `atom-ml-bench`, 2026-10-25 (status.md §5); not a CI gate. | — |
 
-**Every automated case passes.** The 40 `ml_api` cases, the 39 module cases, the
-seven configuration cases and the seeder case passed in the runs recorded in
-[status.md](status.md) §1.5 and `ATOM-CHANGE-20261024-011`. The first executable
-`quality-gate` run over `D0`–`D5` measured the six gates at `0` and the full
-suite at **504 on Windows** (`ATOM-REVIEW-20261024-011`). What no case proves is
-a real model: `ML-R02` is met, so every executed path uses `Deterministic`, and
-the quality run in §5 has not happened. Nothing in this feature is `Verified`.
+**Every automated case passes.** The 41 `ml_api` cases, the 64 module cases, the
+seven configuration cases and the seeder cases passed in the run of
+`cargo test --all-targets --locked` on 2026-10-26 at `4df383e`: **511 passed, 0
+failed** on Windows (513 on a unix host, where the two `shutdown` cases run).
+What no automated case proves is a real model *in CI*: every executed case uses
+`Deterministic` or the synthetic encoder and none loads a model file. The real
+encoder is measured by the manual `atom-ml-bench` run recorded in §5, which is
+not a CI gate. Nothing in this feature is `Verified`, because no reviewer has
+read the encoder span and the re-gate of `ATOM-REVIEW-20261024-011` is recorded
+separately in the engineering record.
 
 ## 1. The rule that makes a test evidence
 
@@ -53,7 +56,7 @@ configuration states that need no artifact at all: `ml.enabled = false`, and
 `ml.enabled = true` with `flex` and no weights. A test that needs the real model
 belongs to the recorded manual evaluation in §5, not to CI.
 
-## 2. `tests/ml_api.rs` — the 40 cases that exist
+## 2. `tests/ml_api.rs` — the 41 cases that exist
 
 Embedding rows are planted through `plant_vector`, a fixture that writes a unit
 vector straight into `embeddings`, so a case can state the score it expects
@@ -148,7 +151,7 @@ For every pair the case asserts six things, and all six pass:
 | # | Assertion |
 | - | --------- |
 | 1 | The set holds **fifteen** pairs. A shorter table would quietly weaken the requirement. |
-| 2 | `pagination.total` is 15: every embedded note is a candidate, so the ranking is over the whole fixture corpus. |
+| 2 | `pagination.total` equals the number of planted notes that this query scores above zero. The case derives that number from its own planted vectors (`tests/ml_api.rs`); it does **not** assert `15`, because the score floor drops every row at or below zero. |
 | 3 | The hit at **rank 1** is the note the fixture created for that query, compared by **id** — the identity the API returned, not a title that happens to look right. |
 | 4 | That note's title is the expected one, which only makes a failure readable. |
 | 5 | Its published score is above `0.999` (the contract's stated floor) **and** `1.0 ± 1e-4`: the planted vector *is* the query's own, so a pipeline that compared a different pair of vectors would fail even if it landed on the right note. |
@@ -181,16 +184,20 @@ query — so assertion 6 is not measuring noise.
 The **control**: the case ends with `"zeppelin airship"`, a query no note was
 planted for and that no fixture note contains, and asserts that it returns **no
 hits** with `total` 0 rather than a confident wrong match. The control runs in
-`hybrid` mode because `semantic` cannot express "nothing matched": it scans
-every stored vector and always answers with a page. The account is not empty at
-that point — the fifteen queries above scored perfectly against it — so the empty
-answer is the pipeline declining to name a best match, not an empty corpus.
+`hybrid` mode because `semantic` has no lexical candidate set: it scores every
+stored vector and returns every positive score, so it cannot express "the query
+matched nothing" the way an empty lexical candidate set can. The account is not
+empty at that point — the fifteen queries above scored perfectly against it — so
+the empty answer is the pipeline declining to name a best match, not an empty
+corpus.
 
 One behaviour the control measurement exposed, and that a reader should know:
-**hybrid now applies a score floor.** A query with a lexical candidate returns that
-candidate even when its score is `0.0`, because the candidate set is the lexical
-match and the score only orders it. That is why the control needs a query with no
-lexical candidate at all, and it is the honest limit of what this control proves.
+**hybrid applies a score floor.** `src/ml/service.rs` retains only hits with a
+score above zero (`scored.retain(|hit| is_match(hit.score))`, where `is_match`
+is `value > 0.0`), so a lexical candidate whose cosine is `0.0` or negative is
+**not** returned. That is why the control needs a query with no lexical candidate
+at all, and it is the honest limit of what this control proves: it shows that an
+unmatched query yields nothing, not that every weak candidate is filtered.
 
 **This case does not prove retrieval quality and must not be described as if it
 did.** The deterministic embedder hashes its input, so a note is "about" a query
@@ -203,11 +210,14 @@ nothing about whether any model understands English, and the `1.0` in the table
 above is a property of the fixture, not a quality signal.
 
 The only quality evidence that exists is the encoder benchmark recorded in
-[status.md](status.md) — the section titled *The encoder, measured*: **15 of 15
-queries returned the expected nearest text** with cosines of `0.31`–`0.64`
-through the real Burn encoder. That is a single five-query manual run on one
-machine, recorded rather than asserted, and it is what `ML-R09`'s quality half
-stands on until a full manual evaluation happens.
+[status.md](status.md) §5, *The encoder, measured*: **15 of 15 queries returned
+the expected nearest text** through the real Burn encoder
+(`cargo run --release --bin atom-ml-bench --features ml`, 2026-10-25), with the
+top-1 cosine range and the negative control recorded in §6.
+That is a recorded manual run, not a CI gate. Its pair count is the one figure
+the record does not settle: the record also carries an earlier five-query probe,
+and [status.md](status.md) §4 marks that count **unverified**. What `ML-R09`'s
+quality half stands on is the recorded run, not an assertion.
 
 The case was shown to fail for the reason it names: pointing pair 1's expected id
 at another note fails at that pair with both ids and the whole returned page in
@@ -217,7 +227,7 @@ assertion the same way.
 
 ## 3. Unit tests
 
-**39 cases in `src/ml/` and seven for the configuration are on disk and pass.**
+**64 cases in `src/ml/`, seven for the configuration, are on disk and pass.**
 The start-up selection rule — the only place the
 `Disabled`/`Deterministic`/`flex` decision is made — is covered in
 `embedder.rs`.
@@ -249,6 +259,14 @@ The start-up selection rule — the only place the
 | `src/ml/service.rs` | `a_vector_of_the_wrong_dimension_is_skipped` | A row whose length differs from `dim` does not panic and does not contribute a score. |
 | `src/ml/service.rs` | `a_timeout_maps_to_the_inference_timeout_degradation` | The mapping from a timed-out inference to `degraded_reason` `inference_timeout` is pure: the error variant in, the reason out, no clock. |
 
+The encoder and the tokenizer contribute 21 of the 64: six in
+`src/ml/burn_embedder.rs` (the identifier, the status and dimension, a unit
+vector, determinism and input dependence, and two load refusals) and fifteen in
+`src/ml/tokenizer.rs` (the vocabulary, the special tokens, casing and accents,
+`##` continuations, unknown words, the 256-token truncation and the attention
+mask). They run against the synthetic encoder and a fixture vocabulary, so no
+case loads a model file.
+
 ## 4. The seeder
 
 | Case | State | Rule it protects |
@@ -269,14 +287,16 @@ The seeder constructs `Deterministic` directly rather than reading
 | `the_fixture_queries_find_the_expected_notes` | The plumbing, as §2.7 describes. | CI, deterministic embedder |
 | The manual quality run | Whether a real model retrieves paraphrases, and its latency and memory on the reference machine. | Once, by the owner or the implementing agent, recorded in [status.md](status.md) |
 
-**The full manual run has not happened; one smaller probe has.** The encoder and
-its WordPiece tokenizer now exist (committed `97d7b4b`, measured in `a3e8c46`),
-and [status.md](status.md) §5 records what `src/bin/atom-ml-bench.rs` measured,
-including a five-query probe in which all five returned the expected nearest
-text. That is a probe, not the evaluation this section describes: it is five
-queries rather than fifteen, it asserts no threshold, and it is not a CI gate.
-[status.md](status.md) §4 is where the full result goes, and the spike's numbers
-do not belong there: they measured a lookup and a projection.
+**The full manual run has happened; its pair count is unverified.** The encoder
+and its WordPiece tokenizer exist (committed `97d7b4b`, measured in `a3e8c46`),
+and [status.md](status.md) §5 records what `src/bin/atom-ml-bench.rs` measured —
+latency, peak RSS, determinism and a retrieval evaluation. The current binary
+defines fifteen pairs, and the record says fifteen in one place and five in
+another; [status.md](status.md) §4 explains why the repository cannot settle
+which count the transcript shows and marks the five-pair figure **unverified**.
+Either way it is a recorded run, not a CI gate, and it asserts no threshold.
+[status.md](status.md) §4 is the record; the spike's numbers do not belong there:
+they measured a lookup and a projection.
 
 ## 6. Deliberately not covered, and the honest gaps
 
@@ -284,7 +304,7 @@ do not belong there: they measured a lookup and a projection.
 | --- | --- |
 | **A real-model run in the suite.** | No automated case loads a model: the weights are not in the repository and every executed case uses `Deterministic`. The encoder has been run once, by hand, in `src/bin/atom-ml-bench.rs`, and that run is recorded in [status.md](status.md) §5 — it is a measurement, not an assertion. |
 | **The Burn model's output, in CI.** | The weights are not in the repository, and downloading them in CI would break the no-outbound rule. `Deterministic` covers the plumbing. **No automated case has ever embedded through the Burn path.** |
-| **Retrieval quality of a real model.** | Measured: fifteen paraphrase queries against fifteen planted texts, **15 of 15 at rank 1**, top-1 cosine `0.2664`-`0.6740`, with a negative control at `0.1256`. The data supports a threshold in `(0.1256, 0.2664)`; none was set in code, because that is a product decision. The `0.0` floor removes orthogonal vectors, not merely unrelated ones. |
+| **Retrieval quality of a real model.** | Recorded, not asserted: fifteen paraphrase queries against fifteen planted texts in `atom-ml-bench`, **15 of 15 at rank 1**, top-1 cosine `0.2664`-`0.6740`, with a negative control at `0.1256`. The data supports a threshold in `(0.1256, 0.2664)`; none was set in code, because that is a product decision. The `0.0` floor removes orthogonal vectors, not merely unrelated ones. The record also carries a five-query probe; its count is **unverified** ([status.md](status.md) §4). |
 | **An inference timeout through the API.** | It needs a fourth `Embedder` (forbidden by `ML-R03`) or a real model slow enough to exceed the budget. The mapping is unit-tested; the end-to-end `408` on a match stays a gap. |
 | **Concurrency.** | Nothing exercises two searches, two reindexes, or a reindex concurrent with a note delete for the same account. For ML this matters more than elsewhere: reindex writes while search reads. |
 | **A live `database_error`.** | Fault injection; the mapping is unit-tested in `src/`. |

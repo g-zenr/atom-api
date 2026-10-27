@@ -1,7 +1,7 @@
 # Local machine learning — architecture
 
 > **Status:** Implemented
-> **Last updated:** 2026-10-25
+> **Last updated:** 2026-10-26
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-ML-001`](specification.md)
 
@@ -16,7 +16,9 @@ chain; read them together with [status.md](status.md) §1.1, §1.4 and §5. The
 `embeddings` migration, the module, the three routes and the seven `ml.*`
 settings exist. The Burn encoder and the WordPiece tokenizer exist as of chain
 `D4.M6` and are measured by `src/bin/atom-ml-bench.rs`, so `ML-R02` is **met**;
-`ML-R09`'s manual quality evaluation is still outstanding (status.md §4).
+`ML-R09`'s quality half is the recorded `atom-ml-bench` run in
+[status.md](status.md) §5, not a CI gate, and its pair count is marked unverified
+there.
 
 **Correction (2026-10-24, chain `D4.M1`).** `src/ml/` was created as the spike
 surface: `embedder.rs` (the trait and the error type), `disabled.rs`,
@@ -772,7 +774,8 @@ missing, and the measured latency in `ADR-0008` §8 does **not** cover them.
 
 1. **A real BERT encoder.** A Burn `Module` mirroring
    `sentence-transformers/all-MiniLM-L6-v2`: token, position and token-type
-   embeddings; six layers, each with 12-head self-attention (head size 64), a
+   embeddings; six layers, each with 12-head self-attention (head size **32**,
+   because 384 / 12 = 32), a
    384→1536→384 feed-forward pair, GELU and two LayerNorms; and the final
    LayerNorm. Load the weights with **`burn_store`**'s SafeTensors recorder and
    an explicit key map from the Hugging Face names

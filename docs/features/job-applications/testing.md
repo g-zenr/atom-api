@@ -1,7 +1,7 @@
 # Job applications — testing
 
 > **Status:** Implemented
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-26
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-JOB-001`](specification.md)
 
@@ -183,7 +183,7 @@ The file groups its cases the way the contract does, and so does this section.
 
 The document is generated from the handlers, and the route table is declared
 independently, so they are held together by assertion. The published surface is
-`CONTRACT_OPERATIONS = 48`.
+`CONTRACT_OPERATIONS = 51` today; it was 48 when these chains landed.
 
 | Test | What it asserts | Serves |
 | ---- | --------------- | ------ |
@@ -241,7 +241,7 @@ without a database.
 | `JOB-R05` | §1 cases 5, 6; §2.5 (all eight); §3 `the_event_schemas_publish_no_updated_at`; §4 two event-kind and timezone tests. | Event pagination beyond `?limit=2`: `offset`, the clamp, an offset past the end. |
 | `JOB-R06` | §1 cases 5, 6; §2.1 `a_company_with_applications_cannot_be_deleted`, `a_company_can_be_deleted_once_its_applications_are_gone`; §2.5 `deleting_an_application_removes_its_events`; §2.4 the company move. | The delete/insert race (§6). |
 | `JOB-R07` | §2.4 both cross-link cases. | The `ON DELETE SET NULL` from a schema-level statement: the API case is the only evidence. |
-| `JOB-R08` | §3 `the_route_table_and_the_document_describe_the_same_operations` (the surface is pinned at 48) and `the_job_application_operations_publish_their_success_status` (the fourteen operations are named). | **The absence of generation is asserted by nothing.** No case checks it; the evidence today is a reading of the route table and the module's imports. |
+| `JOB-R08` | §3 `the_route_table_and_the_document_describe_the_same_operations` (the surface is pinned at 51 today, 48 when the chain landed) and `the_job_application_operations_publish_their_success_status` (the fourteen operations are named). | **The absence of generation is asserted by nothing.** No case checks it; the evidence today is a reading of the route table and the module's imports. |
 | `JOB-R09` | §1 cases 4, 7; §2.1 `two_accounts_may_use_the_same_company_name`; §2.7 (all four); §2.8 `every_job_application_operation_is_not_found_for_another_account`, `every_job_application_operation_requires_a_credential`; §3 the route table. | — |
 
 Both flow cases (§8) also carry `JOB-R01`…`JOB-R07` and `JOB-R09`, each inside a

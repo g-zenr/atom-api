@@ -1,7 +1,7 @@
 # ATOM — project truth
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-25
+> **Last updated:** 2026-10-26
 > **Owner:** product owner, maintained by the `docs` agent
 > **Authority:** this file defines ATOM's *agreed product requirements*. Source
 > code does not change it. See [`README.md`](README.md) for the full authority
@@ -484,8 +484,8 @@ blocks Phase 1 work that does not depend on the answer.
 | CI pipeline | Implemented | `.github/workflows/ci.yml` - the three quality gates, a release build, the documentation check and the OpenCode configuration check |
 | Container image | Implemented | `Dockerfile` and `.github/workflows/container.yml`; probed in run `40011694239` - see [`engineering/implementation-status.md`](engineering/implementation-status.md). |
 | Reimbursement tracking | Implemented | accepted in §18.1; migration `0004_expense_claims.sql`, `src/reimbursements/` and all twelve published operations exist. `tests/claims_schema.rs` asserts the constraints, `tests/claims_api.rs` the twelve operations and `tests/openapi_contract.rs` the published surface. No reviewer has read the chain that completed it, so the feature is **not** `Verified`; a passing suite is not a review. |
-| Job application tracking | Implemented | accepted in §18.2; migration `0005_job_applications.sql`, `src/job_applications/` and all fourteen published operations exist. `tests/jobs_schema.rs` asserts the constraints and `tests/job_applications_api.rs` the fourteen operations, including the stage machine. `ATOM-REVIEW-20261024-010` read the chain, found no code defect and returned FAIL on documentation only; the first executable gate run (`ATOM-REVIEW-20261024-011`) also returned FAIL on documentation and no re-gate is recorded, so the feature is not `Verified`. |
-| Local machine learning | Implemented | accepted in §18.3; migration `0006_embeddings.sql`, `src/ml/` and the three published operations exist, and the suite is recorded green in `ATOM-CHANGE-20261024-011` (40 `ml_api` cases). **`ML-R02` is met**: the Burn encoder produces embeddings (measured, ADR-0008 §12), so the scored modes degrade. Not `Verified` for that reason, not for a missing run; see [`features/ml/status.md`](features/ml/status.md) §1.3-§1.4. |
+| Job application tracking | Implemented | accepted in §18.2; migration `0005_job_applications.sql`, `src/job_applications/` and all fourteen published operations exist. `tests/jobs_schema.rs` asserts the constraints and `tests/job_applications_api.rs` the fourteen operations, including the stage machine. `ATOM-REVIEW-20261024-010` read the chain, found no code defect and returned FAIL on documentation only; the first executable gate run (`ATOM-REVIEW-20261024-011`) also returned FAIL on documentation, and the re-gate of 2026-10-26 (`ATOM-REVIEW-20261026-002`) returned FAIL on documentation again, with its findings repaired under `ATOM-CHANGE-20261026-001`, so the feature is not `Verified`. |
+| Local machine learning | Implemented | accepted in §18.3; migration `0006_embeddings.sql`, `src/ml/` and the three published operations exist, and the suite is measured green at `4df383e` (511 passed, 0 failed; 41 `ml_api` cases). **`ML-R02` is met**: `embedder::select` returns a `BurnEmbedder` when both artifacts load. Not `Verified`: no independent reviewer has read the encoder span and the re-gate of 2026-10-26 (`ATOM-REVIEW-20261026-002`) returned FAIL on documentation; see [`features/ml/status.md`](features/ml/status.md) §1.3. |
 | Everything else in the roadmap | Not started | by design |
 
 **Known discrepancies and limitations** are recorded in
@@ -514,10 +514,14 @@ them; a passing suite is not a review. The job-application requirements are now
 `ATOM-REVIEW-20261024-010` read the chain, found no code defect and returned
 FAIL on documentation only. They are not `Verified`, because the first
 executable gate run (`ATOM-REVIEW-20261024-011`) also returned FAIL on
-documentation and no re-gate is recorded. The machine-learning requirements are
-now **`Implemented`**: the code exists for all three published operations, but
-`ML-R02` is met, so they are not `Verified`. §17 says
-the same in its status table. The
+documentation, and the re-gate of 2026-10-26 returned FAIL on documentation
+again with its findings repaired under `ATOM-CHANGE-20261026-001`. The
+machine-learning requirements are
+now **`Implemented`**: the code exists for all three published operations. They
+are not `Verified`: no independent reviewer has read the encoder span and the
+re-gate returned FAIL on documentation. `ML-R02` is met — the Burn
+encoder produces embeddings — so the missing half is the review, not the model.
+§17 says the same in its status table. The
 feature specifications are:
 
 | Feature | Identifier | Specification |
@@ -580,11 +584,23 @@ requirements. §18.4 says what that means for a change.
 | `ML-R02` | Embeddings are produced by Burn v0.22 on the `flex` CPU backend, with weights loaded from a local SafeTensors file. | `Cargo.toml` selects `flex` and adds none of `wgpu`, `cuda` or `tch`; the model path is a setting; a missing or unreadable file selects the disabled embedder instead of panicking. | A4 (provisional), O6, ADR-0008 |
 | `ML-R03` | The embedder is a trait with exactly three implementations — `Burn`, `Deterministic` and `Disabled` — and every automated test uses `Deterministic`. | No test loads a model file; `Deterministic` returns the same vector for the same input and reports its dimension; `Disabled` reports that it is unavailable rather than failing. | A4 (provisional), ADR-0008 |
 | `ML-R04` | An embedding is stored as a PostgreSQL `REAL[]` together with its source type, source id, model id and dimension, unique per `(user_id, source_type, source_id, model_id)`. | Re-embedding the same source with the same model leaves one row; a vector whose length differs from its recorded dimension is refused; no PostgreSQL extension is required. | A4 (provisional), ADR-0008 |
-| `ML-R05` | Note search accepts the modes `lexical`, `semantic` and `hybrid`; hybrid builds a bounded lexical candidate set and re-ranks it by cosine similarity in Rust. | Lexical mode returns the notes the full-text match returns and no score; hybrid returns at most the configured candidate bound, each with a score in `[0,1]`; semantic mode never scans beyond the caller's own embeddings. | A4 (provisional), ADR-0008 |
+| `ML-R05` | Note search accepts the modes `lexical`, `semantic` and `hybrid`; hybrid builds a bounded lexical candidate set and re-ranks it by cosine similarity in Rust. | Lexical mode returns the notes the full-text match returns and no score; hybrid returns at most the configured candidate bound, each with a score in `[0,1]`; semantic mode never scans beyond the caller's own embeddings (see the 2026-10-26 amendment below: "scan" means what is **returned**). | A4 (provisional), ADR-0008 |
 | `ML-R06` | When ML is disabled or the model file is missing, a semantic or hybrid request returns lexical results with `200` and names the mode that was applied. | The response reports the requested mode, the applied mode `lexical` and a degradation reason; the status is `200`, never `500`; separate tests cover "ML off" and "model missing"; a `POST /job-applications/{id}/match` when ML is unavailable is `409 conflict`, not a degraded `200`. | A4 (provisional) |
 | `ML-R07` | A reindex is idempotent, owner-scoped, and refuses with `409 conflict` when ML is disabled. | Running it twice inserts no duplicate row; it never reads or writes another account's rows; the response reports how many rows were written and skipped. | A4 (provisional) |
 | `ML-R08` | Every embedding read and write, every search and every match is scoped by the caller's `user_id`, and a note or application of another account is `404`. | Semantic and hybrid search cannot return a foreign note even if the embedding row exists; a match on a foreign application is `404`; a reindex touches only the caller's rows. | A5 (provisional) |
 | `ML-R09` | The index is evaluated with a fixed set of fixture queries and expected notes under the deterministic embedder, and the real model's quality is recorded by a separate manual run. | The fixture set contains 15 queries; each one asserts an expected note is in the top results; the manual run is recorded in the feature status and is not a CI gate. | A4 (provisional) |
+
+**Amendment (2026-10-26) — what "scan" means in `ML-R05`.** The acceptance
+criterion above says semantic mode "never scans beyond the caller's own
+embeddings". Read as a statement about the SQL plan, that would be false:
+[`ADR-0010`](decisions/ADR-0010-semantic-search-scan-bound.md) records a
+sequential scan whose executor reads rows belonging to other owners and returns
+none, because the ownership predicate `e.user_id = $1` is in the `WHERE` clause.
+**"Scan" in `ML-R05` is a statement about what is returned, not about what the
+storage engine reads**: semantic mode returns only the caller's own note
+vectors, and the measured read path, its cost and its bound are `ADR-0010`. No
+other part of `ML-R05` changes. This amendment follows §18.4; the change-log
+entry belongs to the change that lands it.
 
 ### 18.4 Origin, provisional status and what to do about a revision
 

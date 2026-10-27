@@ -1,7 +1,7 @@
 # ATOM — deployment
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-26
 > **Owner:** maintained by the `architect` agent
 
 How the ATOM API is configured, started, observed and run in production —
@@ -304,9 +304,10 @@ internal:
   with `ml.backend = flex` selects the Burn encoder and the WordPiece tokenizer
   when both artifacts load; a missing or unreadable artifact selects `disabled`
   with `model_missing`, and start-up still succeeds — the rule above. What
-  remains outstanding is the feature's quality evaluation, not the code path:
-  [`../features/ml/status.md`](../features/ml/status.md) is the record, and the
-  requirement states are not restated here.
+  remains outstanding is the independent review of the encoder span and the
+  re-gate, not the code path or a measurement:
+  [`../features/ml/status.md`](../features/ml/status.md) §1.3 is the record, and
+  the requirement states are not restated here.
 - **Adding one of the seven means all seven places in one change**, as
   [`../../AGENTS.md`](../../AGENTS.md) §4.11 requires: the file in `config/`, the
   typed structure, the loader, the validation, `.env.example`, the reference

@@ -22,12 +22,24 @@ recorded.
 
 ## The entries so far
 
-Eleven reviews have been performed:
+Thirteen reviews have been performed:
 
+- `ATOM-REVIEW-20261026-002`, the **re-gate** of `-011` over the whole Phase 2
+  run. It executed `scripts/gate.ps1` itself (six gates `0`) and
+  `cargo test -- --list` (511 tests) and returned **FAIL on the documentation
+  record, PASS on execution**: `B2`, `B5`, `R3`, `R4` fixed, `B1` fixed in
+  substance, `R1` still open, `B3`/`B4` fixed then regressed, and the change log
+  claiming a re-gate that never ran.
+- `ATOM-REVIEW-20261026-001`, the code review of `58f9532..HEAD` — the encoder,
+  the score floor, the seeder's `V6` change and the `D5.S5` CI wiring. It found
+  no ownership, SQL, money or degradation defect and returned **FAIL on
+  documentation**, with seven blocking findings.
 - `ATOM-REVIEW-20261024-011`, the first **executable** quality-gate verdict,
   over `D0`–`D5`. It measured all six gates at `0` and 504 tests and returned
   **FAIL on documentation**, with five blocking findings (`B1`–`B5`), all
-  repaired; it also confirmed that `ML-R02` is honestly recorded as unmet.
+  repaired; it also confirmed that `ML-R02` was honestly recorded as unmet **at
+  the time of that review** (2026-10-24). It is met as of
+  `ATOM-CHANGE-20261025-003`; see the correction in the entry below.
 - `ATOM-REVIEW-20261024-010`, the code review of job application chains
   `D3.J1`–`J5`. It found no code defect and returned **FAIL on documentation
   only**, with eight blocking findings, all now repaired.
@@ -171,7 +183,117 @@ happened.** The first real entry is below.
 
 ---
 
-### ATOM-REVIEW-20261024-011 — The first executable quality-gate verdict: `D0`–`D5`
+### ATOM-REVIEW-20261026-002 - The re-gate of `-011`: PASS on execution, FAIL on the record
+
+**Date:** 2026-10-26 (UTC)
+**Reviewer:** the `quality-gate` agent, read-only, through `scripts/gate.ps1`
+**Change reviewed:** the whole Phase 2 run through `4df383e`
+**Verdict:** **FAIL on the documentation record. PASS on execution.**
+
+#### What the gate measured itself
+
+| Command | Result |
+| ------- | ------ |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\gate.ps1` | **exit 0** - `fmt 0, clippy 0, test 0, nodefault 0, docs 0, strict 0` |
+| `cargo test --all-targets --locked -- --list` | **exit 0** - **511 tests**, target for target matching the ledger's own breakdown |
+
+#### The re-gate, finding by finding
+
+| # | Verdict |
+| - | ------- |
+| `B2` (`schema.md` denied the embeddings Rust side) | **Fixed** |
+| `B5` (two `#[allow(clippy::cast_possible_truncation)]`) | **Fixed** - zero `#[allow]` in `src/` and `tests/` |
+| `R3` (no `D4`/ML entry in this log) | **Fixed** |
+| `R4` (`project-truth` cited `0001..0005`, no ML row) | **Fixed** |
+| `B1` (`ml/testing.md` claimed no case had run) | **Fixed in substance** |
+| `R1` (`ml/status.md` contradicted itself) | **Still open, and worse** - the file asserted `ML-R02` both ways, six times each |
+| `B3` (`implementation-status.md` counts) | **Fixed, then regressed** - counts stale again |
+| `B4` (ledger scorecards, `Resume`) | **Fixed, then regressed** - the scorecards exist, `Resume` was stale in every field |
+| `R2` (`api/README.md` said no ML run was recorded) | **Replacement text asserted the opposite of the tree** |
+
+#### New blocking findings
+
+`ML-R02` asserted both ways in ten documents; test counts stale (`ml_api` 41 not
+40, `seeder` 21 not 20, `atom-seed` 13 not 12, suite 511 not 504); a
+`CONTRACT_OPERATIONS` value that the constant no longer holds; no change-log entry
+for the encoder, `ADR-0010`, `performance.md` or `D5.S5`; the change log claiming
+"a re-gate then confirmed B1-B5 resolved" when none had run; `architecture.md`
+stating a head size of 64 where `HEAD_DIM` is 32.
+
+#### What the gate confirmed as honest
+
+The six exit codes and the 511-test figure, the migration set (`0001`-`0006`),
+the 51-operation surface, `D5.S5`'s workflow content, money never in a float, and
+the forbidden-construct sweep (`0` `allow`, `0` `ignore`, `0` `TODO`; four
+`unsafe` occurrences, all in the Windows RSS probe of the measurement binaries).
+
+#### Disposition
+
+Every finding is repaired under `ATOM-CHANGE-20261026-001`. **Nothing is promoted
+to `Verified`**: the reviews closed the process gap, not the evidence gap. The
+encoder's recorded measurement is the author's run, not a CI gate.
+
+#### Limitations
+
+`gh` is not on this role's allow-list, so the CI run ids were not re-queried by
+the gate; the workflow content those runs execute was read instead. The encoder
+numbers were not re-measured, because the weights are operator-supplied and
+absent.
+
+---
+
+### ATOM-REVIEW-20261026-001 - The encoder span, read end to end
+
+**Date:** 2026-10-26 (UTC)
+**Reviewer:** the `code-reviewer` agent, read-only
+**Change reviewed:** `git diff 58f9532..HEAD` - 50 files, +5 434/-864, including
+`src/ml/burn_embedder.rs`, `src/ml/tokenizer.rs`, the score floor
+(`src/ml/service.rs`), the seeder's `V6` unification (`src/bin/atom-seed.rs`) and
+the `D5.S5` CI wiring
+**Verdict:** **FAIL** - on documentation, not on behaviour.
+
+#### What it found sound, and why that matters
+
+Ownership is enforced in SQL on all seven embedding statements (`NOTE_VECTORS`,
+`VECTORS_FOR_SOURCES`, `CURRENT_SOURCES`, both `UPSERT_*`, `DELETE_ORPHANS`), each
+a `const &str` with `user_id` bound; a foreign application answers `404` before
+the embedder is consulted, which is the `ML-R08` ordering; degradation returns
+`200` lexical for a disabled or missing model and `409` for `match`/`reindex`;
+`USER_TABLES` is now the single list behind both `--reset` and `V6`; no test was
+deleted, renamed, loosened or ignored; no new `#[allow]`; migrations untouched.
+
+#### Blocking findings
+
+| # | Finding | Disposition |
+| - | ------- | ----------- |
+| 1 | `features/ml/status.md` denied existing code and asserted both statuses | Rewritten |
+| 2 | The same contradiction propagated to ten documents | Rewritten |
+| 3 | `database/seeding.md` described a `V6` gap the code closed | Rewritten |
+| 4 | `features/ml/testing.md` §2.7 stated two things its tests do not do | Corrected |
+| 5 | The change log recorded verification that did not happen | Corrected, with three missing entries added |
+| 6 | The Burn loader's "a missing key is a load failure" invariant was enforced by nothing | Tested and, where needed, enforced in `src/ml/burn_embedder.rs` |
+| 7 | A hit could be published with `score: 0.0` | The floor now filters the rounded value |
+
+#### Non-blocking findings
+
+The `semantic` total in `frontend-handover.md` disagreed with `api.md`; `ML-R05`
+and `ADR-0010` disagreed about what "scan" means; the real-model evaluation was
+recorded as 5 queries in the ADR and 15 in the feature documents; stale line
+citations in two ADRs; a developer's absolute home path as the benchmark default;
+`Cargo.toml` describing a check the binary does not perform; a new Windows-only
+`unsafe` RSS probe without a recorded reason; two half-merged sentences. Each is
+fixed or recorded in `ATOM-CHANGE-20261026-001`.
+
+#### Limitations
+
+The reviewer could not run a build, a test or a lint (read-only shell), so the
+compilation of the tree it read is taken from the gate's execution, not from its
+own. It could not verify Burn 0.22's `AppliedModule` semantics, so finding 6 was
+stated conditionally and was resolved by test rather than by argument.
+
+---
+
+### ATOM-REVIEW-20261024-011 - The first executable quality-gate verdict: `D0`-`D5`
 
 **Date:** 2026-10-24 (UTC)
 **Reviewer:** the `quality-gate` agent, read-only and executable through
@@ -245,6 +367,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\gate.ps1
 
 Until it is green and recorded, no feature moves to `Verified` and `ML-R02`
 stays unmet.
+
+**Correction (2026-10-26).** The last clause is no longer true, and the re-gate
+this entry asked for was run: `ATOM-REVIEW-20261026-002`, same verdict shape
+(FAIL on documentation, PASS on execution, six gates and 511 tests measured by
+the gate itself). `ML-R02` **is met** since `ATOM-CHANGE-20261025-003`: the
+six-layer Burn encoder and the WordPiece tokenizer exist, and
+`embedder::select` returns a `BurnEmbedder` when both artifacts load. The feature
+stays `Implemented` for the reason the re-gate gave - no per-chain reviewer read
+the encoder span, and no test loads a real model - not because the encoder is
+missing.
 
 #### Limitations
 

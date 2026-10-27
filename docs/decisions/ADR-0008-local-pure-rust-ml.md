@@ -2,6 +2,7 @@
 
 > **Status:** Accepted
 > **Date:** 2026-10-24
+> **Amended:** 2026-10-26 (§11 correction, §12.1 pair-count note)
 > **Owner:** architect
 
 ## Context
@@ -367,6 +368,14 @@ hand-written WordPiece tokenizer and a key-mapped SafeTensors load, is a large
 piece of work. If it proves too large for this phase, the following is the
 **agreed outcome**, and it is a legitimate one:
 
+**Correction (2026-10-26).** The condition did **not** happen: the encoder and
+the tokenizer were built in `D4.M5`/`D4.M6`, `ML-R02` is met, and a deployment
+that supplies both artifacts gets a Burn embedding rather than `Disabled`. What
+follows is the fallback that *would* have applied. It is retained because the
+decision and its reasoning are part of the record; read the "what would have
+been not met" bullet below as a statement about that fallback, not about the
+feature as built.
+
 - **ML ships as `Disabled` in every deployment.** `semantic` and `hybrid` answer
   with lexical results and `200`, `degraded: true`,
   `degraded_reason: "ml_disabled"`. A match answers `409`. A reindex answers
@@ -382,12 +391,12 @@ piece of work. If it proves too large for this phase, the following is the
   `Deterministic` and `Disabled`, the three endpoints, the degradation rule, the
   ownership predicates, the idempotent reindex, the seeder's `--with-embeddings`,
   and the whole test suite.
-- **What is not met, and is recorded as not met:** `ML-R05`'s scored modes and
-  `ML-R09`'s manual quality run. They stay unmet in
-  [`../project-truth.md`](../project-truth.md) §18.3 and in
-  [`../features/ml/status.md`](../features/ml/status.md); the feature is not
-  relabelled, and no requirement is quietly redefined. The reason is filed under
-  [`../engineering/known-issues.md`](../engineering/known-issues.md).
+- **What would have been not met in that fallback:** `ML-R05`'s scored modes and
+  `ML-R09`'s manual quality run. The fallback was not taken: the encoder landed,
+  `ML-R02` is met, `ML-R05` is implemented, and `ML-R09`'s quality half is the
+  recorded `atom-ml-bench` run. No requirement was redefined; the fallback stays
+  in this section because it is the gate §6 built, and this correction records
+  that the gate was not needed.
 - **What must not happen instead:** a fake encoder that returns plausible
   numbers, a downloaded model, a second language runtime, a sentence-embedding
   service, or the deletion of the degradation tests because "there is no model
@@ -422,12 +431,21 @@ on the development machine. Recorded in
 | Worst case, 256 tokens (the truncation bound) | **804 ms** mean (min 775, max 834) |
 | Peak RSS | **183.8 MiB** |
 | Determinism | bit-identical for the same input; different for a different input |
-| Semantic quality | 5 of 5 probe queries returned the expected nearest text |
+| Semantic quality | **15 of 15** evaluation queries returned the expected nearest text (see the pair-count note below) |
 
 Roughly **5,600 times** the spike's 0.017–0.020 ms per text, which measured a
 lookup, a mean-pool and a projection (§8.1). This is the real cost of an
 embedding, and §8's numbers are superseded for every purpose except the record
 of what the spike proved.
+
+**Pair-count note (2026-10-26).** Two counts are attached to the same benchmark
+in the record: **fifteen**, which the current `src/bin/atom-ml-bench.rs` defines
+and which [`../features/ml/status.md`](../features/ml/status.md) §5 records, and
+**five**, which this table carried when it was first written from an earlier
+version of the probe. The repository does not hold the transcript, so which count
+the recorded run produced cannot be determined here. The five-query figure is
+marked **unverified** in status.md §4; the fifteen-pair figure is the one the
+current binary produces. No number was invented to reconcile them.
 
 #### 12.2 What it invalidates, and what it does not
 
@@ -439,15 +457,15 @@ The chain that prompted this amendment was opened with the arithmetic
 exactly **one** text — the query — and compares it against vectors that are
 already stored:
 
-- `MlService::search` (`src/ml/service.rs:152`) calls `embed_query` once and
+- `MlService::search` (`src/ml/service.rs`, `fn search`) calls `embed_query` once and
   then hands the vector to `hybrid`.
-- `MlService::hybrid` (`src/ml/service.rs:250`) contains **no inference call at
+- `MlService::hybrid` (`src/ml/service.rs`, `fn hybrid`) contains **no inference call at
   all**. It selects at most `ml.candidate_limit` candidate *identifiers*
   (`NoteRepository::lexical_candidates`), loads their **stored** vectors
   (`MlRepository::vectors_for_sources`), and ranks them with `rank` — one dot
   product per row, over 384 `f32` values.
 - `ml.timeout_seconds` is applied inside `MlService::embed`
-  (`src/ml/service.rs:519`), which wraps **one** `Embedder::embed` call.
+  (`src/ml/service.rs`, `fn embed`), which wraps **one** `Embedder::embed` call.
 
 The number of inferences per request is therefore:
 

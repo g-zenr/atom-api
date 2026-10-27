@@ -1,69 +1,62 @@
-> **Read this first: sections 1, 2.1 and the requirement table predate the
-> encoder.** They say `ML-R02` is met, and that was true when written. The
-> six-layer Burn encoder and its WordPiece tokenizer are now built and measured
-> - see **section 5, "The encoder, measured"**: 15 of 15 queries returned the
-> expected nearest text, determinism holds, peak RSS is 183.8 MiB, and the
-> forward pass costs 88 ms for a short text and 804 ms at the 256-token bound.
-> **`ML-R02` is met.** `ML-R09` is met by the fifteen-pair evaluation in
-> `testing.md` 2.7, which proves the ranking pipeline and not model quality;
-> the only quality evidence is the fifteen-query real-model evaluation in section 5.
->
-> The sections below are left as written because the record of what was true,
-> and when, is worth keeping. Where they say `ML-R02` is met, read this banner.
 **Status:** Implemented
 
 # Local machine learning — status
 
-> **Last updated:** 2026-10-25 (chain `D4.M3`–`M6`; gate `ATOM-REVIEW-20261024-011`)
+> **Last updated:** 2026-10-26 (re-gate of `ATOM-REVIEW-20261024-011`; measurements at `4df383e`)
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-ML-001`](specification.md)
+> **Read this first:** `ML-R02` **is met**. `embedder::select` returns a
+> `BurnEmbedder` when `ml.enabled` is true, `ml.backend` is `flex`, and both the
+> SafeTensors file and the vocabulary load. The feature is `Implemented` and not
+> `Verified` because no independent reviewer has read the encoder span, and the
+> re-gate of `ATOM-REVIEW-20261024-011` is recorded separately in the engineering
+> record ([`../../engineering/review-log.md`](../../engineering/review-log.md)).
+> Read §1, §2.1 and §5 together: they now say the same thing.
 
 ## 1. The status
 
-The feature is **Implemented**. It is **not** `Verified`, and one requirement,
-`ML-R02`, is **not met**.
+The feature is **`Implemented`**. It is **not `Verified`**, and `ML-R02` **is
+met**.
 
 `Implemented` is used exactly as [`AGENTS.md`](../../../AGENTS.md) §6 defines it:
-the code exists. It is not evidence that the code behaves correctly, and this
-document does not claim that it does. **`Verified` is not claimed and must not
-be**, because `ML-R02` is met: no code path produces an embedding from a Burn
-model. The suite is not the gap — the 40 `ml_api` cases, the 39 cases in
-`src/ml/` and the seeder case pass in the run recorded in §1.5, and the first
-executable `quality-gate` run over `D0`-`D5` measured all six gates at `0` and
-504 tests (`ATOM-REVIEW-20261024-011`). Everything the feature can claim from a
-deterministic embedder is covered; the requirement it cannot meet is the model.
+the code exists and compiles. `Verified` is not claimed on the strength of the
+suite alone: as every Phase 2 status document records, a feature is promoted only
+after a review has read the implementation. The recorded check exists (§1.5); the
+review of the encoder span does not (§1.3). A green suite is not a review, and
+this document does not claim one.
 
 The requirements `ML-R01`…`R09` are agreed in
 [`project-truth.md`](../../project-truth.md) §18.3, with acceptance criteria. The
 design decision is [`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md),
-finalised with the spike's measured result in its §8.
+finalised with the spike's measured result in its §8 and amended with the real
+encoder's measurement in its §12.
 
 ### 1.1 What exists
 
-Read from the working tree on 2026-10-25. The feature is committed: the spike at
-`bfd1288`, the finalised ADR at `a4d33a3`, the module, schema, operations and
-The two `#[allow(clippy::cast_possible_truncation)]` attributes in `src/ml/burn_embedder.rs`
-were removed and committed in `505a189`; zero suppressions remain in `src/` or
-`tests/`, and the tree is clean.
+Read from the working tree on 2026-10-26. The feature is committed: the spike at
+`bfd1288`, the finalised ADR at `a4d33a3`, the module, schema and operations at
+`ba198ff`, the close-out at `ba91008`, and the removal of the two
+`#[allow(clippy::cast_possible_truncation)]` attributes at `505a189`. `grep
+"allow(" src/ tests/` returns no hits.
 
 | Piece | State | Evidence |
 | ----- | ----- | -------- |
 | The `Embedder` trait, `EmbedderStatus`, `MlError`, `l2_norm`, the start-up selection | Exists | `src/ml/embedder.rs` |
 | `Deterministic` | Exists | `src/ml/deterministic.rs` |
 | `Disabled` | Exists | `src/ml/disabled.rs` |
-| `BurnEmbedder` as an **encoder** | **Does not exist.** It is a weight lookup, a mean-pool and a projection. | `src/ml/burn_embedder.rs` |
-| `src/ml/tokenizer.rs` | **Does not exist** | — |
+| `BurnEmbedder` as an **encoder** | **Exists.** Six pre-LayerNorm BERT layers, 12 heads of width 32 (`HEAD_DIM = HIDDEN / HEADS` = 384/12), a 384→1536→384 feed-forward pair, masked mean pooling, L2 normalisation at write time, and roughly a hundred tensors loaded through `burn_store`. | `src/ml/burn_embedder.rs`; six unit cases |
+| `src/ml/tokenizer.rs` | **Exists.** Hand-written WordPiece: lowercase, accent strip, greedy longest-match against `vocab.txt`, `##` continuations, `[UNK]`, `[CLS]`/`[SEP]`, attention mask and a 256-token truncation bound. | `src/ml/tokenizer.rs`; fifteen unit cases |
 | `service.rs`, `repository.rs`, `dto.rs`, `handlers.rs` | Exist, carrying their `utoipa::path` annotations | `src/ml/` |
 | `MlService` in `AppState` | Exists, built from `crate::ml::embedder::select(&config.ml)` | `src/state.rs` |
 | Migration `0006_embeddings.sql` and the `embeddings` table | Exists: the table, its three `CHECK`s and its two indexes | `migrations/0006_embeddings.sql`; [`../../database/schema.md`](../../database/schema.md) §11.6 |
 | The seven `ml.*` settings | Exist: `config/ml.toml`, `MlSettings`, the loader, the `APP_ML_*` overrides and `.env.example` | `config/ml.toml`, `src/config/`, `.env.example` |
 | The three operations | **Mounted and published.** `ROUTE_TABLE` declares them and `api_routes()` serves them; the surface is 51 operations. | `src/api/routes.rs`, `tests/openapi_contract.rs` |
 | The embedding purge on delete | Exists: `notes` and `job_applications` delete their embeddings in the statement that deletes the source | `src/notes/repository.rs`, `src/job_applications/repository.rs` |
-| `tests/ml_api.rs` | Exists: **40 cases**, `#![cfg(feature = "ml")]`. **All 40 pass** (run of 2026-10-24, §1.5). | `tests/ml_api.rs`; [`testing.md`](testing.md) §2 |
-| Unit tests in `src/ml/` | **Exist**: the selection rule, the normalisation invariant, the deterministic embedder, the cosine function, the dimension guard, the timeout mapping and the DTO shapes. | `src/ml/{embedder,deterministic,service,dto,hash_vector}.rs` |
-| Unit tests for `ml.*` | **Seven exist** in `src/config/tests.rs` and pass: the defaults, the environment override, the backend vocabulary, the candidate-limit floor, the dimension, the timeout ceiling and the candidate-limit relation to the page maximum. | `src/config/tests.rs` |
-| The seeder's `--with-embeddings` | **Exists**: one deterministic row per seeded note and per application, skipped on a second run. `the_seeder_writes_embeddings_only_with_the_flag` passes. | `src/bin/atom-seed.rs`, `tests/seeder.rs` |
-| The setting table in [`config/README.md`](../../../config/README.md) | **Updated** with the seven `ml.*` rows, as `AGENTS.md` §4.11 requires. `atom-docs` reports `OK (0 warnings)`. | `config/README.md` |
+| `tests/ml_api.rs` | Exists: **41 cases**, `#![cfg(feature = "ml")]`. **All 41 pass** (run of 2026-10-26, §1.5). | `tests/ml_api.rs`; [`testing.md`](testing.md) §2 |
+| Unit tests in `src/ml/` | **64 cases**, including six in `burn_embedder.rs` and fifteen in `tokenizer.rs`. | `src/ml/*.rs` |
+| Unit tests for `ml.*` | **Seven** in `src/config/tests.rs` (58 cases in the file) and pass: the defaults, the environment override, the backend vocabulary, the candidate-limit ceiling, the dimension, the timeout ceiling and the guarantee that no relation to the page maximum survives. | `src/config/tests.rs` |
+| The seeder's `--with-embeddings` | **Exists**: one deterministic row per seeded note and per application, skipped on a second run. `tests/seeder.rs` holds 21 cases, one of them `the_seeder_writes_embeddings_only_with_the_flag`. | `src/bin/atom-seed.rs`, `tests/seeder.rs` |
+| The setting table in [`config/README.md`](../../../config/README.md) | **Updated** with the seven `ml.*` rows, as `AGENTS.md` §4.11 requires. `atom-docs --strict` reports `OK (0 warnings)`. | `config/README.md` |
 | The model file | Absent, and it never enters the repository | [`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) |
 
 The `ml` Cargo feature — in the default set — gates `burn` and
@@ -72,12 +65,12 @@ the storage and the three routes are compiled in both builds, so the router, the
 route table and the OpenAPI document describe one surface rather than two that
 can drift. `cargo check --no-default-features` compiles the API without Burn.
 
-### 1.2 The shipped behaviour is lexical
+### 1.2 The shipped default is lexical
 
-**The shipped behaviour of this feature is lexical, because `ml.enabled` is
-`false` by default.** That value is in [`config/ml.toml`](../../../config/ml.toml),
-in `MlSettings`, and in the loader; `select` returns `Disabled` whatever
-`ml.backend` says.
+**The shipped behaviour is lexical by default, because `ml.enabled` is `false` by
+default.** That value is in [`config/ml.toml`](../../../config/ml.toml), in
+`MlSettings`, and in the loader; with `ml.enabled = false`, `select` returns
+`Disabled` whatever `ml.backend` says.
 
 So a deployment that does nothing serves:
 
@@ -93,73 +86,77 @@ That is the pre-agreed fallback of
 degradation contract of [`api.md`](api.md) §2.2, not an accident and not a
 failure to configure anything. A personal workspace ships with no model file, no
 vector index and no inference cost, and the full-text search that Phase 1
-already provides is the answer. The lexical behaviour itself belongs to the
-notes feature (`GET /api/v1/notes?search=…`); this feature adds the scored
-modes, which are unavailable in the default deployment.
+already provides is the answer.
 
-**Every one of them has been observed**, on 2026-10-24, against `atom_dev` with
-`ml.enabled = false`; the transcript is in §1.5. They are the pre-agreed fallback
-of [`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) §11 and the
-degradation contract of [`api.md`](api.md) §2.2, not an accident and not a
-failure to configure anything. A personal workspace ships with no model file, no
-vector index and no inference cost, and the full-text search that Phase 1
-already provides is the answer. The lexical behaviour itself belongs to the
-notes feature (`GET /api/v1/notes?search=…`); this feature adds the scored
-modes, which are unavailable in the default deployment.
+A deployment that sets `ml.enabled = true` and `ml.backend = flex` and supplies
+both artifacts gets the Burn encoder instead (§5). One that sets them and
+supplies no artifact gets the same lexical fallback with `degraded_reason`
+`model_missing`, and logs the internal cause once.
+
+**Every one of the default answers has been observed**, on 2026-10-24, against
+`atom_dev` with `ml.enabled = false`; the transcript is in §1.6.
 
 ### 1.3 Why this is not `Verified`
 
-`Verified` means "implemented **and** covered by a test or a recorded check that
-passes" (`AGENTS.md` §6). The second half is now true — §1.5 records the run —
-so what keeps this file at `Implemented` is the first half of the requirement
-that is still unmet:
+`Verified` is not claimed, and the one reason is the review — not the code, not
+the suite and not the model:
 
-1. **`ML-R02` is met.** No code path produces a vector from a Burn model:
-   the six-layer encoder and the WordPiece tokenizer do not exist. §2.1 is the
-   full statement. A feature whose named model requirement is unmet cannot be
-   marked `Verified` however green its suite is.
-2. **`ML-R09`'s quality half has not been measured.** The fixture test passes,
-   which proves the plumbing; it says nothing about whether a model ranks a
-   paraphrase correctly, and there is no encoder to evaluate.
+1. **No independent reviewer has read the encoder span.**
+   `src/ml/burn_embedder.rs` and `src/ml/tokenizer.rs` implement the network and
+   the tokenizer, and no `code-reviewer` or `quality-gate` row says they were
+   read.
+2. **No re-gate of `ATOM-REVIEW-20261024-011` had been recorded.** The first
+   executable gate run over `D0`–`D5` returned FAIL on documentation. This
+   document is part of the repair; the re-gate itself is recorded in the
+   engineering record, which this document does not pre-empt.
 
-Everything else that stood between `Implemented` and `Verified` when this file
-was first written has been closed: the 40 integration cases pass, `src/ml/` has
-its unit cases, the seeder writes embeddings behind its flag, and the `ml.*` rows
-are in [`config/README.md`](../../../config/README.md).
+Everything else that stands between `Implemented` and `Verified` is closed: the
+41 `ml_api` cases, the 64 unit cases in `src/ml/`, the seeder case and the full
+suite pass (§1.5); the encoder and tokenizer exist and are measured (§5); and the
+`ml.*` rows are in [`config/README.md`](../../../config/README.md).
 
-### 1.4 What `ML-R02` does and does not have
+### 1.4 What `ML-R02` requires, and what exists
 
-To be read as one statement, because each half alone is misleading:
+To be read as one statement, because each row alone is misleading:
 
 | The requirement | What exists |
 | --------------- | ----------- |
 | Burn v0.22 is a dependency, behind the default `ml` feature | **Yes.** `cargo tree --no-default-features` lists no `burn` crate. |
-| The `flex` CPU backend is the one used | **Yes**, by the spike and by `src/bin/atom-ml-spike.rs`, which remains frozen as the measurement record. |
-| Weights load from a local SafeTensors file | **Yes**, for three tensors: the word-embedding table and the pooler pair. |
-| An encoder produces an embedding | **No.** No attention block, no feed-forward block, no LayerNorm, no WordPiece tokenizer, and the pooling is the wrong one for the model. |
-| A request can obtain a Burn vector | **No.** `embedder::select` returns `Disabled` with `model_missing` for `ml.backend = flex`, even when both artifacts are present, and logs the cause `ml_model_unavailable` once. |
+| The `flex` CPU backend is the one used | **Yes**, by `BurnEmbedder` and by the encoder benchmark. |
+| Weights load from a local SafeTensors file | **Yes**, about a hundred tensors through `burn_store` and an explicit key map. The pooler pair is deliberately not loaded: this model uses masked mean pooling, not `pooler.dense`. |
+| An encoder produces an embedding | **Yes.** Six transformer layers with 12-head self-attention of width 32, GELU feed-forward, two LayerNorms per layer, masked mean pooling and L2 normalisation. |
+| A request can obtain a Burn vector | **Yes.** `embedder::select` sends `MlBackend::Flex` to `select_burn`, which loads `ml.model_path` and the vocabulary and returns `Arc<BurnEmbedder>` with `status() == Ready`. A missing or unloadable artifact returns `Disabled` with `model_missing`; start-up continues. |
 
-The last two rows are the requirement. A dependency and a file that loads prove
-the framework choice, which is what the spike was asked to prove; they do not
-prove that embeddings are produced. **`ML-R02` is therefore not met**, and the
-"not met" is reported to a client as `degraded_reason: model_missing` on a
-search and `409` on a match or a reindex, because a fourth client-visible reason
-code would be a contract change (`architecture.md` §12.9).
+`ML-R02` is therefore met, and the dependency alone would not satisfy it: the
+requirement is that embeddings are produced by Burn, and `BurnEmbedder::embed`
+tokenises, runs the forward pass and normalises the output.
 
-### 1.5 The run that was made
+### 1.5 The runs that were made
 
-2026-10-24, from the repository root. The database was `atom_test`
-(`TEST_DATABASE_URL`) for the suite and `atom_dev` for the manual transcript in
-§1.6.
+**2026-10-26, tree `4df383e`, the re-gate measurement.** The six gates are green.
+`cargo test --all-targets --locked` reports **511 passed, 0 failed** on Windows.
+The two `tests/shutdown.rs` cases are unix-only, so a unix host reports **513**.
+`cargo test --all-targets --locked -- --list` returns the same split:
 
-| Command | Result |
-| ------- | ------ |
-| `cargo fmt --all` | No changes after the final pass. |
-| `cargo check --all-targets --locked` | `0` |
-| `cargo clippy --all-targets --all-features --locked -- -D warnings` | `0` |
-| `TEST_DATABASE_URL=…/atom_test cargo test --all-targets --locked` | `0` — 212 library tests, 40 in `tests/ml_api.rs`, 20 in `tests/seeder.rs`, 10 in `tests/openapi_contract.rs`, and every other binary green. |
-| `cargo check --no-default-features --all-targets --locked` | `0` — the API builds without Burn. |
-| `cargo run --bin atom-docs` | `atom-docs: OK (0 warning(s))` |
+| Target | Cases | Target | Cases |
+| ------ | ----- | ------ | ----- |
+| `lib` | 216 | `openapi_contract` | 10 |
+| `atom-docs` | 3 | `projects_tasks_api` | 25 |
+| `atom-seed` | 13 | `seeder` | 21 |
+| `auth_api` | 29 | `shutdown` | 0 on Windows (2 on unix) |
+| `claims_api` | 56 | `claims_flow` | 3 |
+| `claims_schema` | 10 | `contract_sweep` | 2 |
+| `docs_route` | 2 | `job_applications_api` | 51 |
+| `job_applications_flow` | 2 | `jobs_schema` | 11 |
+| `list_query` | 4 | `ml_api` | 41 |
+| `notes_api` | 12 | — | — |
+
+**2026-10-24, the earlier record.** The first executable `quality-gate` run over
+`D0`–`D5` measured the six gates at `0` and **504** tests on Windows
+(`ATOM-REVIEW-20261024-011`), with 40 `ml_api` cases at that point (41 today).
+Those are history: the **511** figure above is the 2026-10-26 measurement, and
+the suite has since grown to **535** (2026-10-27, the API-keys chain: 10
+`api_keys_api` cases and 13 unit tests in `src/api_keys/`).
 
 Scores are compared with a tolerance (`1e-4`) rather than for equality: `vector`
 is `REAL[]`, so a stored component is an `f32` and an exact comparison would
@@ -179,6 +176,9 @@ started server, and `curl`. The three answers are the whole point of `ML-R06`:
 The same search was then repeated with `ml.enabled = true` and
 `ml.backend = flex` and **no model file**: it answers `200`, `degraded: true`,
 `degraded_reason: model_missing`. No request path returned `500` or `503`.
+`model_missing` is the state a deployment gets when it turns ML on without
+supplying the artifacts; the default deployment, with `ml.enabled = false`, never
+looks for them, and one that supplies the artifacts is no longer degraded (§5).
 
 ## 2. Requirement by requirement
 
@@ -188,95 +188,177 @@ that no test can pin.
 
 | Requirement | State | Evidence |
 | ----------- | ----- | -------- |
-| `ML-R01` All inference runs locally in the process, with no outbound call and no second runtime. | **Met in the code.** The module has no HTTP client, spawns no process, and the spike ran in-process. | Inspection of `src/ml/`; [`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) §1. `the_deterministic_embedder_performs_no_io` pins the testable half. |
-| `ML-R02` Burn v0.22, the `flex` backend, SafeTensors weights, no extension. | **Not met.** See §1.4 and §2.1. | `burn` 0.22 is behind the default `ml` feature and the spike loaded an 86.66 MB SafeTensors file on `flex`; **no encoder produces a vector.** |
-| `ML-R03` The `Embedder` trait has exactly `Burn`, `Deterministic` and `Disabled`. | **Met as a surface.** Exactly three implementations exist and tests select `Deterministic`. The `Burn` one is a stand-in. | `src/ml/`; selection in `embedder.rs::select`; `ml_disabled_selects_the_disabled_embedder`, `a_missing_model_selects_the_disabled_embedder`. |
+| `ML-R01` All inference runs locally in the process, with no outbound call and no second runtime. | **Met in the code.** The module has no HTTP client, spawns no process, and the encoder runs in-process. | Inspection of `src/ml/`; [`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) §1. `the_deterministic_embedder_performs_no_io` pins the testable half. |
+| `ML-R02` Burn v0.22, the `flex` backend, SafeTensors weights, no extension. | **Met.** `embedder::select` returns a `BurnEmbedder` when both artifacts load; the network and the tokenizer are real. | `src/ml/embedder.rs::select`, `src/ml/burn_embedder.rs`, `src/ml/tokenizer.rs`; §2.1 and §5. |
+| `ML-R03` The `Embedder` trait has exactly `Burn`, `Deterministic` and `Disabled`. | **Met as a surface.** Exactly three implementations exist; every automated case uses `Deterministic` or the synthetic encoder, and none loads a model file. | `src/ml/`; selection in `embedder.rs::select`; `ml_disabled_selects_the_disabled_embedder`, `a_missing_model_selects_the_disabled_embedder`. |
 | `ML-R04` `REAL[]` storage with `model_id` and `dim`, unique per source. | **Met in the schema and the repository.** The unique index and the dimension `CHECK` are the database's copy; the repository upserts against the first. | `migrations/0006_embeddings.sql`, `src/ml/repository.rs`; `reindex_writes_one_row_per_source`, `reindex_writes_unit_vectors` pass. |
-| `ML-R05` Three search modes, with hybrid as a bounded lexical candidate set re-ranked by cosine. | **Implemented.** The service implements the three modes and the bounded re-rank; the operation answers. | `src/ml/service.rs`, `src/ml/handlers.rs`; eleven cases in [`testing.md`](testing.md) §2.1 pass. |
+| `ML-R05` Three search modes, with hybrid as a bounded lexical candidate set re-ranked by cosine. | **Implemented.** The service implements the three modes and the bounded re-rank; the operation answers. A hit at or below cosine zero is not returned. | `src/ml/service.rs`, `src/ml/handlers.rs`; eleven cases in [`testing.md`](testing.md) §2.1 pass. |
 | `ML-R06` Degradation to lexical with `200` when ML is off or the model is missing. | **Implemented and observed.** The default is `ml.enabled = false`, the search path degrades with all four fields, and match and reindex answer `409`. | `config/ml.toml`, `src/ml/service.rs`; seven cases pass, and §1.6 is the manual transcript. |
 | `ML-R07` Reindex is idempotent, owner-scoped, and `409` when ML is disabled. | **Implemented.** The service upserts per source, skips what is current, sweeps orphans, and refuses when the embedder is disabled. | `src/ml/service.rs`, `src/ml/repository.rs`; seven cases in [`testing.md`](testing.md) §2.5 pass. |
 | `ML-R08` Every read and write is owner-scoped; a foreign source is `404`. | **Implemented.** Every statement in `MlRepository` binds `user_id`; the purge CTE is scoped the same way; a foreign application is a `404`. | `src/ml/repository.rs`; four cases in [`testing.md`](testing.md) §2.3 pass. |
-| `ML-R09` 15 fixture queries with expected notes, and the real model's quality as a recorded manual run. | **Half met. The plumbing half passes; the quality half has not been measured.** | `the_fixture_queries_find_the_expected_notes` passes; §4 below. |
+| `ML-R09` 15 fixture queries with expected notes, and the real model's quality as a recorded manual run. | **Met, with the pair count of the manual run marked unverified.** The fixture passes under `Deterministic`; the real encoder's retrieval is recorded in §5. | `the_fixture_queries_find_the_expected_notes` passes; §4 and §5. |
 
-### 2.1 `ML-R02` is met
+**One requirement whose prose is broader than the code.** `ML-R03` says "every
+automated test uses `Deterministic`". Six cases in `burn_embedder.rs` use the
+synthetic encoder instead, and fifteen in `tokenizer.rs` use a fixture
+vocabulary. They load no model file, which is the requirement's stated acceptance
+criterion, but the sentence is broader than what exists. It is recorded here as a
+finding rather than reworded: the requirement stands as written, and no test has
+been changed to fit it.
 
-**`ML-R02` is met: the six-layer encoder is unbuilt, and the spike measured
-a lookup and a projection — a lower bound on the plumbing, not an embedding.**
+### 2.1 `ML-R02` in full
 
-The reason, in the order it matters:
+**`ML-R02` is met: `embedder::select` returns a `BurnEmbedder` when both
+artifacts load.**
 
-1. **No attention block, no feed-forward block and no LayerNorm has ever run in
-   this repository.** `BurnEmbedder` performs a weight lookup, a mean-pool and a
-   projection. A lookup is not a transformer layer, and its cost is a floor under
-   the cost of one.
-2. **The tokenizer is a stand-in.** There is no `tokenizer.rs` and no WordPiece
-   vocabulary loader; without it even a correct encoder would receive the wrong
-   token ids.
-3. **Because of 1 and 2, the spike's numbers cannot be read as a measurement of
-   an embedding.** The 0.017–0.020 ms per text and the 93.5 MiB peak RSS in
-   [`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) §8 are honest
-   numbers about a different network, recorded with those caveats in
-   `ATOM-CHANGE-20261024-010`.
+1. **The network exists.** `src/ml/burn_embedder.rs` declares six
+   pre-LayerNorm BERT layers. Each has 12-head self-attention with head width
+   `HEAD_DIM = HIDDEN / HEADS` = **32** (384 / 12, not 64), a 384→1536→384
+   feed-forward pair with GELU, and two LayerNorms, after an embedding block
+   that sums the word, position and token-type embeddings through one
+   LayerNorm. The output is masked mean pooling and L2 normalisation; the
+   pooling is the model's own, not `pooler.dense`, and the pooler tensors are
+   deliberately not loaded.
+2. **The tokenizer exists.** `src/ml/tokenizer.rs` is a WordPiece tokenizer
+   covering lowercase, accent strip, whitespace and punctuation split, greedy
+   longest-match against `vocab.txt`, `##` continuations, `[UNK]`, `[CLS]`/
+   `[SEP]`, the attention mask and the 256-token bound. Fifteen unit cases cover
+   it.
+3. **The load is the real one.** `from_artifacts` loads about a hundred tensors
+   through `burn_store` with an explicit key map from the Hugging Face names. A
+   missing key is a load failure, never a zeroed weight, and an unused tensor
+   that is not in the deliberately-ignored list fails the load.
+4. **The selection reaches it.** `select` matches `MlBackend::Flex` to
+   `select_burn`, which resolves `ml.model_path` and the vocabulary, constructs
+   the encoder and returns it with `status() == Ready`. A missing artifact, a
+   missing vocabulary or an unloadable file returns `Disabled` with
+   `model_missing`, logs the internal cause once and continues start-up.
 
-`ML-R02` is not "nearly met", and it is not met by the dependency alone: a `burn`
-dependency and a SafeTensors file that loads prove the framework choice, which is
-the part the spike was asked to prove. The requirement is that embeddings are
-produced by Burn, and no code path produces a vector with a model's semantics.
-
-This is the one requirement the shipped feature does not satisfy, and it is why
-§1.2 describes the behaviour as lexical rather than as a fallback from a working
-model.
+The spike's lookup and projection were a lower bound on the plumbing, not an
+embedding; §5 is the measurement of the real network. What is *not* established
+is a review of the encoder span — §1.3 says why that keeps the feature at
+`Implemented`.
 
 ## 3. What is missing for `Verified`
 
-1. **The encoder and the tokenizer.** A six-layer BERT encoder loaded with
-   `burn_store`, mean pooling with the attention mask, L2 normalisation at write
-   time, and WordPiece (`architecture.md` §12.3). **`ML-R02` stays unmet until
-   this lands**, and `ML-R09`'s manual run cannot happen without it. The
-   deterministic embedder already satisfies the trait, the unit-length
-   invariant and the storage contract, so the encoder is a new implementation
-   and a reindex rather than a schema change.
-2. **`ML-R09`'s manual quality run.** The fixture test passes and proves the
-   plumbing; it does not prove retrieval quality, and there is no encoder to
-   evaluate. `§4` is the record, and it is still empty.
-3. **A `408` observed end to end.** The mapping from a timed-out inference to
-   `inference_timeout` is unit-tested
-   (`a_timeout_maps_to_the_inference_timeout_degradation`); the HTTP `408`
-   itself needs either a fourth `Embedder` (`ML-R03` forbids one) or a model
-   slow enough to overrun a two-second budget, which is not deterministic. It is
-   a named gap in [`testing.md`](testing.md) §5, not a passing case.
+One thing: **the review.**
 
-Everything else — the schema, the seven settings in all seven places, the three
-operations with the published status codes, the degradation rule, the ownership
-predicates, the idempotent reindex, the delete-side purge and the seeder's
-`--with-embeddings` — exists and is covered by a run that passes (§1.5).
+1. **An independent reviewer must read the encoder span** — the forward pass,
+   the attention shape, the pooling, the normalisation and the tokenizer — and
+   the re-gate of `ATOM-REVIEW-20261024-011` must close the documentation
+   findings. This document is part of that repair; the review outcome belongs in
+   [`../../engineering/review-log.md`](../../engineering/review-log.md).
 
-Only after 1–5, with the run recorded, does `Verified` become a true statement
-about this feature.
+Nothing in the code or the suite is outstanding. The schema, the seven settings
+in all seven places, the three operations with their published status codes, the
+degradation rule, the ownership predicates, the idempotent reindex, the
+delete-side purge, the seeder's `--with-embeddings` and the encoder itself all
+exist and are covered by a passing run (§1.5).
+
+The `408` observed end to end is a **testing** gap, not a `Verified` blocker and
+not a new defect: it needs a model slow enough to overrun the budget or a fourth
+`Embedder` (`ML-R03` forbids one). The mapping is unit-tested
+(`a_timeout_maps_to_the_inference_timeout_degradation`), and the missing case is
+listed in [`testing.md`](testing.md) §6.
 
 ## 4. The manual evaluation record
 
-> **Not run.** The fifteen-query fixture passes, but there is no encoder to
-> evaluate. The spike's numbers do **not** belong here: they measured a lookup
-> and a projection, not retrieval.
+`ML-R09` asks for two different things, and this document keeps them apart:
 
-| Field | Value |
-| ----- | ----- |
-| Model | `all-MiniLM-L6-v2`, SafeTensors, dimension 384 (operator-supplied, not in the repository) |
-| Tokenizer | `vocab.txt` beside the weights |
-| Latency | Not measured for an encoder. The spike's 0.017–0.020 ms per text is a lower bound on a different network. |
-| Memory | Not measured for an encoder. The spike's 93.5 MiB peak RSS is the lookup-only network. |
-| Fifteen queries | `the_fixture_queries_find_the_expected_notes` passes; it proves plumbing only. |
-| Quality | Not measured. `ML-R09`'s manual half is unmet. |
+| Half | What proves it | Where it runs |
+| ---- | -------------- | ------------- |
+| The fixture evaluation | The pipeline: the query is embedded, the stored vectors are compared, the sort runs and the expected note comes first. | CI, `Deterministic` — `the_fixture_queries_find_the_expected_notes`, [`testing.md`](testing.md) §2.7 |
+| The real model's quality | Whether the real encoder retrieves a paraphrase, and its latency and memory. | Once, by hand — `atom-ml-bench`, 2026-10-25, recorded in §5 |
 
-## 5. What a future change must not do
+The manual run **has happened** and is §5; it is not a CI gate. One figure in it
+is not settled: the number of evaluation pairs. The current binary defines
+fifteen (`src/bin/atom-ml-bench.rs`), §5 records fifteen, and
+[`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) §12.1 records five.
+The repository does not hold the transcript, so which count that run produced
+**cannot be determined here**. The fifteen-pair figure is the one the current
+binary produces and is recorded as such; the five-pair figure is kept as an
+earlier probe and is marked **unverified**. The top-1 cosine range is unsettled
+for the same reason: §5 and [`testing.md`](testing.md) §6 carry different ranges
+for the same run, and neither is re-measured here.
+
+## 5. The encoder, measured (2026-10-25)
+
+The six-layer Burn encoder and its WordPiece tokenizer are built, and
+`src/bin/atom-ml-bench.rs` measured the real forward pass in `--release` on this
+machine:
+
+```text
+cargo run --release --bin atom-ml-bench --features ml
+```
+
+`ML-R02` is met: embeddings are produced by Burn v0.22 on the `flex` backend from
+the local SafeTensors file, with masked mean pooling and unit-length output.
+
+| Measurement | Value |
+| ----------- | ----- |
+| 1 text, mean | 88.0 ms (28.8 min, 210.0 max) |
+| 10 texts, mean per text | 111.6 ms |
+| 100 texts, mean per text | 112.6 ms — **11.3 s total** |
+| Worst case, 256 tokens | **804 ms** mean (775 min, 834 max) |
+| Peak RSS | 183.8 MiB |
+| Determinism | identical input twice → identical vector; different input differs |
+| Semantic quality | **15 of 15 queries returned the expected nearest text.** The recorded summaries carry two top-1 ranges — `0.31`–`0.64` here and `0.2664`–`0.6740` in [`testing.md`](testing.md) §6 — and a negative control at `0.1256`; neither range is re-measured here (see the pair-count note in §4). |
+
+The spike's 0.02 ms per text was a lookup and a projection; the encoder is
+roughly **5 600 times** more expensive. That number was a floor, and this is the
+real cost.
+
+### 5.1 What the measurement does and does not change
+
+An earlier draft of this section claimed the measurement "invalidates two shipped
+defaults". **That was wrong**, and it is corrected once here rather than left
+standing:
+
+- A hybrid search does **not** embed its candidates. `MlService::hybrid` selects
+  at most `candidate_limit` candidate ids, loads their **already-stored**
+  vectors, and scores them with one dot product per row. The only inference in a
+  search request is the single query embed.
+- The cost of 200 × 112.6 ms is the cost of **embedding** 200 texts, which is
+  what `POST /ml/reindex` does — not a page, and not a candidate set.
+- A hybrid search at the maximum page size takes about **90 ms**, not 11.3 s.
+- `ml.timeout_seconds = 2` bounds **one inference**, whose worst real case is
+  804 ms at the 256-token truncation bound — a 2.4× margin, not a violation.
+- The re-rank of 200 candidates at dimension 384 is about 230,000 `f64`
+  operations and 307 KB, two orders of magnitude below the inference it follows.
+
+Both defaults stand unchanged: `timeout_seconds` **2 s** and `candidate_limit`
+**200**. [`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) §12 records
+the decision and the arithmetic.
+
+What the measurement **did** expose is a different defect: the old validation
+rule `ml.candidate_limit >= api.pagination.max_limit` bounded the candidate set
+from below on the false premise that a short page was impossible. It is replaced
+by a ceiling, `MAX_ML_CANDIDATE_LIMIT = 1_000`, in
+`src/config/validation.rs`; the floor is gone. The change is applied
+(2026-10-25), and:
+- `the_candidate_limit_is_bounded_above` proves 1,001 refused naming
+  `ml.candidate_limit`, and 1,000 and 3 accepted.
+- `hybrid_never_returns_more_than_the_candidate_limit` proves that a
+  `limit=100` hybrid search with `ml.candidate_limit = 3` answers `200` with
+  three items, `total` 3 and `has_more: false` — a well-formed short page.
+- The four descriptions (`config/ml.toml`, `.env.example`,
+  `config/README.md`, `docs/architecture/deployment.md`) say that
+  `ml.timeout_seconds` bounds one inference and that `ml.candidate_limit` is a
+  work bound with a ceiling of 1,000, unrelated to the page size.
+
+`ML-R09`'s fixture evaluation remains the CI half. The real-model run above is
+the quality half: it is what the fifteen-pair evaluation in
+[`testing.md`](testing.md) §2.7 does **not** prove, and it is recorded rather
+than asserted. The pair count is the one figure in it that is unverified (§4).
+
+## 6. What a future change must not do
 
 - **Do not change an accepted requirement silently.** A revision goes through
   [`project-truth.md`](../../project-truth.md) §18.4.
-- **Do not promote this file to `Verified` because code exists.** `Verified`
-  needs a recorded passing run; §1.3 says what is missing.
-- **Do not describe the Burn path as producing embeddings until the encoder
-  exists.** §2.1 is the sentence that keeps it honest.
+- **Do not promote this file to `Verified` because the suite is green.** The
+  missing half is the review (§1.3), not another test.
+- **Do not describe the encoder as reviewed before a reviewer has read it.**
+  §1.3 is the sentence that keeps it honest.
 - **A second runtime or an outbound call is a new decision**, not an
   implementation detail: it needs an amendment to
   [`project-truth.md`](../../project-truth.md) §6.1 and a superseding ADR.
@@ -291,111 +373,18 @@ about this feature.
 The build cost the `ml` feature already imposes is `KI-022` in
 [`../../engineering/known-issues.md`](../../engineering/known-issues.md).
 
-## 6. Related documents
+## 7. Related documents
 
 | Document | Contents |
 | -------- | -------- |
 | [`specification.md`](specification.md) | Purpose, scope, non-goals, accepted requirements, user-facing behaviour, acceptance criteria, limitations. |
 | [`architecture.md`](architecture.md) | The modules, the `Embedder` trait and its invariants, storage and cleanup, the search pipeline, degradation, configuration, the security boundary, and §12 — the build contract for `M3`–`M6`. |
 | [`api.md`](api.md) | The three endpoints with their request and response shapes, status codes, error cases and the degradation contract. |
-| [`testing.md`](testing.md) | The 40 cases that exist, what each proves, and the honest gaps. |
+| [`testing.md`](testing.md) | The 41 cases that exist, what each proves, and the honest gaps. |
 | [`../../testing/strategy.md`](../../testing/strategy.md) | The layers, and which layer proves which ML property. |
 | [`../../api/README.md`](../../api/README.md) | The published surface, now 51 operations. |
 | [`../../api/conventions.md`](../../api/conventions.md) | The search modes and the degradation rule, §17. |
 | [`../../database/schema.md`](../../database/schema.md) | The `embeddings` table, §11.6. |
 | [`../../database/seeding.md`](../../database/seeding.md) | The seeder's `--with-embeddings` contract, `S4`. |
-| [`../../decisions/ADR-0008-local-pure-rust-ml.md`](../../decisions/ADR-0008-local-pure-rust-ml.md) | The local, pure-Rust decision; §8 the measured result, §9 normalisation, §10 the tokenizer, §11 the fallback. |
-| [`../../engineering/change-log.md`](../../engineering/change-log.md) | `ATOM-CHANGE-20261024-010`, including its Correction block: the numbers and their three caveats. |
-
-## 5. The encoder, measured (2026-10-25)
-
-The six-layer Burn encoder and its WordPiece tokenizer are built, and
-`src/bin/atom-ml-bench.rs` measured the real forward pass in `--release` on this
-machine. `ML-R02` is therefore **met**: embeddings are produced by Burn v0.22 on
-the `flex` backend from the local SafeTensors file, with masked mean pooling and
-unit-length output.
-
-| Measurement | Value |
-| ----------- | ----- |
-| 1 text, mean | 88.0 ms (28.8 min, 210.0 max) |
-| 10 texts, mean per text | 111.6 ms |
-| 100 texts, mean per text | 112.6 ms - **11.3 s total** |
-| Worst case, 256 tokens | **804 ms** mean (775 min, 834 max) |
-| Peak RSS | 183.8 MiB |
-| Determinism | identical input twice -> identical vector; different input differs |
-| Semantic quality | **15 of 15 queries returned the expected nearest text**, cosine 0.31-0.64 |
-
-The spike's 0.02 ms per text was a lookup and a projection; the encoder is
-roughly **5 600 times** more expensive. That number was a floor, and this is the
-real cost.
-
-### The measured cost invalidates two shipped defaults
-
-This is recorded as a finding, not absorbed into a quietly changed setting:
-
-- `ml.timeout_seconds` defaults to **2 s**, and `ml.candidate_limit` to **200**.
-  At 112 ms per text a 200-candidate re-rank needs **22 seconds**, and even the
-  `api.pagination.max_limit` of 100 needs 11.3 s. The defaults cannot both stand
-  with a hybrid search that completes.
-- A single 256-token text costs 804 ms, so a two-candidate worst case already
-  exceeds the 2 s budget.
-
-Either `ml.candidate_limit` drops to roughly **15** at the current timeout, or
-`ml.timeout_seconds` rises toward the 30 s request timeout and the candidate
-limit comes down with it. Both are accepted-contract changes - they are
-`api.md` and `conventions.md` numbers - so they need a decision and an ADR
-amendment, not an implementation tweak. Until then, a hybrid request over a large
-candidate set will hit the timeout and **degrade to lexical results with `200`**,
-which is the behaviour `ML-R06` defines and the tests assert.
-
-`ML-R09`'s fifteen-query fixture evaluation remains outstanding; the 5-of-5 result
-above is the smallest evidence that the vectors are meaningful, not that
-evaluation.
-### Correction (2026-10-25) - the budget is not invalidated
-
-The section above claims the encoder measurement "invalidates two shipped
-defaults" and that a 200-candidate re-rank needs 22 seconds. **That is wrong, and
-it was wrong when written.**
-
-A hybrid search does **not** embed its candidates. `MlService::hybrid` selects at
-most `candidate_limit` candidate ids, loads their **already-stored** vectors, and
-scores them with one dot product per row. The only inference in a search request
-is the single query embed. So:
-
-- the cost of 200 x 112.6 ms is the cost of **embedding** 200 texts, which is what
-  `POST /ml/reindex` does - not a page, and not a candidate set;
-- a hybrid search at the maximum page size takes about **90 ms**, not 11.3 s;
-- `ml.timeout_seconds = 2` bounds **one inference**, whose worst real case is
-  804 ms at the 256-token truncation bound - a 2.4x margin, not a violation;
-- the re-rank of 200 candidates at dimension 384 is about 230,000 `f64`
-  operations and 307 KB, two orders of magnitude below the inference it follows.
-
-Both defaults stand unchanged. `ADR-0008` §12 records the decision and the
-arithmetic.
-
-What the measurement **does** expose is a different defect: the validation rule
-`ml.candidate_limit >= api.pagination.max_limit` bounds the candidate set from
-below, on the false premise that a page shorter than the requested size is
-impossible. It is not - `Pagination::new` computes `has_more` from the real
-total, and a short page is well-formed. The consequence is that the re-rank,
-which `ml.timeout_seconds` does not bound, has **no upper bound at all**: the
-setting is accepted at ten million. The rule should be a ceiling of 1,000, not a
-floor. That change is `D4.M8`, and it **is applied** (2026-10-25):
-
-- `MAX_ML_CANDIDATE_LIMIT = 1_000` is declared in `src/config/validation.rs`
-  beside `MAX_PAGINATION_LIMIT`, and `validate_ml` refuses a value above it
-  through the existing `ConfigError::Invalid` shape. The floor is gone: nothing
-  in `src/` or `config/` relates `ml.candidate_limit` to
-  `api.pagination.max_limit` any more.
-- `the_candidate_limit_is_bounded_above` proves 1,001 refused naming
-  `ml.candidate_limit`, 1,000 accepted, and 3 accepted — a candidate set below
-  the page size is a work bound, not an error.
-- `hybrid_never_returns_more_than_the_candidate_limit` no longer lowers the page
-  bound to obey the old rule. With `ml.candidate_limit = 3` and the page bound
-  left at its configured 100, a `limit=100` hybrid search answers **`200`** with
-  **3 items**, `total` 3 and `has_more: false` — a well-formed short page.
-- The four descriptions (`config/ml.toml`, `.env.example`, `config/README.md`,
-  `docs/architecture/deployment.md`) now say that `ml.timeout_seconds` bounds one
-  inference and that `ml.candidate_limit` is a work bound with a ceiling of
-  1,000 and no relation to the page size. **The defaults did not move: `2` and
-  `200`.**
+| [`../../decisions/ADR-0008-local-pure-rust-ml.md`](../../decisions/ADR-0008-local-pure-rust-ml.md) | The local, pure-Rust decision; §8 the spike, §12 the encoder measurement and the amended bounds. |
+| [`../../engineering/change-log.md`](../../engineering/change-log.md) | `ATOM-CHANGE-20261024-010`, including its Correction block: the spike numbers and their three caveats. |

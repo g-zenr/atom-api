@@ -2,7 +2,7 @@
 
 > **Status:** Proposed (living document; the items whose status column says
 > `Accepted` are agreed in [`project-truth.md`](project-truth.md) §18)
-> **Last updated:** 2026-10-25
+> **Last updated:** 2026-10-26
 > **Owner:** product owner, maintained by the `docs` agent
 
 The future of ATOM beyond the backend foundation. This document lists the
@@ -44,7 +44,7 @@ Two rules follow, and they are the reason the column exists:
 | Phase | Name | Status | What it delivers |
 | ----- | ---- | ------ | ---------------- |
 | 1 | The backend foundation | `In progress` | The modular monolith, authentication, notes, projects, tasks, the versioned API, the documentation and the test suite. Accepted in [`project-truth.md`](project-truth.md) §4. |
-| 2 | The personal-workspace layer | `In progress` | Reimbursement tracking, job application tracking and local machine learning over the owner's notes, on the Phase 1 foundation. Accepted in [`project-truth.md`](project-truth.md) §18; all three features are `Implemented` (twelve, fourteen and three published operations), and the seeder exists. Nothing in the phase is `Verified`; `ML-R02` is met. |
+| 2 | The personal-workspace layer | `In progress` | Reimbursement tracking, job application tracking and local machine learning over the owner's notes, on the Phase 1 foundation. Accepted in [`project-truth.md`](project-truth.md) §18; all three features are `Implemented` (twelve, fourteen and three published operations), the seeder exists and the Burn encoder is built. Nothing in the phase is `Verified`; `ML-R02` is met, and ML waits on a review of the encoder span and the re-gate. |
 | 3+ | Unassigned | — | Everything in §3 whose phase is "Later — unassigned". |
 
 ### 2.1 Phase 2 — the personal-workspace layer
@@ -105,8 +105,8 @@ accepted requirement. They therefore stay "Later — unassigned" rather than
 | ------- | ------ | ----- | ---------- | ----- |
 | Reimbursement tracking | `Implemented` | 2 | Projects (optional link) | Requirements are `REIMB-R01`…`R11` in [`project-truth.md`](project-truth.md) §18.1. Single owner, one currency per claim, no FX. A receipt is a reference, not an upload ([`ADR-0009`](decisions/ADR-0009-receipt-references.md)). All twelve published operations exist and their suite passes, but no reviewer has read the chain that completed them, so the feature is not `Verified`. |
 | Job application tracking | `Implemented` | 2 | Tasks (optional link) | Requirements are `JOB-R01`…`R09` in [`project-truth.md`](project-truth.md) §18.2. It tracks applications and events; it **does not** generate text and does not scrape a job board. Migration `0005`, six Rust modules and all fourteen published operations exist. Not `Verified`: `ATOM-REVIEW-20261024-010` found no code defect but returned FAIL on documentation only, and no gate run after those fixes is recorded. |
-| Local machine learning | `Implemented` | 2 | Notes, job applications | Requirements are `ML-R01`…`R09` in [`project-truth.md`](project-truth.md) §18.3. Local and pure Rust ([`ADR-0008`](decisions/ADR-0008-local-pure-rust-ml.md)); no vector-database service; no outbound AI call. `ML-R02` is met: the Burn encoder produces embeddings (measured, ADR-0008 §12). |
-| Database seeder (development tooling) | `Implemented` | 2 | The Phase 1 schema and every Phase 2 table | Development-only. Not product behaviour and not in [`project-truth.md`](project-truth.md); specified in [`database/seeding.md`](database/seeding.md). `src/bin/atom-seed.rs` exists with 20 passing integration tests and 12 tests in the binary; the chain's review rows (`D2.S1` rows 10-11) are outstanding. A feature that adds a table without adding it to the seeder is not complete. |
+| Local machine learning | `Implemented` | 2 | Notes, job applications | Requirements are `ML-R01`…`R09` in [`project-truth.md`](project-truth.md) §18.3. Local and pure Rust ([`ADR-0008`](decisions/ADR-0008-local-pure-rust-ml.md)); no vector-database service; no outbound AI call. `ML-R02` is met: the Burn encoder produces embeddings (measured, ADR-0008 §12). Not `Verified`: no reviewer has read the encoder span and no re-gate of `ATOM-REVIEW-20261024-011` is recorded. |
+| Database seeder (development tooling) | `Implemented` | 2 | The Phase 1 schema and every Phase 2 table | Development-only. Not product behaviour and not in [`project-truth.md`](project-truth.md); specified in [`database/seeding.md`](database/seeding.md). `src/bin/atom-seed.rs` exists with 21 integration tests in `tests/seeder.rs` and 13 tests in the binary; the chain's review rows (`D2.S1` rows 10-11) are outstanding. A feature that adds a table without adding it to the seeder is not complete. |
 | n8n workflow automation | `Proposed` | Later — unassigned | Projects, tasks, notes | An external integration, and **not Phase 2** (owner decision O7). It is a separate Node service that calls the API; the API never depends on it and it never sits inside the data path of a private record. It does not violate the Rust-only rule because it is not part of the API runtime. |
 | Web frontend | `Proposed` | Later — unassigned | The Phase 1 API | A separate codebase and a separate consumer of the API. The API is already CORS-enabled against an explicit origin allowlist for it. The refresh-token and CSRF questions are `Q-02` and `Q-05`. |
 | Mobile frontend | `Proposed` | Later — unassigned | The Phase 1 API | A separate codebase. The bearer-token model suits a mobile client without the cookie and CSRF obligations a browser brings. |

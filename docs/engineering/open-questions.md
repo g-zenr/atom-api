@@ -399,6 +399,40 @@ note is [`../project-truth.md`](../project-truth.md) §18.4.
 [`../decisions/ADR-0007-money-representation.md`](../decisions/ADR-0007-money-representation.md);
 [`../decisions/ADR-0009-receipt-references.md`](../decisions/ADR-0009-receipt-references.md).
 
+### Q-14 — Is `ML-R03`'s "every automated test uses `Deterministic`" meant literally?
+
+**State:** Open · **Blocks:** nothing; the behaviour is implemented and tested either way
+
+**Context.** `ML-R03` in [`../project-truth.md`](../project-truth.md) §18.3 says
+the embedder is a trait with three implementations and that "every automated test
+uses `Deterministic`". Read literally that is false, and the tree is not going to
+make it true without weakening a test: six cases in `src/ml/burn_embedder.rs`
+exercise the encoder's arithmetic with synthetic tensors, and fifteen in
+`src/ml/tokenizer.rs` exercise the tokenizer with a fixture vocabulary. Neither
+loads a model file or performs I/O, which is the property the requirement exists
+to protect - "no test downloads a model, no test calls out". The forty-one
+`tests/ml_api.rs` cases, which do exercise search and matching end to end, all use
+`Deterministic`.
+
+**The question is whether the requirement means** (a) *no automated test may
+depend on the real model or a network*, which is what the tree satisfies, or
+(b) *no automated test may instantiate any embedder other than `Deterministic`*,
+which would forbid the encoder's own unit tests and leave its arithmetic untested.
+
+**Options.**
+
+| Option | Impact |
+| ------ | ------ |
+| Read it as (a) and amend the wording. | One sentence in §18.3 plus the feature specification; no code change, and the encoder keeps its tests. Requires the owner, because it edits an accepted requirement. |
+| Read it as (b) and delete the encoder/tokenizer unit tests. | The encoder's arithmetic loses all coverage; the suite would still pass. Not recommended, and not done unilaterally. |
+| Leave the text and the finding as they are. | This is the state today: the discrepancy is recorded in [`../features/ml/status.md`](../features/ml/status.md) §2 and nothing claims otherwise. |
+
+**Who decides.** The product owner.
+
+**Related.** [`../project-truth.md`](../project-truth.md) §18.3 `ML-R03`;
+[`../features/ml/status.md`](../features/ml/status.md) §2;
+[`../features/ml/testing.md`](../features/ml/testing.md).
+
 ---
 
 ## Summary
@@ -417,4 +451,5 @@ note is [`../project-truth.md`](../project-truth.md) §18.4.
 | `Q-10` | Which license does ATOM use? | Open | The publication of the repository |
 | `Q-11` | What are the phases after Phase 1? | **Answered** — Phase 2 defined in `roadmap.md` §2 | Nothing any more |
 | `Q-12` | Reload without a restart, and which settings may change at run time | Open | Nothing today |
-| `Q-13` | Are the Phase 2 working assumptions (`A1`–`A6`) correct? | Open | The product behaviour each assumption describes |
+| `Q-13` | Are the Phase 2 working assumptions (`A1`-`A6`) correct? | Open | The product behaviour each assumption describes |
+| `Q-14` | Is `ML-R03`'s "every automated test uses `Deterministic`" literal? | Open | Nothing; the encoder's unit tests depend on the answer |

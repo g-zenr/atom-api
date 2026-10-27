@@ -2,7 +2,7 @@
 
 # Reimbursements — status
 
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-26
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-REIMB-001`](specification.md)
 
@@ -39,9 +39,14 @@ three actions, and the refusals. That entry is the orchestrator's record; it is
 cited here as such, not as evidence this document gathered.
 
 `tests/claims_flow.rs` is committed at `02c5489`, after that run, and adds
-**three** cases, which take the count to **299**:
+**three** cases, which took the count to **299**:
 `ATOM-CHANGE-20261024-008` records the six gates green at that count. That too
 is the orchestrator's record, not a measurement made here.
+
+**Today's size is 511.** `cargo test --all-targets --locked` at `4df383e` on
+2026-10-26 reports 511 passed, 0 failed on Windows (513 on a unix host, where
+the two `shutdown` cases run). The 296 and 299 above are history — 299 at
+`02c5489` — not today's figure, and the measured run is still not a review.
 
 The feature is nevertheless **not** promoted to `Verified` in this document.
 The promotion belongs to the change that closes the chain's review rows —
