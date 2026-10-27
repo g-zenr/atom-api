@@ -137,8 +137,11 @@ curl http://127.0.0.1:3000/health/ready
 
 ## API at a glance
 
-All endpoints live under `/api/v1` and all of them except registration and
-login require `Authorization: Bearer <access_token>`.
+All product endpoints live under `/api/v1`; the two health probes do not. A
+private endpoint accepts a bearer credential in the `Authorization` header, in
+either of two forms: `Authorization: Bearer <access_token>` from the token
+endpoints, or `Authorization: Bearer <api_key>` for a machine client. Only
+registration, login and refresh take no credential at all.
 
 ```bash
 # Register
@@ -190,14 +193,19 @@ atom/api/
 ├── src/
 │   ├── api/          routing, middleware, extractors, OpenAPI
 │   ├── auth/         registration, login, token lifecycle
+│   ├── api_keys/     owner-issued API keys for machine clients
 │   ├── users/        user persistence and the public user shape
 │   ├── notes/        personal notes
 │   ├── projects/     projects
 │   ├── tasks/        tasks
+│   ├── reimbursements/  expense claims, line items and the claim lifecycle
+│   ├── job_applications/  companies, applications, stages and events
+│   ├── ml/           local embeddings, hybrid search and match ranking
 │   ├── config/       settings, loader, validation, message catalogue
 │   ├── helpers/      the shared text validators
 │   ├── utils/        the generic text helpers
 │   ├── bin/atom-docs.rs   documentation checker
+│   ├── bin/atom-seed.rs   development seeder
 │   └── error.rs state.rs pagination.rs ratelimit.rs telemetry.rs health.rs
 ├── config/           the committed configuration files; no secrets
 ├── migrations/       SQLx migrations, embedded in the binary

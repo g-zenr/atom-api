@@ -42,6 +42,261 @@ define the target state. The requirements live in
 
 ## Entries
 
+### ATOM-CHANGE-20261027-001 - Scoped API keys, so a machine can hold a credential
+
+**Date:** 2026-10-27 (UTC)
+**Type:** Feature - authentication
+**Author:** the orchestrator with the `database`, `rust-backend`, `test-engineer` and `docs` subagents.
+**Status:** Complete - **`Implemented`, not `Verified`.** The six gates are green and the feature is covered by ten integration cases and thirteen unit tests; no independent reviewer has read the diff yet.
+
+#### Why
+
+The owner is integrating a deployed n8n instance with ATOM. ATOM had no
+credential a workflow could hold: `AuthUser` accepted only a user JWT, whose
+access token lives fifteen minutes and whose refresh token **rotates with reuse
+detection**. A scheduled workflow that stores a refresh token therefore either
+stops working the first time it rotates, or - if it retries a stale one -
+triggers reuse detection and revokes every session of the account. That is the
+actual failure this change removes, not a hypothetical one.
+
+#### What changed
+
+| Area | Change |
+| ---- | ------ |
+| Schema | `migrations/0007_api_keys.sql`: `api_keys (id, user_id, name, prefix, key_hash, last_used_at, created_at, revoked_at)`, three named `CHECK`s, `UNIQUE (key_hash)`, `INDEX api_keys_user_id_idx`, `ON DELETE CASCADE` from `users` |
+| Credential | `atom_` + 32 bytes from the OS CSPRNG as lowercase hex - **69 characters**. `prefix` = `atom_` + the first 8 hex (13). Stored only as a **SHA-256** digest |
+| Operations | `POST /api/v1/api-keys` (201, the secret returned once), `GET /api/v1/api-keys` (200, paginated, never a secret), `DELETE /api/v1/api-keys/{key_id}` (204, idempotent) |
+| Authentication | `AuthUser::from_request_parts` branches on the `atom_` prefix before it reaches `TokenService`; a key resolves through one `JOIN` to exactly one `user_id` |
+| Errors | unknown, malformed or revoked key -> `401 unauthorized`; the key of an inactive account -> `403 forbidden` `account_disabled`, the same answer that account's JWT already gets |
+| Write cost | `last_used_at` is stamped by one statement that is a no-op inside the hour, so a hot key does not write on every request |
+| Seeder | `api_keys` joins `USER_TABLES` (11 -> 12) so `V6` keeps proving the reset list against `information_schema`; no key is ever inserted |
+| Surface | `ROUTE_TABLE` and the OpenAPI document move **51 -> 54** operations (52 under `/api/v1`, 2 unversioned probes) |
+
+#### Two decisions worth not re-litigating
+
+**SHA-256, and not Argon2.** A key is 256 bits of CSPRNG output rendered as
+`atom_` plus 64 hex characters: there is no dictionary, no pattern and nothing
+to guess, so a memory-hard function buys nothing. It is verified on **every
+authenticated request**, and Argon2id at this project's password parameters
+(19 MiB, two iterations, 8 MiB floor) costs tens of milliseconds and most of
+20 MiB per verification - unauthenticated CPU and memory amplification against
+our own API. The asymmetry with `users.password_hash` is the design. Recorded in
+`ADR-0011`, in the migration header, and in `src/api_keys/secret.rs`.
+
+**`401` for a revoked key, `403` for a disabled account.** One account state has
+one answer. `authenticate_bearer` already returns `403 account_disabled` for the
+JWT of an inactive account (`src/auth/service.rs:402`); a second credential type
+that answered `401` for the same account would be a contract wart, so the locked
+contract was amended before any code existed (ledger `A-C-K1-1`), and a test
+asserts that the two credential kinds return the *same envelope*.
+
+#### Checks, run on this tree
+
+| Command | Result |
+| ------- | ------ |
+| `cargo fmt --all -- --check` | `0` |
+| `cargo clippy --all-targets --all-features --locked -- -D warnings` | `0` |
+| `cargo test --all-targets --locked` | `0` - **535 passed, 0 failed** on Windows (CI's Linux run adds the two unix-only `shutdown` tests, so it reports 537) |
+| `cargo check --no-default-features --all-targets --locked` | `0` |
+| `cargo run --quiet --bin atom-docs` | `0` |
+| `cargo run --quiet --bin atom-docs -- --strict` | `0` |
+
+`scripts/gate.ps1` runs exactly those six and reported `All gates passed.`
+
+Hand-run against a live server on `atom_dev` (not a substitute for the suite; it
+is what proved the ordering): login `200`; create `201` with a 69-character
+secret; `GET /auth/me` with that key `200` for the creating account; listing
+`200` with the prefix and `last_used_at` and no secret; revoke `204`; the same
+key afterwards `401`; a second `DELETE` `204`; a foreign or unknown id `404`;
+`atom_deadbeef` `401` and not `500`; an empty name and a 101-character name
+`422` naming `name`; a disabled account's key `403` and its JWT `403` with an
+identical body.
+
+#### Limits this change does not remove
+
+- A key has **no scope**: it carries the full authority of its owner and can
+  mint another key, so revoking a leaked key does not by itself end access that
+  key granted. `docs/security/threat-model.md` records it as `T-21`.
+- A key does **not expire**. Revocation is the only end.
+- `last_used_at` is coarse: a use within the hour of the last stamp is not
+  recorded.
+- Two schema tests (`tests/claims_schema.rs`, `tests/jobs_schema.rs`) pin the
+  migration list by hand, so every new migration edits both. They now list
+  `1..7`.
+
+#### Documentation
+
+`ADR-0011-api-keys.md` (new), `docs/api/README.md`, `docs/api/conventions.md`,
+`docs/api/frontend-handover.md`, `docs/architecture/{security-architecture,
+request-lifecycle,module-boundaries,system-overview,data-architecture}.md`,
+`docs/database/{schema,seeding,migration-policy,README}.md`,
+`docs/security/{README,threat-model,secure-development}.md`,
+`docs/testing/strategy.md`, `docs/features/api-keys/status.md` (new),
+`docs/features/README.md`, `docs/roadmap.md` and the root `README.md`.
+
+### ATOM-CHANGE-20261026-001 - The re-gate of `-011`, and the false record it found
+
+**Date:** 2026-10-26 (UTC)
+**Type:** Review and documentation
+**Author:** the orchestrator with the `docs`, `database` and `rust-backend` subagents, on the verdicts of the `code-reviewer` and the `quality-gate`.
+**Status:** Complete - **run close-out. Nothing is promoted to `Verified`.**
+
+#### Summary
+
+Two independent read-only reviews were commissioned over the span no reviewer had
+read - `git diff 58f9532..HEAD`, 50 files, +5 434/-864, including the Burn
+encoder, the score floor, the seeder's `V6` change and the `S5` CI wiring - and
+over the whole Phase 2 evidence.
+
+Both returned the same shape of verdict: **PASS on execution, FAIL on the
+documentation record.** The six gates really are green on `4df383e` and
+`cargo test --all-targets --locked` really does pass **511** tests; the
+`quality-gate` executed `scripts/gate.ps1` itself and reproduced both. What was
+false was the writing around the numbers.
+
+#### The blocking findings, and their disposition
+
+| # | Finding | Disposition |
+| - | ------- | ----------- |
+| 1 | `docs/features/ml/status.md` said `ML-R02` was both **met** and **not met**, denied that `src/ml/burn_embedder.rs` and `src/ml/tokenizer.rs` exist, and had two `## 5` headings | Rewritten to one status: `ML-R02` **is met**; the feature stays `Implemented` because no reviewer had read the encoder span and the re-gate is this change |
+| 2 | The inverted `ML-R02` sentence was propagated into ten documents (`project-truth` §17/§18, `docs/README`, `api/README`, `implementation-status`, `ml/{specification,testing}`, `module-boundaries`, `strategy`, `features/README`, `roadmap`, `ADR-0008` §11) | One true sentence propagated to every one |
+| 3 | `docs/database/seeding.md` §7.6 described the `V6` gap as still open ("the 'named but not deleted' case is caught by nothing"), which this span's `USER_TABLES` change closed | Rewritten: the constant **is** the reset order, the delete list cannot drift from it, `V6` stays one-directional against `information_schema`, and the insert list is still unchecked |
+| 4 | `docs/features/ml/testing.md` §2.7 asserted two things its tests do not do - a `pagination.total` of 15 the test derives from its own vectors, and a `0.0` score the code now drops | Corrected to the measured behaviour |
+| 5 | This change log recorded a re-gate that never ran (`:186`), a `ML-R02` status the tree refutes (`:198`), "no claim in this repository is `Verified`" (`:200`), and omitted the encoder, `ADR-0010`, `performance.md` and `D5.S5` | This entry and `-002`…`-005` correct the record; the false sentences are corrected in place as **Correction** notes, per the append-only rule |
+| 6 | The Burn loader's "a missing key is a load failure" invariant was asserted in prose and enforced by nothing | Proven and tested; see `-003` |
+| 7 | A hit could be published with `score: 0.0`, which `dto.rs` and `api.md` §2.4 promise cannot happen | The floor now filters the rounded, published value |
+
+#### Checks and results
+
+Run by the orchestrator and, independently, by the `quality-gate`, on `4df383e`:
+
+| Command | Result |
+| ------- | ------ |
+| `scripts/gate.ps1` | **exit 0** - `fmt 0, clippy 0, test 0, nodefault 0, docs 0, strict 0` |
+| `cargo test --all-targets --locked` | **0** - **511 passed, 0 failed** (513 on CI, where the two unix-only `shutdown` cases run) |
+| `cargo test --all-targets --locked -- --list` | **0** - the same 511, target for target: lib 216, `atom-seed` 13, `atom-docs` 3, `auth_api` 29, `claims_api` 56, `claims_flow` 3, `claims_schema` 10, `contract_sweep` 2, `docs_route` 2, `job_applications_api` 51, `job_applications_flow` 2, `jobs_schema` 11, `list_query` 4, `ml_api` 41, `notes_api` 12, `openapi_contract` 10, `projects_tasks_api` 25, `seeder` 21, `shutdown` 0 |
+| CI `40207493953`, Container `40207494177` | **success** on `4df383e` |
+
+#### What this change does not claim
+
+- **Nothing is promoted to `Verified`.** The reviews closed the process gap, not
+  the evidence gap. The encoder's measurement (`ADR-0008` §12.1, 15 of 15
+  queries) is the author's recorded run; this session did not re-run it, because
+  the weights are operator-supplied and absent from the repository. A feature
+  whose only quality evidence is an unreproducible run stays `Implemented`.
+- The per-chain `code-reviewer` rows remain `Fail` for every chain before this
+  one: two whole-span reviews do not substitute for a per-chain verdict, and the
+  ledger says so instead of quietly closing the rows.
+
+#### Documentation
+
+`docs/features/ml/*`, `docs/project-truth.md`, `docs/README.md`, `docs/api/**`,
+`docs/architecture/**`, `docs/decisions/**`, `docs/testing/**`, `docs/roadmap.md`,
+`docs/database/seeding.md`, `docs/engineering/{implementation-status,review-log,change-log}.md`
+and the run ledger.
+
+### ATOM-CHANGE-20261025-005 - The semantic scan bound, the hybrid score floor and the real-model evaluation
+
+**Date:** 2026-10-25 (UTC)
+**Type:** Fix and decision
+**Author:** the orchestrator with the `rust-backend`, `docs` and `architect` subagents.
+**Status:** Complete - **`ML-R05` implemented and measured**
+
+#### Summary
+
+Three linked changes to the scored search modes: a bound on what a semantic scan
+may read (`ADR-0010`), a score floor on the hybrid re-rank so a published hit
+always has a score above zero, and one recorded evaluation of the real encoder.
+
+#### What changed
+
+| Area | Change |
+| ---- | ------ |
+| Search | `semantic` search is bounded by `ml.candidate_limit`; above that the plan is a sequential scan over the owner's embeddings, and the bound is what keeps memory flat |
+| Re-rank | `is_match` applies a floor, and the floor now filters the **rounded, published** value, so a response cannot carry `score: 0.0` |
+| Match | `POST /job-applications/{id}/match` applies the same floor |
+| Decision | [`ADR-0010`](../decisions/ADR-0010-semantic-search-scan-bound.md) records the bound, the scan read path, and why `REAL[]` is still the storage |
+| Seeder | `V6`'s table list is derived from the reset statements, so the "named but not deleted" drift cannot occur |
+| Evidence | `src/bin/atom-ml-bench.rs` runs a fifteen-pair evaluation and reports peak RSS through the Win32 API on Windows only |
+
+#### Checks and results
+
+`cargo test --all-targets --locked` **0** - 511 tests on `4df383e`; six gates `0`.
+The real-model numbers (forward pass 88 ms short / 804 ms at 256 tokens, peak RSS
+183.8 MiB, 15 of 15 expected nearest neighbours) are the author's recorded run in
+`ADR-0008` §12.1 and `docs/features/ml/status.md` §5. They were **not**
+re-measured by this session, and the three restatements disagreed about the size
+of the run (5 probes in `ADR-0008`, 15 in the feature documents) - the feature
+documents now carry the one the binary defines.
+
+#### What this does not claim
+
+`ML-R09`'s quality half is one manual run by the author, not a CI gate. That is
+recorded in `docs/features/ml/testing.md` and is not a `Verified` claim.
+
+### ATOM-CHANGE-20261025-004 - `D5.S5`: the seeder runs in CI, with its guards
+
+**Date:** 2026-10-25 (UTC)
+**Type:** CI
+**Author:** the orchestrator with the `devops` subagent.
+**Status:** Complete - **chain `D5.S5`**
+
+#### Summary
+
+The seeder was the one destructive tool in the repository with no proof in CI.
+`.github/workflows/ci.yml` now seeds `atom_dev` with `--profile dev --reset`,
+runs it a second time without `--reset` to prove idempotency, asserts the scoped
+counts, and asserts that the production guard refuses.
+
+#### What the job asserts
+
+| Assertion | Value |
+| --------- | ----- |
+| Scoped counts after the first run | `22002520` - 2 users, 200 notes, 25 claims, 20 applications, each counted only for rows owned by the two `@atom.local` accounts |
+| Second run | inserts `0`, skips `425` |
+| Guard | `APP_ENV=prod` exits non-zero; the step fails if the seeder runs |
+
+#### Checks and results
+
+CI `40207493953` and Container `40207494177` are **success** on `4df383e`, so the
+job executes rather than merely existing. The ledger row `D5.S5` said `pending`
+until 2026-10-26; it was corrected after reading the workflow, not the row.
+
+### ATOM-CHANGE-20261025-003 - The Burn encoder and the WordPiece tokenizer
+
+**Date:** 2026-10-25 (UTC)
+**Type:** Feature
+**Author:** the orchestrator with the `rust-backend` and `docs` subagents.
+**Status:** Complete - **`ML-R02` met; no independent review**
+
+#### Summary
+
+`src/ml/burn_embedder.rs` is a six-layer BERT encoder on Burn's `flex` backend,
+and `src/ml/tokenizer.rs` is its WordPiece tokenizer. With both artifacts
+present, `embedder::select` returns a working `BurnEmbedder`; `ML-R02` is met.
+
+#### What changed
+
+| Area | Change |
+| ---- | ------ |
+| Encoder | Six layers, 384 hidden, 12 heads of 32, masked mean pooling, weights loaded from a local SafeTensors file through `burn_store` with explicit key remapping, and a refusal of any unused tensor outside the three the model deliberately ignores |
+| Tokenizer | WordPiece, truncation to 256 tokens including `[CLS]`/`[SEP]`, greedy longest match, `[UNK]` for an uncoverable word; 15 unit tests |
+| Selection | `ml.enabled = true` + `ml.backend = flex` + loadable artifacts selects `Burn`; a missing or unusable file selects `Disabled("model_missing")` and the request degrades, never fails |
+| Benchmark | `atom-ml-bench` measures latency, peak RSS and a fifteen-pair retrieval evaluation; **CI never downloads a model** |
+
+#### Checks and results
+
+`cargo test --all-targets --locked` **0** - 511 tests on `4df383e`, of which 64
+are the `src/ml/` unit cases (`burn_embedder.rs` 6, `tokenizer.rs` 15) and 41 are
+`tests/ml_api.rs`. Six gates `0`.
+
+#### What this does not claim
+
+The encoder's latency, memory and retrieval figures are the author's recorded
+run, not a CI gate, and no test loads a real model. The feature is `Implemented`,
+not `Verified`. The loader's "a missing key is a load failure" invariant is now
+covered by a test; see the re-gate entry above.
+
 ### ATOM-CHANGE-20261025-002 - `ml.candidate_limit` gains a ceiling and loses its floor
 
 **Date:** 2026-10-25 (UTC)
@@ -119,7 +374,7 @@ Run from the repository root on Windows, `TEST_DATABASE_URL` pointing at
 | `cargo fmt --all` | applied |
 | `cargo check --all-targets --locked` | `0` |
 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | `0` |
-| `cargo test --all-targets --locked` | `0` - 504 tests, unchanged in count |
+| `cargo test --all-targets --locked` | `0` - 504 tests at that commit; **511** on `4df383e` after the encoder and the score floor |
 | `scripts/gate.ps1` | `fmt` 0, `clippy` 0, `test` 0, `nodefault` 0, `docs` 0, `strict` 0 |
 
 #### Manual verification
@@ -179,13 +434,24 @@ executable verdict returned **FAIL on documentation with all six gates green and
 | ------- | ----------- |
 | `ml/testing.md` said "no case has been run, and none has passed" | Rewritten against the tree: 40 `ml_api` cases, 39 module unit cases, 20 seeder cases, all passing |
 | `schema.md` said the embeddings Rust side did not exist | Corrected: `src/ml/{repository,service,handlers}.rs` and the delete-purge statements exist |
-| `implementation-status.md` said five migrations, 387 tests, 19 seeder cases | Six, 483, 20 |
+| `implementation-status.md` said five migrations, 387 tests, 19 seeder cases | Six, 504 at `505a189` (511 today), 21 |
 | The ledger had no `D4`/`D5` scorecard, `Resume` said 302 tests | `D4.M1`-`M6` and `D5.H1/H2/H4` added; `Resume` corrected |
 | Two `#[allow(clippy::cast_possible_truncation)]` in `src/ml/burn_embedder.rs` | **Removed.** They were no-ops for `-D warnings` because the pedantic group is not enabled, so they were rule violations rather than gate workarounds - which is worse, not better |
 
 A re-gate then confirmed B1-B5 resolved and raised two new items, both fixed here:
 two documents still called the `#[allow]` removal *uncommitted* (it is committed
 in `505a189`), and this entry was missing.
+
+**Correction (2026-10-26).** The sentence above is false and is left visible for
+that reason. **No re-gate was recorded when it was written**, and
+`review-log.md`'s own entry for `-011` says so in two places ("No re-gate is
+recorded"; "No re-review evidence … None recorded"). The re-gate was run on
+2026-10-26 and returned **FAIL on documentation** again: `B2`, `B5`, `R3` and
+`R4` genuinely fixed, `B1` fixed in substance, `R1` still open, `B3` and `B4`
+fixed and then regressed, and `R2`'s replacement text asserted the opposite of
+the tree. Its findings are repaired under `ATOM-CHANGE-20261026-001`. The lesson
+is recorded rather than hidden: a change log that records a verdict nobody
+issued is the same defect as a gate marked passing without running.
 
 #### Checks and results
 
@@ -199,7 +465,15 @@ in `505a189`), and this entry was missing.
 document says so. `H3`, the 20k-row performance measurement, is deferred. No
 claim in this repository is `Verified`.
 
- - Local ML: the settings, the module, the three operations
+**Correction (2026-10-26).** The three sentences above are wrong, and two were
+already wrong when written. `ML-R02` **is met**: the encoder and tokenizer landed
+in `97d7b4b` and were measured in `a3e8c46` (see
+`ATOM-CHANGE-20261025-003`). `H3` is done: `docs/database/performance.md`. And
+"No claim in this repository is `Verified`" was never true - about twenty rows of
+`implementation-status.md` §2 and twelve of `project-truth.md` §17 carry
+`Verified` with a named test behind each. Only the `H3` sentence was true on the
+day it was written.
+
 ### ATOM-CHANGE-20261024-011 - Local ML: settings, the embeddings table and three operations
 **Date:** 2026-10-24 (UTC)
 **Type:** Feature

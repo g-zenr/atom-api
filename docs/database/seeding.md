@@ -1,7 +1,7 @@
 # The database seeder
 
 > **Status:** Implemented
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-27
 > **Owner:** maintained by the `database` agent
 
 `atom-seed` is the development seeder: one command that fills a disposable
@@ -15,7 +15,7 @@ reset, the post-insert verification, the credentials and the tests.
 **The binary, the tests and this specification all exist.** `[[bin]] name =
 "atom-seed"` is declared in [`../../Cargo.toml`](../../Cargo.toml), the source
 is [`../../src/bin/atom-seed.rs`](../../src/bin/atom-seed.rs), and
-[`../../tests/seeder.rs`](../../tests/seeder.rs) drives it with 18 tests. The
+[`../../tests/seeder.rs`](../../tests/seeder.rs) drives it with 21 tests. The
 status is `Implemented`, not `Verified`: rows 10 and 11 of the `D2.S1`
 checkpoint — `code-reviewer` on the seeder diff and `quality-gate` on the
 evidence — have not been closed (the table in
@@ -50,6 +50,7 @@ binary's; without it, `cargo run` consumes `--profile` itself.
 | -------- | ------- | ------- |
 | `--profile <minimal\|dev\|demo>` | The size of the dataset. | `dev` |
 | `--reset` | Delete every row owned by the two seeded accounts, then insert. See §6. | off |
+| `--with-embeddings` | Also write one deterministic embedding per seeded note and per seeded application, in the shape the reindex produces. Needs no model file and no network; a second run skips what exists. | off |
 | `--allow-non-empty` | Admit a database that holds accounts outside the seeded set. See §3.3. | off |
 | `--help` | Print usage and exit `0`. | — |
 
@@ -104,8 +105,10 @@ It reads **nothing else**. In particular it does not need `APP_JWT_SECRET`,
     order in §6.
 11. Insert each entity in foreign-key order: `users`, `projects`, `tasks` and
     `notes`; then `expense_claims`, `expense_items`, `companies`,
-    `job_applications`, `application_events` and `embeddings`, **each only when
-    its table exists — see §2**.
+    `job_applications`, `application_events` and, only with
+    `--with-embeddings`, `embeddings`. Every one of those tables exists by the
+    time this step runs, because step 7 applied the embedded migrations — see
+    §2.
 12. Recompute `total_amount` for the claims this run inserted, from their items,
     in SQL (§7.1).
 13. Run the post-insert verification (§7).
@@ -143,13 +146,20 @@ not per account.
 - **Which chain seeds what.** The `S1` chain seeds the four Phase 1 entities:
   `users`, `notes`, `projects`, `tasks`; `R1` extends the seeder with
   `expense_claims` and `expense_items`; `J1`-`J5` extend it with `companies`,
-  `job_applications` and `application_events`. `S4` (embeddings, behind
-  `--with-embeddings`) and `S5` (the CI smoke run) remain.
+  `job_applications` and `application_events`; `S4` adds `embeddings`, behind
+  `--with-embeddings`; `S5` adds the CI smoke run.
 - **The seeder must not name a table that does not exist.** `migrations/` ends
-  at `0005_job_applications.sql`, so `companies`, `job_applications` and
-  `application_events` exist and are seeded; `embeddings` is not there yet, so
-  an `INSERT` into it would fail to prepare. The seeder grows by one entity per
-  chain, in the same change that adds the table.
+  at `0007_api_keys.sql`, so every table the seeder names exists:
+  `expense_claims` and `expense_items` from `0004`, `companies`,
+  `job_applications` and `application_events` from `0005`, `embeddings`
+  from `0006`, and `api_keys` from `0007`. The run applies those migrations
+  before it inserts (§1.2 step 7), so no insert is conditional and every one
+  prepares. The seeder grows by one entity per chain, in the same change that
+  adds the table.
+- **`api_keys` is named but never inserted.** A key is a credential an operator
+  creates through `POST /api/v1/api-keys`, so no profile seeds one and step 11
+  of §1.2 writes no row into it. It is in the `--reset` list, which is how a
+  seeded account's keys go away with the account (§6).
 - **Coverage.** `dev` and `demo` contain enough claims to cover all five claim
   statuses and enough applications to cover all seven stages. `minimal` seeds
   one of each, so full coverage there is arithmetically impossible; its single
@@ -157,9 +167,12 @@ not per account.
   the plumbing rather than the breadth.
 - **Derived entities are not profile counts.** `expense_items`,
   `application_events` and `companies` are derived from their parents, and
-  `embeddings` is bounded by the ML settings. The chain that added each of the
-  first three extended this document in the same change, with the rule it uses;
-  the chain that adds `embeddings` must do the same.
+  `embeddings` is derived from the notes and the applications. The chain that
+  added each entity extended this document in the same change, with the rule it
+  uses: `--with-embeddings` writes one row per seeded note plus one per seeded
+  application, `384` dimensions from a constant that mirrors
+  [`../../config/ml.toml`](../../config/ml.toml), model id
+  `deterministic-sha256-v1-384`, and no row at all without the flag.
 
 The claim and application parts of this specification inherit the plan's
 assumptions **A1** (one currency per claim), **A3** (applications and events,
@@ -416,7 +429,8 @@ id     = Uuid::from_bytes(bytes)
 
 - `<entity>` is the table name in lower-case snake case: `users`, `notes`,
   `projects`, `tasks`, `expense_claims`, `expense_items`, `companies`,
-  `job_applications` and `application_events`; `embeddings` is planned.
+  `job_applications`, `application_events` and `embeddings` (the last numbered
+  across the notes first and then the applications).
 - `<index>` is the row's zero-based position within the entity, in decimal
   without padding: `users/0`, `notes/17`, `tasks/103`.
 - The version and variant bits are set so the value is a well-formed UUIDv4
@@ -451,7 +465,7 @@ table in the source; these are the reference values:
 | `companies` | base + 20 days + `i × 3` hours |
 | `job_applications` | base + 28 days + `i × 4` hours |
 | `application_events` | its application's `created_at` + `(j + 1)` days |
-| `embeddings` | its source's `created_at` + 1 hour |
+| `embeddings` | not set by the seeder — see the divergence note below |
 
 The dependent values keep the row internally consistent and never read the
 clock:
@@ -471,27 +485,41 @@ clock:
   a `wishlist` application has no `applied_on`.
 - An event's `occurred_at` is `created_at + j` days.
 
-Because the values are fixed, two `--reset` runs produce the same ids and the
-same timestamps. Changing a constant table entry is a change to this document
-in the same commit.
+Because the values are fixed, two `--reset` runs produce the same ids, and the
+same timestamps for every entity except `embeddings` (§4.3). Changing a
+constant table entry is a change to this document in the same commit.
 
 ### 4.3 What is forbidden
 
 - No `rand` for ids, timestamps, ordering or content. No `Uuid::new_v4`.
 - No `Utc::now()`, no `SystemTime::now()`, no `NOW()` or `CURRENT_TIMESTAMP` in
-  an insert. Every timestamp column is listed in the `INSERT` with an explicit
-  value, so the schema's `DEFAULT NOW()` never evaluates.
+  an insert. Every timestamp column of the rows the seeder builds is listed in
+  the `INSERT` with an explicit value, so the schema's `DEFAULT NOW()` does not
+  evaluate — for every table except `embeddings`, see below.
 - No `f32` or `f64` in any computation. `tasks.position` is the only
   `DOUBLE PRECISION` column; its value is an integer produced by integer
   division and bound directly as an `f64` parameter, with no arithmetic done in
   floating point.
 
-There is exactly one non-deterministic value in the run: the salt inside the
-Argon2id hash (§8). It is generated inside `argon2` from the OS random source,
-it is not used for identity, and the hash column is never part of what the
-frontend displays or a test compares. Two runs therefore store different,
-equally valid hashes for the same published password. A fixed salt would make
-them identical and would be the worse choice.
+There is exactly one non-deterministic value in a run **without
+`--with-embeddings`**: the salt inside the Argon2id hash (§8). It is generated
+inside `argon2` from the OS random source, it is not used for identity, and the
+hash column is never part of what the frontend displays or a test compares. Two
+runs therefore store different, equally valid hashes for the same published
+password. A fixed salt would make them identical and would be the worse choice.
+
+**One divergence from `G5` remains, and it is open.** `insert_embedding` lists
+`id, user_id, source_type, source_id, model_id, dim, vector` and does not bind
+`created_at` or `updated_at`, so those two columns take the table's
+`DEFAULT NOW()`. A `--with-embeddings` run therefore produces the same ids and
+the same vectors but different timestamps. The determinism test does not see it:
+`a_reset_run_reproduces_the_same_ids_and_timestamps` snapshots `users`, `notes`,
+`projects` and `tasks`, and it runs without the flag. Closing the gap means
+reading the source's `created_at` in `seed_embeddings` and binding
+`created_at + 1 hour` for both columns — a change to
+[`../../src/bin/atom-seed.rs`](../../src/bin/atom-seed.rs), not to this document.
+Until then, this paragraph records the divergence instead of claiming
+determinism the code does not have.
 
 ---
 
@@ -505,22 +533,33 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (id) DO NOTHING;
 ```
 
-- `EXISTS` is never used as a pre-check. The database decides, so two
-  invocations cannot both insert the same id.
+- `EXISTS` is never used as a pre-check: no statement reads a row and then
+  inserts it in a second step. The database decides, so two invocations cannot
+  both insert the same id. The one `WHERE EXISTS` in the seeder is a predicate
+  inside the embedding `INSERT` itself, which is the ownership check of that
+  write, not a separate read (§2).
 - `rows_affected` is the number of rows actually inserted; the rest are
   counted as skipped. The run reports both, per entity and in total:
 
   ```text
   atom-seed: profile dev
-    users      inserted 2     skipped 0
-    notes      inserted 200   skipped 0
-    projects   inserted 8     skipped 0
-    tasks      inserted 60    skipped 0
-    claims     inserted 25    skipped 0
-    items      inserted 48    skipped 0
-  atom-seed: verification passed (6 checks); 343 rows inserted, 0 skipped
+    users        inserted 2     skipped 0
+    notes        inserted 200   skipped 0
+    projects     inserted 8     skipped 0
+    tasks        inserted 60    skipped 0
+    claims       inserted 25    skipped 0
+    items        inserted 48    skipped 0
+    companies    inserted 12    skipped 0
+    applications inserted 20    skipped 0
+    events       inserted 50    skipped 0
+    embeddings   inserted 0     skipped 0
+  atom-seed: verification passed (6 checks); 425 rows inserted, 0 skipped
   atom-seed: accounts owner@atom.local and other@atom.local
   ```
+
+  The `embeddings` line is `0` unless `--with-embeddings` is passed; a `dev`
+  run with the flag reports `220` there and `645` in the total. The counts are
+  the constants of §2 and §7.4, not a transcription of one machine's run.
 
 - A second run on the same database reports `inserted 0` and every row as
   skipped. The seeder **never updates** an existing row: a seeded row whose
@@ -552,33 +591,44 @@ atom-seed: reset: deleting every row owned by the two seeded accounts
 API while logged in as them
 ```
 
-The delete order is the foreign-key order. The run executes a table's
-statement only when the table exists: today every row below is executed except
-the one for `embeddings`, which is the contract for the chain that adds the
-table.
+The delete order is the foreign-key order, and it is the order of
+`USER_TABLES`; each row below is one entry of that list. Every table exists —
+`migrations/` ends at `0007_api_keys.sql` and the run applies the migrations
+before the reset (§1.2 step 7) — so every statement executes on every
+`--reset`, and none is conditional on a table existing.
 
-| # | Table | Predicate | Exists today |
-| - | ----- | --------- | ------------ |
-| 1 | `embeddings` | `user_id = ANY($1)` | no — `0006` |
-| 2 | `application_events` | `user_id = ANY($1)` | yes — `0005` |
-| 3 | `expense_items` | `user_id = ANY($1)` | yes — `0004` |
-| 4 | `expense_claims` | `user_id = ANY($1)` | yes — `0004` |
-| 5 | `job_applications` | `user_id = ANY($1)` | yes — `0005` |
-| 6 | `companies` | `user_id = ANY($1)` | yes — `0005` |
-| 7 | `refresh_sessions` | `user_id = ANY($1)` | yes |
-| 8 | `notes` | `user_id = ANY($1)` | yes |
-| 9 | `tasks` | `project_id IN (SELECT id FROM projects WHERE user_id = ANY($1))` | yes |
-| 10 | `projects` | `user_id = ANY($1)` | yes |
-| 11 | `users` | `id = ANY($1)` | yes |
+| # | Table | Predicate | Introduced by |
+| - | ----- | --------- | ------------- |
+| 1 | `application_events` | `user_id = ANY($1)` | `0005` |
+| 2 | `embeddings` | `user_id = ANY($1)` | `0006` |
+| 3 | `expense_items` | `user_id = ANY($1)` | `0004` |
+| 4 | `expense_claims` | `user_id = ANY($1)` | `0004` |
+| 5 | `job_applications` | `user_id = ANY($1)` | `0005` |
+| 6 | `companies` | `user_id = ANY($1)` | `0005` |
+| 7 | `refresh_sessions` | `user_id = ANY($1)` | `0001` |
+| 8 | `api_keys` | `user_id = ANY($1)` | `0007` |
+| 9 | `notes` | `user_id = ANY($1)` | `0002` |
+| 10 | `tasks` | `project_id IN (SELECT id FROM projects WHERE user_id = ANY($1))` | `0003` |
+| 11 | `projects` | `user_id = ANY($1)` | `0003` |
+| 12 | `users` | `id = ANY($1)` | `0001` |
 
 - `$1` is the two seeded user ids, bound as a `uuid[]`. There is one statement
-  per table, and no statement builds SQL from strings.
+  per table, held in the same entry as the table's name, and no statement builds
+  SQL from strings.
 - **`tasks` has no `user_id`** (§6 of [`schema.md`](schema.md)). Its predicate
   goes through `projects`, which is also why the order deletes tasks before
   projects.
 - `refresh_sessions` is deleted explicitly even though the `users` cascade
   would remove it. The order is the contract, and an explicit statement does
   not depend on a cascade staying in place.
+- `api_keys` is the same shape: deleted explicitly through
+  `DELETE FROM api_keys WHERE user_id = ANY($1)`, and never inserted. A key is
+  created by its owner through `POST /api/v1/api-keys`, not by the seeder, so a
+  reset removes the keys an operator made for the two seeded accounts while
+  logged in as them — and nothing else. It is placed after `refresh_sessions`
+  and before `notes`, which is foreign-key safe: `api_keys.user_id` is
+  `ON DELETE CASCADE`, so `users` would remove the rows anyway, and the
+  explicit statement does not rely on that.
 - Applications are deleted before companies, because
   `job_applications.company_id` uses `ON DELETE NO ACTION` and a company that
   still has applications must not be deletable (§11.4 of
@@ -620,9 +670,9 @@ After the inserts and before `COMMIT`, the seeder checks its own output. A
 failed check rolls the transaction back and exits non-zero; the message names
 the check, never the connection string.
 
-The checks below cover the Phase 1 entities from `S1` and the later entities as
-their chains add them. A check whose table does not exist yet is not run, for
-the same reason the seeder does not insert into it (§2).
+The checks below cover every table the seeder writes, because every one of them
+exists by the time verification runs (§2). A new table adds its checks in the
+same change that adds the table.
 
 ### 7.1 `V1` — a claim's total is the sum of its items
 
@@ -662,8 +712,8 @@ rule in §5 true.
 | An event shares its application's owner | `application_events JOIN job_applications ... WHERE application_events.user_id <> job_applications.user_id` |
 | No row names a user outside the seeded set | the `user_id` of every seeded table is in `$1` |
 
-Every expected count is `0`. Checks for a table that does not exist yet are
-added by the chain that creates it.
+Every expected count is `0`. A new table adds its ownership check in the same
+change that creates it.
 
 ### 7.3 `V3` — task completion agrees with the status
 
@@ -692,9 +742,15 @@ every arm of the constraint has data behind it.
 ### 7.4 `V4` — the counts match the profile, including the derived ones
 
 Every entity the profile fixes is counted **restricted to the seeded set**:
-`users` by id, `notes`, `projects`, `tasks` via their projects, and
-`expense_claims` and `expense_items` by `user_id`; the remaining owned tables
-join this list as their chains add them. The counts must equal the §2 table.
+`users` by id; `notes`, `projects`, `expense_claims`, `expense_items`,
+`companies`, `job_applications` and `application_events` by `user_id`; and
+`tasks` through their projects, because the table has no `user_id` column. The
+counts must equal the §2 table.
+
+`embeddings` is the one table `V4` does not count: the flag decides whether any
+row is written at all, so a count would have to be conditional in a way the
+other nine are not. `the_seeder_writes_embeddings_only_with_the_flag` asserts
+`0` rows without the flag, `220` with it on `dev`, and no orphan source.
 
 Derived entities are asserted **exactly**, from the same formula that inserts
 them (A-C-S1-10), never as a lower bound:
@@ -727,10 +783,8 @@ password through the API sees `V5` fail and uses `--reset`.
 
 ### 7.6 `V6` — every user table is named in the seeder's list
 
-The seeder holds a `const` list of the user tables it handles: the tables it
-inserts into and the tables `--reset` deletes from, including
-`refresh_sessions`, which is deleted but never inserted. At the end of the run
-it compares that list with the schema:
+The seeder holds one `const` list of the user tables it handles, `USER_TABLES`.
+At the end of the run it compares the names in that list with the schema:
 
 ```sql
 SELECT table_name
@@ -740,26 +794,51 @@ WHERE table_schema = 'public'
   AND table_name <> '_sqlx_migrations';
 ```
 
-Every returned name must be in the `const` list; a single unlisted table fails
+Every returned name must be in `USER_TABLES`; a single unlisted table fails
 the run and names the table (A-C-S1-10). A `to_regclass` loop over the list is
 an equivalent implementation; the comparison above is the specified one because
 it also catches a table the list has never heard of.
 
+**The constant is the delete list.** `USER_TABLES` holds twelve entries, each
+pairing a table name with the parameterised `DELETE` that `--reset` runs for it:
+
+```rust
+struct UserTable {
+    name: &'static str,
+    delete: &'static str,
+}
+```
+
+`refresh_sessions` and `api_keys` are two of the twelve and are deleted but never
+inserted: both hold a credential the seeder does not write, and both must still
+disappear with their account. `reset_seeded_rows` iterates the list and executes
+`entry.delete`; nothing else holds a second copy of the order or of the
+statements. The unit test
+`the_user_table_list_is_the_reset_order_and_each_statement_targets_it` keeps the
+list honest: it pins the twelve names in foreign-key order, rejects a duplicate,
+asserts every statement starts with `DELETE FROM <entry.name> `, and asserts
+each binds exactly one `$1`. A new table therefore arrives with its own delete
+statement in a position whose children precede it, or that test fails.
+
 **What `V6` guarantees, exactly.** One direction only: every base table in
-`public` must be named by `USER_TABLES`. It is a completeness check on the
-constant, not on the run, and it does not compare the constant with the
-`--reset` statement list or with the insert list. A table added to the constant
-and nowhere else therefore still passes: the run would neither insert its rows
-nor delete them, and `V6` would say nothing. That is a residual gap in the
-check, recorded here rather than papered over; keeping the two lists in step is
-a review obligation, not something the seeder verifies.
+`public` must be named by `USER_TABLES`. It does not assert the reverse — an
+entry with no table — because that case does not reach verification: every
+table except `refresh_sessions` and `api_keys` has an `INSERT` that names it,
+and a `--reset` executes every delete, so a missing table fails at the first
+statement that names it. It also does not inspect the **insert** list: a table
+that exists and is named in `USER_TABLES` but is never filled passes `V6`. Adding
+a table is therefore two edits in one change — the entry with its delete, and the
+insert that fills it — and only the first is verified by the seeder. That is the
+one residual surface the check does not cover.
 
 **Why the check still matters.** A chain that adds a table and forgets the
 constant outright fails the run, which is the common omission. With
 deterministic ids a stale child on a table missing from the delete order
 re-attaches to the re-inserted parent (§7.4), so the defect is silent until
-someone reads the data; `V6` turns the "not named at all" case into a failed
-run, and the "named but not deleted" case is caught by nothing.
+someone reads the data. Because the constant *is* the reset order, `V6` turns
+the "not named at all" case into a failed run and the "named but not deleted"
+case can no longer arise; only "named and deleted but never filled" remains, and
+it is caught by review rather than by the run.
 
 ### 7.7 Failure
 
@@ -850,6 +929,7 @@ the output are properties of the process, not of a library function.
 | `the_seeder_refuses_a_production_environment` | `G1` (A-C-S1-5): `APP_ENV` = `prod`, `staging`, `""`, `Production` in any case and a typo each exit non-zero and name the reason; `development`, `dev`, `local` and unset pass the guard. |
 | `the_seeder_refuses_a_database_whose_name_is_not_a_development_database` | `G2` (A-C-S1-6): a name that is neither `atom_dev`/`atom_test`/`atom_local`/`atom_demo` nor ends in `_dev`/`_test`/`_local` exits non-zero, and the refusal renders it as a Rust string literal. The test points at a name that does not exist, proving the name check runs before the connection. |
 | `the_seeder_refuses_a_database_that_holds_foreign_rows` | `G3`: one account outside the seeded set refuses the run. |
+| `the_foreign_account_guard_runs_before_the_migration_step` | `G3`'s ordering (A-C-S1-7): on a scratch database with a hand-made `users` table and no `_sqlx_migrations`, the guard refuses and the migration table is still absent; a control run on the same database reaches the migration step once the guard is satisfied. |
 | `an_override_flag_admits_a_database_that_holds_foreign_rows` | `G3`'s flag: the run succeeds and the foreign account still exists afterwards. |
 | `the_dev_profile_inserts_the_documented_counts` | `G9`: the `users`, `notes`, `projects` and `tasks` counts of §2, measured in the database, and that each seeded account owns rows of its own. |
 | `a_second_run_skips_every_existing_row` | `G6`: `ON CONFLICT (id) DO NOTHING`, reported as skipped. |
@@ -859,23 +939,28 @@ the output are properties of the process, not of a library function.
 | `a_constraint_violation_is_reported_by_sqlstate_and_constraint_only` | `G4` (A-C-S1-8): a deterministic unique violation prints the SQLSTATE `23505` and the `UniqueViolation` kind, and neither the row value nor the driver `DETAIL`. "Constraint only" in the name means the violation kind, not the constraint's name or its row. The test inserts a foreign account with the email `owner@atom.local` under a different id, runs with `--allow-non-empty`, and expects the `users_email_unique_idx` violation when the seeded row is inserted. |
 | `seeded_tasks_belong_to_projects_of_the_same_owner` | `G7`: the task/project join of §7.2. |
 | `every_seeded_task_has_a_consistent_completion_timestamp` | `G8`: the completion rule of §7.3. |
-| `the_help_text_states_the_blast_radius_without_a_url_or_a_hash` | A-C-S1-9 and `G4`: `--help` succeeds with no `DATABASE_URL` and no `APP_ENV`, documents all four flags, states what `--reset` deletes, and prints no URL, password or hash. |
+| `the_help_text_states_the_blast_radius_without_a_url_or_a_hash` | A-C-S1-9 and `G4`: `--help` succeeds with no `DATABASE_URL` and no `APP_ENV`, documents the four flags the test names (`--profile`, `--reset`, `--allow-non-empty`, `--help`; the text also lists `--with-embeddings`), states what `--reset` deletes, and prints no URL, password or hash. |
 | `an_unknown_flag_is_a_usage_error_that_names_the_flag` | §1: an unknown flag exits non-zero with `atom-seed: usage error:`, names the flag, and is not reported as a guard refusal. |
 | `the_seeded_accounts_are_the_published_development_credentials` | §8 and `V5`: exactly the two documented emails, display names and `is_active`; the published password verifies against each stored PHC hash. |
 | `a_reset_deletes_rows_owned_by_the_seeded_accounts` | A-C-S1-9: a note written for the seeded owner after the first run is gone after `--reset`, and the documented `minimal` counts are intact. |
 | `the_seeder_dev_profile_inserts_the_documented_claim_counts` | §2 and §7.4 for claims: `dev` inserts 25 claims and 48 items, on the derived ids, with claim 0 the only itemless draft. |
 | `a_seeded_claim_total_equals_the_sum_of_its_items` | `V1` and §7.3: every seeded claim's `total_amount` equals the sum of its items, compared by PostgreSQL in `numeric`; all 25 are present, `expense_claims_lifecycle_timestamps_chk` exists, and `dev` stores all five statuses. |
+| `the_seeder_dev_profile_inserts_the_documented_company_and_application_counts` | `G9` for the job applications: `dev` inserts 12 companies, 20 applications and 50 events, the database agrees, and every row sits on its derived id. |
+| `the_seeder_writes_embeddings_only_with_the_flag` | §2 and §7.4: a `dev` run without `--with-embeddings` writes no embedding row; with it, `220` rows (one per note, one per application), matching the report and the database, with no orphan source. |
 
-Unit tests in `src/bin/atom-seed.rs` cover the three pieces that are pure
+Seven unit tests in `src/bin/atom-seed.rs` cover the four pieces that are pure
 functions:
 
 - **The profile table.** Each variant returns the counts of §2; `dev` is the
   default when `--profile` is absent.
+- **The table list.** `USER_TABLES` is the reset order, each statement targets
+  its own table, each binds exactly one `$1`, and no table appears twice (§7.6).
 - **The id derivation.** Two calls with the same entity and index agree; two
   different indices differ; the bytes are a valid version-4 UUID with the RFC
   4122 variant.
 - **The argument parser.** `--reset` sets the flag; `--profile demo` selects
-  demo; an unknown flag is an error; `--help` prints usage and exits `0`.
+  demo; an unknown flag is an error; a missing profile value is an error;
+  `--help` prints usage and exits `0`.
 
 ### 9.1 How the tests run
 
@@ -903,12 +988,12 @@ functions:
   `ON CONFLICT (id) DO NOTHING` then reports the rows as skipped.
 - The `G3` test creates exactly one foreign account of its own before the run,
   rather than depending on whatever the shared database happens to contain. It
-  also asserts that `_sqlx_migrations` is unchanged by the refusal. That
-  assertion does **not** prove the preflight runs before the migration step:
-  the test applies the migrations with `migrated_pool()` before it reads
-  `_sqlx_migrations`, so the before-and-after comparison is identical by
-  construction. The ordering is implemented in the binary (A-C-S1-7); no test
-  distinguishes it, and that is a residual gap rather than a proven property.
+  also asserts that `_sqlx_migrations` is unchanged by the refusal.
+  `the_foreign_account_guard_runs_before_the_migration_step` is what proves the
+  ordering itself: it plants a bare `users` table on a scratch database with no
+  `_sqlx_migrations`, shows the guard refuses, shows the migration table is
+  still absent, and then shows a control run on the same database reaches the
+  migration step once the guard is satisfied (A-C-S1-7).
 - The two `G4` tests (`a_connect_failure_prints_no_part_of_the_url` and
   `a_constraint_violation_is_reported_by_sqlstate_and_constraint_only`) assert
   the absence of substrings and the presence of the SQLSTATE; they parse no
@@ -967,13 +1052,13 @@ implements the amended rule.
 | `G2` (A-C-S1-6) | database-name allow-list and connected-name assertion | §3.2 |
 | `G3` (A-C-S1-7) | foreign-account guard, preflight and authoritative | §3.3 |
 | `G4` (A-C-S1-8) | no URL, password or hash printed; every error classified | §3.4 |
-| `G5` | determinism across runs | §4 |
+| `G5` | determinism across runs (§4.3 records the open `embeddings` timestamp exception) | §4 |
 | `G6` | idempotency without `--reset` | §5 |
 | `G7` | every seeded row has one owner | §7.2 |
 | `G8` | task completion consistency | §7.3 |
 | `G9` (A-C-S1-10) | counts match the profile, derived ones exactly | §7.4 |
 | A-C-S1-9 | `--reset` blast radius | §1 and §6 |
-| A-C-S1-10 | every user table is in the seeded-table list (§7.6 states the residual gap) | §7.6 |
+| A-C-S1-10 | every user table is in `USER_TABLES`, which is also the `--reset` order; the insert list is not compared (§7.6) | §7.6 |
 
 The plan's profiles and the credential policy are in
 [`../engineering/runs/chain/plan.md`](../engineering/runs/chain/plan.md) §8.
@@ -993,8 +1078,11 @@ implementable, and it does not change the contract.
   builds the rows it needs through the API or SQL; `tests/seeder.rs` is the
   only test that runs the binary.
 - **CI.** The `S5` smoke run executes the seeder against the disposable CI
-  database and asserts the `dev` counts. The CI database is named `atom_test`,
-  which is on `G2`'s allow-list, so no override is needed.
+  database with `--reset`, runs it again without the flag to prove idempotency,
+  and asserts the scoped counts `22002520` — 2 users, 200 notes, 25 claims and
+  20 applications, each counted over the two `@atom.local` accounts. The CI
+  database is named `atom_dev`, which is on `G2`'s allow-list, so no override is
+  needed.
 - **The frontend.** The two accounts are stable across runs, which is the
   point: a screenshot, a saved login and a manual test script keep working
   after a reseed. `--reset` deletes anything written as the seeded accounts and
@@ -1004,9 +1092,11 @@ implementable, and it does not change the contract.
   supported.
 - **The schema.** The seeder only writes tables that exist. Adding a table
   without extending the seeder is an incomplete chain. `V6` (§7.6) fails the
-  run while the table is missing from `USER_TABLES`; it does not check the
-  inserts or the delete order, so a table named in the constant and nowhere
-  else still passes. [`../roadmap.md`](../roadmap.md) states the rule.
+  run while the table is missing from `USER_TABLES`; that constant is also the
+  `--reset` order, so the delete list cannot drift from it, and a unit test pins
+  the order. What `V6` does not check is the insert list: a table that is named
+  and deleted but never filled still passes, so the insert is a review
+  obligation. [`../roadmap.md`](../roadmap.md) states the rule.
 
 ---
 
@@ -1032,10 +1122,12 @@ implementable, and it does not change the contract.
 
 ### Correction (2026-10-25) - the `G3` ordering is now tested
 
-Section 9.1 said the ordering "is implemented in the binary but no test
-distinguishes it". That is no longer true.
-`the_foreign_account_guard_runs_before_the_migration_step` creates a database with
-a hand-made `users` table and **no** `_sqlx_migrations`, proves the guard refuses,
-and proves the migration table is still absent afterwards - then a control run on
-the same database shows the migration step is reached once the guard is satisfied.
+Section 9.1 previously said the ordering "is implemented in the binary but no
+test distinguishes it". That has not been true since
+`the_foreign_account_guard_runs_before_the_migration_step` landed, and the
+bullet above now states the tested behaviour.
+That test creates a database with a hand-made `users` table and **no**
+`_sqlx_migrations`, proves the guard refuses, and proves the migration table is
+still absent afterwards - then a control run on the same database shows the
+migration step is reached once the guard is satisfied.
 That control is what makes the absence meaningful rather than accidental.

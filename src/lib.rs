@@ -3,6 +3,7 @@
 //! The crate is organised as a modular monolith:
 //!
 //! * `api`     — HTTP routing, middleware and shared HTTP concerns.
+//! * `api_keys` — long-lived credentials for machine clients.
 //! * `auth`    — authentication use cases, token lifecycle and password hashing.
 //! * `users`   — user persistence and the public user representation.
 //! * `notes`   — personal notes.
@@ -23,6 +24,7 @@
 //! `docs/architecture/`.
 
 pub mod api;
+pub mod api_keys;
 pub mod auth;
 pub mod config;
 pub mod error;

@@ -1,7 +1,7 @@
 # ATOM database
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-27
 > **Owner:** maintained by the `database` agent
 
 This directory holds the persistence documentation of the ATOM backend: the
@@ -43,18 +43,26 @@ out-of-contract value impossible to persist. The reasoning is recorded in
 | `tasks` | `migrations/0003_projects_and_tasks.sql` | `projects` | The units of work inside a project. |
 | `expense_claims` | `migrations/0004_expense_claims.sql` | `users` | A reimbursement claim: its status, lifecycle timestamps and computed total. |
 | `expense_items` | `migrations/0004_expense_claims.sql` | `users` | The line items of a claim; `total_amount` is their sum. |
+| `companies` | `migrations/0005_job_applications.sql` | `users` | An employer. |
+| `job_applications` | `migrations/0005_job_applications.sql` | `users` | A role being pursued at a company. |
+| `application_events` | `migrations/0005_job_applications.sql` | `users` | A dated entry in an application's timeline. |
+| `embeddings` | `migrations/0006_embeddings.sql` | `users` | One vector per source, model and owner; the source is polymorphic (`note` or `application`) and carries no foreign key. |
+| `api_keys` | `migrations/0007_api_keys.sql` | `users` | One row per issued API key; the secret is stored only as a SHA-256 digest (§11.7). |
 
 The full definition of each table is in [`schema.md`](schema.md).
 
-Phase 2 proposes six more tables. Five of them now exist:
-`expense_claims` and `expense_items` have
-`migrations/0004_expense_claims.sql` and a Rust model in
-`src/reimbursements/models.rs`; `companies`, `job_applications` and
-`application_events` have `migrations/0005_job_applications.sql` and Rust models
-in `src/job_applications/models.rs`. The sixth — `embeddings` — has neither a
-migration nor a Rust model, is marked `Proposed` in [`schema.md`](schema.md)
-§11, and must not be treated as scope. The development seeder that fills the
-existing tables is implemented and specified in [`seeding.md`](seeding.md).
+Every table [`schema.md`](schema.md) §11 lists exists. `expense_claims` and
+`expense_items` come from `migrations/0004_expense_claims.sql` with their model
+in `src/reimbursements/models.rs`; `companies`, `job_applications` and
+`application_events` from `migrations/0005_job_applications.sql` with their
+model in `src/job_applications/models.rs`; `embeddings` from
+`migrations/0006_embeddings.sql`, read and written by `src/ml/repository.rs` and
+served by the three route handlers in `src/ml/handlers.rs`; and `api_keys` from
+`migrations/0007_api_keys.sql`, with its secret format in
+`src/api_keys/secret.rs`, its statements in `src/api_keys/repository.rs` and the
+authentication branch that resolves an `atom_` bearer token in
+`src/api/middleware.rs`. `migrations/` ends at `0007`, and the development
+seeder that fills these tables is specified in [`seeding.md`](seeding.md).
 
 ## 3. The migration workflow at a glance
 

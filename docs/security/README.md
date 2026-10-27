@@ -1,10 +1,10 @@
 # ATOM security
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-27
 > **Owner:** maintained by the `docs` agent
 
-This directory describes the security posture of the ATOM Phase 1 backend:
+This directory describes the security posture of the ATOM backend:
 what is protected, which controls exist today, where each control lives in the
 source, and what is still missing. It is the counterpart of
 [`../architecture/security-architecture.md`](../architecture/security-architecture.md),
@@ -24,7 +24,13 @@ returned; access tokens are short-lived HS256 JWTs validated for signature,
 expiry, issuer and audience; refresh tokens are opaque random values of which
 only the SHA-256 hash is persisted, are rotated on every use without extending
 the absolute deadline of the session, and a reuse of an
-already-rotated token revokes every session of that account. Authentication
+already-rotated token revokes every session of that account. A **second bearer
+form** exists for unattended clients: an API key of 32 CSPRNG bytes rendered as
+`atom_` plus 64 lower-case hex characters — 69 characters — of which only the
+SHA-256 digest is stored, resolved in one statement to exactly one account and
+revoked by a timestamp. A key carries its owner's **full authority**: there is no
+scope model, and a key can mint another key, so revoking a leaked one is
+necessary but not sufficient. Authentication
 failures return one generic message, and the response time of an unknown email
 address is equalised with a dummy Argon2 verification. Registration, login and
 refresh are rate limited per client address. The API never returns database
@@ -61,6 +67,7 @@ test that proves the behaviour; where no test exists, that is stated.
 | Refresh tokens stored hashed, rotated on use, reuse detected | [`../../src/auth/token.rs`](../../src/auth/token.rs), [`../../src/auth/service.rs`](../../src/auth/service.rs) | `refresh_rotates_the_token_pair` and `reusing_a_rotated_refresh_token_revokes_every_session` |
 | Logout and per-user session revocation | [`../../src/auth/service.rs`](../../src/auth/service.rs) | `logout_revokes_the_session` and `an_account_cannot_log_out_another_accounts_session` |
 | Authenticated identity derived only from the credential | [`../../src/api/middleware.rs`](../../src/api/middleware.rs) | `protected_routes_reject_missing_and_invalid_credentials` |
+| An API key as a second bearer form: `atom_` plus 32 CSPRNG bytes as lower-case hex, stored only as a SHA-256 digest, resolved to exactly one user and revoked by `revoked_at` | [`../../src/api_keys/secret.rs`](../../src/api_keys/secret.rs), [`../../src/api_keys/service.rs`](../../src/api_keys/service.rs), [`../../src/api/middleware.rs`](../../src/api/middleware.rs), [`../../migrations/0007_api_keys.sql`](../../migrations/0007_api_keys.sql) | [`../../tests/api_keys_api.rs`](../../tests/api_keys_api.rs) (10 cases): the secret is returned once, the listing never carries it, an unknown or revoked key is `401`, a disabled account's key is `403`, the revoke is idempotent and a foreign id is `404`. **Limitation:** a key has its owner's full authority and there is no scope model, and a key can mint another key — so revoking a leaked key does not by itself end access. |
 | Ownership enforced in SQL, with `404` for an inaccessible resource | [`../../src/notes/repository.rs`](../../src/notes/repository.rs), [`../../src/projects/repository.rs`](../../src/projects/repository.rs), [`../../src/tasks/repository.rs`](../../src/tasks/repository.rs) | The isolation cases in [`../../tests/notes_api.rs`](../../tests/notes_api.rs) and [`../../tests/projects_tasks_api.rs`](../../tests/projects_tasks_api.rs) |
 | Generic authentication failure with timing equalisation | [`../../src/auth/service.rs`](../../src/auth/service.rs) | `login_fails_with_a_generic_message` and `an_unknown_email_produces_the_same_failure_as_a_wrong_password` |
 | A fixed error envelope that never carries internal detail | [`../../src/error.rs`](../../src/error.rs) | Unit tests in the same file (5) |

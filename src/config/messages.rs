@@ -183,6 +183,11 @@ pub struct ResourceMessages {
     pub application_not_found: String,
     /// 404, when the application event does not exist.
     pub event_not_found: String,
+    /// 404, when the API key does not exist, or is not owned by the caller.
+    ///
+    /// A revoked key is still found, because revocation is a stamp and not a
+    /// delete: only an unknown id or another account's is a `404`.
+    pub api_key_not_found: String,
 }
 
 /// The messages for a request the current state refuses.

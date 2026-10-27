@@ -1,10 +1,10 @@
 # ATOM threat model
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-27
 > **Owner:** maintained by the `docs` agent
 
-This document models the threats to the ATOM Phase 1 backend, the controls
+This document models the threats to the ATOM backend, the controls
 that exist against them, and the risk that remains. It is a working model, not
 a certification: it describes the system as it is built today, and every claim
 in it is traceable to the source.
@@ -44,6 +44,7 @@ a single-owner, API-only Phase 1 deployment.
 | A-8 | Availability of the service | The API process and the database | A personal workspace that does not answer is worthless. |
 | A-9 | Schema and migration history | `migrations/` | A lost or altered migration breaks reproducibility and the safety of the schema. |
 | A-10 | The dependency set | `Cargo.lock` | A compromised dependency executes with the privileges of the process. |
+| A-11 | API keys | The plaintext exists only in the create response; the SHA-256 digest is in `api_keys.key_hash` and the display tag in `api_keys.prefix` | A leaked key is a **long-lived, full-authority** bearer credential for one account: 69 characters, no expiry and no scope model. |
 
 **No file in `config/` may contain a secret.** The configuration directory is
 committed to the repository and embedded in the binary, so a secret in a file
@@ -61,7 +62,7 @@ enforces it are in [`secure-development.md`](secure-development.md) SD-4.
 | ACT-3 | An authenticated user attacking another user | Holds a valid token for their own account and tries to reach resources they do not own. |
 | ACT-4 | A compromised dependency or build step | Runs inside the process, with access to the environment, the database and every secret the process holds. |
 | ACT-5 | An operator with database access | Can read and write the database directly, bypassing the API. |
-| ACT-6 | An attacker holding a stolen token | Holds a valid access token or refresh token that was captured, leaked or logged. |
+| ACT-6 | An attacker holding a stolen token | Holds a valid access token, refresh token or API key that was captured, leaked or logged. |
 
 ## 4. Trust boundaries
 
@@ -98,6 +99,7 @@ enforces it are in [`secure-development.md`](secure-development.md) SD-4.
 | T-18 | A destructive or inconsistent schema change | ACT-4 | TB-3 | Migrations are append-only, invariants are expressed as `CHECK` constraints and foreign keys, and a schema change requires a matching model change. | A migration that is destructive is still possible. The protection is procedural. |
 | T-19 | Use of a leaked or retired signing secret | ACT-2, ACT-5 | TB-4 | The secret comes from the environment and has no file layer, so no committed configuration file can hold it. It is at least 32 bytes, and the documented placeholder is refused in production. | There is no rotation procedure, no key identifier in the token, and no revocation list, so a compromised secret cannot be retired without restarting every instance with a new one. |
 | T-20 | A race between two registrations of the same address | ACT-2 | TB-2 | Uniqueness lives on the normalized value in the database, and the unique-violation error is mapped to a conflict. The application never does a check-then-insert. | None material. |
+| T-21 | Theft or exposure of an API key — from a client's configuration, a log line, a screenshot or a repository | ACT-2, ACT-6 | TB-5, TB-6 | The secret is shown **once**, in the create response, and only its SHA-256 digest is stored, so a database dump hands over no usable credential. Revocation is immediate: `DELETE /api/v1/api-keys/{key_id}` sets `revoked_at`, which every authenticated request checks. `last_used_at` is stamped at most hourly, so an unexpected use is visible in the listing. The secret, its digest and its prefix are never logged, including on an error path. | Revocation is only as good as the operator noticing that a key is being used by somebody else, and the hourly stamp is a coarse signal. There is no expiry, no scope model and no per-key rate limit, and a key can mint another key — so revoking the leaked one does not by itself end access: every key of the account must be revoked and the account's activity treated as suspect. |
 
 ## 6. Accepted risks
 

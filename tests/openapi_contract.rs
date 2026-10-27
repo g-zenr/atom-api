@@ -28,16 +28,18 @@ use atom_api::api::routes::{API_PREFIX, ROUTE_TABLE, UNVERSIONED_ROUTE_TABLE, op
 
 /// The number of operations the locked contract publishes.
 ///
-/// Forty-nine versioned operations - five authentication, five notes, five
-/// projects, five tasks, twelve claims (five claim routes, three item writes
-/// and four lifecycle actions), fourteen job-application operations (five
-/// company routes, five application routes and four event routes) and three
-/// machine-learning operations (the search, the match and the reindex) - plus
-/// the two unversioned probes. The two-way comparison below cannot see an
-/// operation that was dropped from the table, the router and the document
-/// together, so the size of the agreed surface is pinned as well: the contract
-/// is that all 51 operations of `/api/v1/openapi.json` still exist.
-const CONTRACT_OPERATIONS: usize = 51;
+/// Fifty-two versioned operations - five authentication, six notes (five routes
+/// plus the scored search), five projects, five tasks, twelve claims (five claim
+/// routes, three item writes and four lifecycle actions), fourteen
+/// job-application operations (five company routes, five application routes and
+/// four event routes), three machine-learning operations (the match, the reindex
+/// and the scored search counted with notes) and three API-key operations (the
+/// create, the list and the revoke) - plus the two unversioned probes. The
+/// two-way comparison below cannot see an operation that was dropped from the
+/// table, the router and the document together, so the size of the agreed
+/// surface is pinned as well: the contract is that all 54 operations of
+/// `/api/v1/openapi.json` still exist.
+const CONTRACT_OPERATIONS: usize = 54;
 
 /// Every operation declared on a path item, as `(METHOD, operation)`.
 ///
@@ -638,6 +640,21 @@ fn has_type(map: &serde_json::Map<String, Value>, name: &str) -> bool {
     }
 }
 
+/// The published property names of one component schema.
+///
+/// Sorted, so the comparison in the caller is about the set of fields and not
+/// about the order `utoipa` happened to emit them in.
+fn published_fields(schema: &Value) -> Vec<String> {
+    let mut fields: Vec<String> = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .map(|properties| properties.keys().cloned().collect())
+        .unwrap_or_else(|| panic!("the schema must publish its properties: {schema}"));
+
+    fields.sort();
+    fields
+}
+
 /// Whether a serialized schema carries a `null` branch anywhere.
 fn carries_null(value: &Value) -> bool {
     match value {
@@ -898,6 +915,115 @@ fn the_event_schemas_publish_no_updated_at() {
                 .is_some_and(|properties| !properties.contains_key("updated_at")),
             "{component_name} must not publish `updated_at`: an event is corrected in place and \
              carries only its creation instant (A-D1-1): {schema}"
+        );
+    }
+}
+
+/// The three API-key operations, and the one response that carries a secret.
+///
+/// `C-K1` publishes the create, the list and the revoke. A generated client
+/// picks its return type from the success response, so a create that published
+/// `200` where the API answers `201`, or a revoke that published no `204`, is
+/// the contract already broken for that client.
+///
+/// The schema half is what a client cannot work around: `ApiKeyCreatedResponse`
+/// publishes `key` because that is the single response that carries the secret,
+/// and `ApiKeyResponse` must not publish it at all. A document that published
+/// `key` on the read type would give a generated client a field the server never
+/// sends, and the next "restore the missing field" change would be a secret on
+/// every listing.
+#[test]
+fn the_api_key_operations_publish_their_success_status() {
+    let document = openapi_document(&common::test_config());
+
+    let published: [(&str, &str, &str); 3] = [
+        ("POST", "/api/v1/api-keys", "201"),
+        ("GET", "/api/v1/api-keys", "200"),
+        ("DELETE", "/api/v1/api-keys/{key_id}", "204"),
+    ];
+
+    for (method, path, expected) in published {
+        let item = document
+            .paths
+            .get_path_item(path)
+            .unwrap_or_else(|| panic!("the document must describe the path {path}"));
+
+        let operation = match method {
+            "GET" => item.get.as_ref(),
+            "POST" => item.post.as_ref(),
+            "DELETE" => item.delete.as_ref(),
+            other => panic!("{other} is not one of the methods these operations use"),
+        }
+        .unwrap_or_else(|| panic!("the document must describe {method} {path}"));
+
+        let statuses: Vec<&String> = operation.responses.responses.keys().collect();
+
+        assert!(
+            statuses.iter().any(|status| status.as_str() == expected),
+            "{method} {path} must publish the {expected} success response; it publishes {statuses:?}"
+        );
+    }
+
+    // The revoke addresses a `key_id`: the name the route table and the router
+    // use, and therefore the name a generated client sends.
+    let item = document
+        .paths
+        .get_path_item("/api/v1/api-keys/{key_id}")
+        .unwrap_or_else(|| {
+            panic!("the document must describe the path /api/v1/api-keys/{{key_id}}")
+        });
+    let operation = item
+        .delete
+        .as_ref()
+        .unwrap_or_else(|| panic!("the document must describe DELETE /api/v1/api-keys/{{key_id}}"));
+
+    let parameters = published_parameters(item, operation);
+    let in_path: Vec<&str> = parameters
+        .iter()
+        .filter(|(_, place)| *place == "path")
+        .map(|(name, _)| name.as_str())
+        .collect();
+
+    assert_eq!(
+        in_path,
+        vec!["key_id"],
+        "the revoke must publish exactly the `key_id` path parameter"
+    );
+
+    // The create publishes the secret; nothing else does.
+    let created = published_fields(&component(&document, "ApiKeyCreatedResponse"));
+    for field in ["created_at", "id", "key", "name", "prefix"] {
+        assert!(
+            created.iter().any(|published| published == field),
+            "ApiKeyCreatedResponse must publish `{field}`, because that response is where the \
+             secret is handed over; it publishes {created:?}"
+        );
+    }
+
+    let read = published_fields(&component(&document, "ApiKeyResponse"));
+    assert!(
+        !read.iter().any(|published| published == "key"),
+        "ApiKeyResponse must never publish `key`: the secret is handed over once, by the create. \
+         It publishes {read:?}"
+    );
+    for leaked in ["key_hash", "hash", "user_id"] {
+        assert!(
+            !read.iter().any(|published| published == leaked),
+            "ApiKeyResponse must not publish `{leaked}`: it publishes {read:?}"
+        );
+    }
+    for field in [
+        "created_at",
+        "id",
+        "last_used_at",
+        "name",
+        "prefix",
+        "revoked_at",
+    ] {
+        assert!(
+            read.iter().any(|published| published == field),
+            "ApiKeyResponse must publish `{field}`, because the listing is the only published read \
+             of a key; it publishes {read:?}"
         );
     }
 }

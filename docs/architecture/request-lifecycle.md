@@ -1,7 +1,7 @@
 # ATOM — request lifecycle
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-27
 > **Owner:** maintained by the `architect` agent
 
 The path of a single request, from the socket to PostgreSQL and back. Read
@@ -113,6 +113,9 @@ Router::new()
 | `POST /api/v1/auth/refresh` | `auth::handlers::refresh` | none, rate limited |
 | `POST /api/v1/auth/logout` | `auth::handlers::logout` | bearer |
 | `GET /api/v1/auth/me` | `auth::handlers::me` | bearer |
+| `POST /api/v1/api-keys` | `api_keys::handlers::create_api_key` | bearer |
+| `GET /api/v1/api-keys` | `api_keys::handlers::list_api_keys` | bearer |
+| `DELETE /api/v1/api-keys/{key_id}` | `api_keys::handlers::revoke_api_key` | bearer |
 | `GET /api/v1/notes` | `notes::handlers::list_notes` | bearer |
 | `POST /api/v1/notes` | `notes::handlers::create_note` | bearer |
 | `GET /api/v1/notes/{note_id}` | `notes::handlers::get_note` | bearer |
@@ -128,6 +131,14 @@ Router::new()
 | `GET /api/v1/tasks/{task_id}` | `tasks::handlers::get_task` | bearer |
 | `PATCH /api/v1/tasks/{task_id}` | `tasks::handlers::update_task` | bearer |
 | `DELETE /api/v1/tasks/{task_id}` | `tasks::handlers::delete_task` | bearer |
+
+The three API-key rows sit where `ROUTE_TABLE` places them — after the
+authentication operations and before the notes ones — because that table is the
+router's own order. The table above is not the whole surface: it lists the Phase
+1 operations and the three API-key operations, and the full ordered list,
+including the Phase 2 routes, is `ROUTE_TABLE` in
+[`../../src/api/routes.rs`](../../src/api/routes.rs), which the contract test
+compares with the generated document in both directions.
 
 The API explorer is merged at the top level, not nested, and serves the UI at
 `/api/v1/docs` and the document at `/api/v1/openapi.json`. It is registered
@@ -155,10 +166,27 @@ so the order is:
 
 1. `State<AppState>` — the shared dependencies.
 2. `AuthUser` — **authentication happens here**, before the body is even read.
-   The extractor requires an `Authorization: Bearer <token>` header, decodes
-   the HS256 JWT through `TokenService`, loads the user and refuses a
-   disabled account. A missing, malformed or invalid credential is
-   `AppError::Unauthorized`; a disabled account is `AppError::Forbidden`.
+   The extractor requires an `Authorization: Bearer <token>` header and takes
+   one of two branches, decided by the token's prefix alone:
+   - a token that begins `atom_` is an **API key**. It is resolved by
+     `ApiKeyService::authenticate`, which refuses a wrong-shaped value before
+     any statement, then binds the SHA-256 digest in one statement that joins
+     `users` — so an unknown digest, a revoked key and a disabled account are
+     all decided without a second round trip;
+   - anything else is a **user JWT**. The HS256 token is verified and decoded
+     through `TokenService` and the account is loaded by
+     `AuthService::authenticate_bearer`. A JWT's first segment is a base64url
+     JSON header, so it can never begin with `atom_` and the two branches
+     cannot claim the same value.
+
+   Both branches converge on the same `AuthUser`, so an API key is not a
+   reduced principal: it reaches every private route its owner reaches, the
+   key-management routes included. A missing, malformed, unknown, revoked or
+   expired credential of **either** kind is `AppError::Unauthorized`; a
+   **disabled account** is `AppError::Forbidden` for both kinds, with the same
+   `messages.auth.account_disabled` message, so one account state has one
+   answer (amendment `A-C-K1-1`). The branch is in `AuthUser::from_request_parts`
+   in [`../../src/api/middleware.rs`](../../src/api/middleware.rs).
 3. `Path`, `Query` and `HeaderMap` — the remaining parts of the request. Each
    rejection is an `AppError::BadRequest` carrying the catalogue message
    `malformed_parameter` — "The request path or query string is malformed."
@@ -276,8 +304,8 @@ a response by hand.
 | `extract::Json` — the body is not JSON | `BadRequest` | `400` | `bad_request` |
 | `extract::Json` — the body does not match the contract | `Validation` | `422` | `validation_failed` |
 | `extract::Path`, `extract::Query` — an unparsable value | `BadRequest` | `400` | `bad_request` |
-| `AuthUser` — no, malformed or invalid credential | `Unauthorized` | `401` | `unauthorized` |
-| `AuthUser` — a disabled account | `Forbidden` | `403` | `forbidden` |
+| `AuthUser` — no, malformed or invalid credential, of either kind | `Unauthorized` | `401` | `unauthorized` |
+| `AuthUser` — a disabled account, with either kind | `Forbidden` | `403` | `forbidden` |
 | `api::middleware::enforce_rate_limit` | `RateLimited` | `429` | `rate_limited`, plus a `retry-after` header |
 | The service — a resource the caller does not own | `NotFound` | `404` | `not_found` |
 | The service — a duplicate registration | `Conflict` | `409` | `conflict` |

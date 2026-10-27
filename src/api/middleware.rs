@@ -18,8 +18,20 @@ use crate::state::AppState;
 /// The authenticated caller.
 ///
 /// Extracting this type guarantees that the request carried a valid, unexpired
-/// bearer token for an active account. Handlers that take `AuthUser` cannot be
-/// reached without credentials.
+/// bearer credential for an active account. Handlers that take `AuthUser` cannot
+/// be reached without credentials.
+///
+/// Two kinds of credential are accepted, and the prefix of the token is the
+/// whole of the routing decision:
+///
+/// * an `atom_…` **API key**, resolved through
+///   [`crate::api_keys::service::ApiKeyService`] against the `api_keys` table;
+/// * anything else is a **user JWT**, verified by
+///   [`crate::auth::service::AuthService::authenticate_bearer`].
+///
+/// The two paths converge on the same type, so every route is reachable with
+/// either credential: an API key is not a reduced principal. That is what lets
+/// an unattended workflow rotate its own key.
 #[derive(Debug, Clone)]
 pub struct AuthUser {
     /// The authenticated user's id.
@@ -56,6 +68,36 @@ impl FromRequestParts<AppState> for AuthUser {
             .map(str::trim)
             .filter(|token| !token.is_empty())
             .ok_or_else(|| AppError::Unauthorized(messages.general.unauthorized.clone()))?;
+
+        // An API key is recognised by its prefix and by nothing else. A JWT is
+        // base64url text whose first segment is a JSON header, so it can never
+        // begin with `atom_`; the check therefore cannot steal a valid JWT, and
+        // a garbage `atom_…` value is routed here and refused as a credential
+        // rather than handed to the JWT decoder. See `api_keys::secret`.
+        //
+        // The `map_err` is the same pair as the JWT path below, for the same
+        // reason: the status and the wording are the published contract, and
+        // `AuthUser` is the one place that decides them. An inactive account's
+        // key is a `403` with the message the JWT path uses for that account, so
+        // one account state has one answer (amendment `A-C-K1-1`).
+        if crate::api_keys::secret::is_api_key(token) {
+            let caller = state
+                .api_keys
+                .authenticate(token)
+                .await
+                .map_err(|error| match error {
+                    AppError::Unauthorized(_) => {
+                        AppError::Unauthorized(messages.auth.access_token_invalid.clone())
+                    }
+                    AppError::Forbidden(message) => AppError::Forbidden(message),
+                    other => other,
+                })?;
+
+            return Ok(AuthUser {
+                user_id: caller.user_id,
+                email: caller.email,
+            });
+        }
 
         let user = state
             .auth

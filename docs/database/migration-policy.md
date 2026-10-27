@@ -1,7 +1,7 @@
 # Migration policy
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-21
+> **Last updated:** 2026-10-27
 > **Owner:** maintained by the `docs` agent
 
 How a change to the ATOM schema is made, applied, reviewed and — when it is
@@ -19,8 +19,13 @@ migrations/
 ├── 0001_users_and_sessions.sql
 ├── 0002_notes.sql
 ├── 0003_projects_and_tasks.sql
-└── 0004_<short_description>.sql
+├── 0004_expense_claims.sql
+├── 0005_job_applications.sql
+├── 0006_embeddings.sql
+└── 0007_api_keys.sql
 ```
+
+The repository ends at `0007`; the next migration takes `0008`.
 
 - The file name starts with a **four-digit, zero-padded sequence number**
   followed by an underscore and a short description in lower case with

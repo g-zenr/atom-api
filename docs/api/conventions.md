@@ -1,7 +1,7 @@
 # API conventions
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-27
 > **Owner:** maintained by the `docs` agent
 
 The rules every endpoint of the ATOM API follows. A client that knows these
@@ -365,13 +365,35 @@ curl -s http://127.0.0.1:3000/health/ready
 
 ## 12. Authentication
 
-- A private endpoint expects the credential in the `Authorization` header:
-  `Authorization: Bearer <access_token>`. The scheme is matched
-  case-insensitively.
+- A private endpoint accepts **two bearer forms**, both in the `Authorization`
+  header:
+  - `Authorization: Bearer <access_token>` — a user JWT, short-lived and issued
+    by the token endpoints (§1 of [`frontend-handover.md`](frontend-handover.md));
+  - `Authorization: Bearer <api_key>` — a long-lived key an owner issues for a
+    machine client, `atom_` followed by 64 lower-case hex characters.
+- The scheme is matched case-insensitively.
+- The two forms are told apart by **the token's prefix, and nothing else**. An
+  API key always begins `atom_`; a JWT is base64url text whose first segment is a
+  JSON header (`eyJ…`) and can therefore never begin with it. The decision is one
+  branch in `AuthUser::from_request_parts`
+  ([`../../src/api/middleware.rs`](../../src/api/middleware.rs)), so a value that
+  begins `atom_` is routed to the key check and a garbage key is a `401`, never a
+  decode error.
+- Both forms resolve to **exactly one user**, and a key's authority is its
+  owner's: there is no scope model and no reduced principal, so every private
+  endpoint is reachable with either. The identity is derived **only** from the
+  credential; nothing in the body, the query string or the path can influence it.
+- Ownership is unchanged by the credential kind. A resource that belongs to
+  another account is `404`, never `403`.
+- An unknown, malformed or revoked key is `401` `unauthorized` with the same
+  generic message an invalid access token gets. The key of a disabled account is
+  `403` `forbidden`, which is the answer that account's JWT already receives.
+- A key is created by `POST /api/v1/api-keys` — that response is the **only** one
+  that carries the secret — listed by `GET /api/v1/api-keys` (never the secret)
+  and revoked by `DELETE /api/v1/api-keys/{key_id}`, which is idempotent and
+  answers `404` for an unknown or foreign id.
 - There is no session cookie, no query parameter credential and no custom
   header alternative. The header is the only accepted form.
-- The authenticated identity is derived **only** from the credential. Nothing
-  in the body, the query string or the path can influence it.
 
 ## 13. Request correlation
 

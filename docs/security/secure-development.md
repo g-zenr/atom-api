@@ -1,7 +1,7 @@
 # ATOM secure development rules
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-27
 > **Owner:** maintained by the `docs` agent
 
 These are the rules a change to this repository must follow, and the concrete
@@ -45,9 +45,18 @@ is the property that makes a single-owner product safe by default.
 **Check.** Every `SELECT`, `UPDATE` and `DELETE` in a repository under
 [`../../src/notes/`](../../src/notes/),
 [`../../src/projects/`](../../src/projects/),
-[`../../src/tasks/`](../../src/tasks/) and
-[`../../src/users/`](../../src/users/) must contain a `user_id` predicate, or
-a join to `projects` whose predicate is `p.user_id = $n`. See §2.
+[`../../src/tasks/`](../../src/tasks/),
+[`../../src/users/`](../../src/users/) and
+[`../../src/api_keys/`](../../src/api_keys/) must contain a `user_id`
+predicate, or a join to `projects` whose predicate is `p.user_id = $n`. The
+`api_keys` table is private like the others: it carries its own non-null
+`user_id`, and the create, list, revoke and usage-stamp statements all bind it.
+**One statement is deliberately outside the rule**, because it is the statement
+that discovers the owner: `FIND_KEY_IDENTITY` in `src/api_keys/repository.rs`
+selects one row by the unique `key_hash` and reaches `user_id` through its join
+to `users`, so it has nothing to scope yet. It is a single-row read by a
+credential digest and it writes nothing; every other statement in that
+repository carries `user_id` in its own `WHERE`. See §2.
 
 **Test.** A cross-account case for every private endpoint: the second account
 must receive `404`, never `403` and never the resource.
@@ -68,11 +77,15 @@ does not own, and the service converts that into `AppError::NotFound`.
 
 ### SD-4 — No secret in code, logs, errors or responses
 
-**Rule.** A password, a token, the signing secret and the database URL must
-never appear in a log line, an error message or an API response. Configuration
-types that carry a secret implement `Debug` manually and print a redaction
-placeholder. The panic handler must not log the panic payload. **No file in
-[`../../config/`](../../config/) may contain a secret**: the directory is
+**Rule.** A password, a token, an **API key secret**, its SHA-256 digest, its
+display prefix, the signing secret and the database URL must never appear in a
+log line, an error message or an API response. The key secret is a bearer
+credential in its own right, and the stored digest and the `atom_` + eight-hex
+`prefix` name the row it belongs to: none of the three belongs on an error path
+either, even though the digest and the prefix cannot authenticate on their own.
+Configuration types that carry a secret implement `Debug` manually and print a
+redaction placeholder. The panic handler must not log the panic payload. **No
+file in [`../../config/`](../../config/) may contain a secret**: the directory is
 committed and embedded in the binary, and the two secrets — `DATABASE_URL` and
 `APP_JWT_SECRET` — have no file layer at all.
 
@@ -116,8 +129,12 @@ to an empty header value, and the process is never taken down by it.
 panic, which the panic layer converts into a `500` while discarding the reason.
 
 **Check.** See §2. Every hit must be inside a `#[cfg(test)]` module, in
-[`../../src/telemetry.rs`](../../src/telemetry.rs), in a default-value helper
-that parses a constant, or in the development tool. Nowhere else.
+[`../../src/telemetry.rs`](../../src/telemetry.rs), in the `main` start-up path,
+in a default-value helper that parses a constant, or in the development tool
+[`../../src/bin/atom-docs.rs`](../../src/bin/atom-docs.rs). Nowhere else — and
+**no hit at all** may come from
+[`../../src/bin/atom-seed.rs`](../../src/bin/atom-seed.rs), which denies both
+lints crate-wide so that a stray `expect` cannot render the connection string.
 
 The CORS allowlist is validated when the configuration is loaded, so the router
 needs no assertion of its own. The layer in
@@ -332,8 +349,9 @@ in [`../../src/health.rs`](../../src/health.rs).
 ```bash
 # Every statement that reads or writes a private table must carry the owner
 # predicate. The `users` table is excluded: it is the account itself, looked
-# up by id or by normalized email, not by an owner.
-rg -n -A 15 'FROM notes|FROM projects|FROM tasks|UPDATE notes|UPDATE projects|UPDATE tasks|DELETE FROM notes|DELETE FROM projects' src --glob '*.rs' | rg 'user_id'
+# up by id or by normalized email, not by an owner. `api_keys` is included: it
+# is the credential table and its rows belong to exactly one owner.
+rg -n -A 15 'FROM notes|FROM projects|FROM tasks|FROM api_keys|UPDATE notes|UPDATE projects|UPDATE tasks|UPDATE api_keys|DELETE FROM notes|DELETE FROM projects|DELETE FROM api_keys' src --glob '*.rs' | rg 'user_id'
 ```
 
 The window is deliberately wide, because the predicate is not always on the
@@ -342,6 +360,13 @@ line after the table name — the task update reaches it through
 statement that touches a private table. The command is a screen, not a proof:
 a statement without one is a finding, and a statement with one still has to
 be read.
+
+**The one expected exception** is `FIND_KEY_IDENTITY` in
+`src/api_keys/repository.rs`: it selects the key row by `key_hash` and reaches
+`user_id` through its join to `users`, because the request has not been
+authenticated yet and no caller id exists at that point. It matches the screen
+(a projected `k.user_id` appears in its window) and it is not a finding; every
+other `api_keys` statement carries the owner in its own `WHERE`.
 
 ### SD-3 — `404`, not `403`
 
@@ -358,7 +383,7 @@ cross-account session-revocation path in the logout handler. A new
 
 ```bash
 # No log statement may interpolate a secret.
-rg -n '(tracing::)?(info|warn|error|debug)!' src --glob '*.rs' | rg -i 'password|secret|token|url'
+rg -n '(tracing::)?(info|warn|error|debug)!' src --glob '*.rs' | rg -i 'password|secret|token|url|api_key|key_hash|prefix'
 # The configuration types must redact.
 rg -n 'REDACTED' src --glob '*.rs'
 # No committed configuration file may carry a secret-shaped value.
@@ -389,12 +414,15 @@ rg -n '\.unwrap\(\)|\.expect\(|panic!|unreachable!|todo!|unimplemented!' src --g
 
 Every hit must be inside a `#[cfg(test)]` module, in
 [`../../src/telemetry.rs`](../../src/telemetry.rs) — the start-up of the
-tracing subscriber — in a default-value helper in
+tracing subscriber — in the `main` start-up path, in a default-value helper in
 [`../../src/config/settings.rs`](../../src/config/settings.rs) that parses a
 constant, or in the development tool
 [`../../src/bin/atom-docs.rs`](../../src/bin/atom-docs.rs). Nowhere else. A
-hit in a handler, a service or a repository is a finding. There is no other
-tolerated hit: the CORS layer of
+hit in a handler, a service or a repository is a finding, and a hit in
+[`../../src/bin/atom-seed.rs`](../../src/bin/atom-seed.rs) cannot survive the
+build at all: that binary denies `clippy::unwrap_used` and
+`clippy::expect_used` crate-wide, so the screen meets the same rule the compiler
+enforces. There is no other tolerated hit: the CORS layer of
 [`../../src/api/mod.rs`](../../src/api/mod.rs) contains no `panic!`, because
 the allowlist it reads was refused at start-up and the layer falls back to an
 empty header value for anything that still fails to parse.

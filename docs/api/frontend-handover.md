@@ -1,7 +1,7 @@
 # ATOM API — frontend handover
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-27
 > **Owner:** maintained by the `docs` agent
 
 This document is for an engineer building the first client against a running
@@ -173,9 +173,14 @@ and do not refresh.
 
 ### 1.6 There is no cookie, so there is no CSRF surface — and what that costs
 
-The credential travels **only** in `Authorization: Bearer <access_token>`
+The credential travels **only** in `Authorization: Bearer <credential>`
 ([`conventions.md`](conventions.md) §12; the extractor is `AuthUser` in
-[`src/api/middleware.rs`](../../src/api/middleware.rs)). Nothing in `src/`
+[`src/api/middleware.rs`](../../src/api/middleware.rs)), and that one header
+carries **two** possible bearer kinds: a user access token, or an API key — the
+`atom_` form a machine client holds — which the extractor tells apart by the
+prefix before it decodes either
+([`../decisions/ADR-0011-api-keys.md`](../decisions/ADR-0011-api-keys.md)).
+Nothing in `src/`
 writes a `Set-Cookie` header, the refresh token is carried in a JSON body, and
 the CORS layer never enables credentials ([`src/api/mod.rs`](../../src/api/mod.rs)
 `cors_layer`; [`conventions.md`](conventions.md) §10).
@@ -742,7 +747,7 @@ On a degraded response, every score is `null`. Do not sort client-side by
 | ------------ | ------------------ |
 | `lexical` (including degraded) | the number of matching notes |
 | `hybrid` | the number of hits whose published score is greater than zero, bounded by `ml.candidate_limit` — **not** "every relevant note" |
-| `semantic` | the number of the caller's notes that have an embedding |
+| `semantic` | the number of the caller's notes whose published score is greater than zero. A hit at or below zero is not returned. |
 
 This is [`conventions.md`](conventions.md) §17.2. Presenting the hybrid `total`
 as a result count is the mistake this row exists to prevent.
@@ -785,8 +790,8 @@ fetching the document.
 
 ### 8.3 What is stable
 
-- The document describes **51 operations** — 49 under `/api/v1` plus the two
-  health probes. The number is pinned by `CONTRACT_OPERATIONS = 51` in
+- The document describes **54 operations** — 52 under `/api/v1` plus the two
+  health probes. The number is pinned by `CONTRACT_OPERATIONS = 54` in
   [`tests/openapi_contract.rs`](../../tests/openapi_contract.rs), and the
   inventory is listed in [`README.md`](README.md) §3.
 - The version changes only for an **incompatible** change. Adding an optional

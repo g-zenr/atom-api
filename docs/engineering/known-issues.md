@@ -984,3 +984,46 @@ closed; the remaining gap is the missing re-gate, not the mechanism.
 **Related.** [`.opencode/agents/quality-gate.md`](../../.opencode/agents/quality-gate.md),
 [`../testing/verification-policy.md`](../testing/verification-policy.md),
 [`runs/chain/ledger.md`](runs/chain/ledger.md) `## Checkpoints`.
+
+---
+
+### KI-024 - An API key has no scope, no expiry, and can mint another key
+
+**Problem.** An API key issued by `POST /api/v1/api-keys` carries the **full
+authority of its owner**. There is no scope model, no expiry, and no restriction
+on which operations it may call - including `POST /api/v1/api-keys` itself. The
+only way to end a key's access is `DELETE /api/v1/api-keys/{key_id}`, and a key
+that was used to mint another key leaves that second key alive when the first is
+revoked.
+
+**Impact.** The credential is honest for the job it was built for - one machine
+client acting as one person - but it is not a credential a third party can ever
+hold. A leaked key is a full-account compromise until somebody notices and
+revokes it, and revocation does not undo access the key granted. The hourly
+`last_used_at` stamp is the only audit signal, and it is deliberately coarse: a
+use inside the hour of the previous stamp is not recorded.
+
+**Why it is not fixed here.** Scopes are a product decision with no requirement
+behind them (`docs/project-truth.md` has no notion of a limited credential), and
+an expiry needs a rotation story ATOM does not have. `ADR-0011` records both as
+accepted negatives rather than pretending the key is safer than it is.
+
+**Recommended fix, in order.**
+
+1. Add a `scopes` column and a per-route requirement, defaulting to the current
+   full authority so nothing existing changes meaning.
+2. Add `expires_at`, and refuse a key past it with the same `401` a revoked key
+   gets.
+3. Decide whether a key may mint another key. If it may not, that is one check
+   in the create handler and it removes the "revoking the parent does not revoke
+   the child" case above.
+
+**Not a documentation defect.** `docs/security/threat-model.md` records it as
+`T-21` and `docs/features/api-keys/status.md` states it as a limitation; what is
+missing is the control, not the description.
+
+**Related.** [`../../migrations/0007_api_keys.sql`](../../migrations/0007_api_keys.sql),
+[`../../src/api_keys/service.rs`](../../src/api_keys/service.rs),
+[`../decisions/ADR-0011-api-keys.md`](../decisions/ADR-0011-api-keys.md),
+[`../security/threat-model.md`](../security/threat-model.md),
+[`../features/api-keys/status.md`](../features/api-keys/status.md).

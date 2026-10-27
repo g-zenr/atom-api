@@ -1,7 +1,7 @@
 # Database schema
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-25
+> **Last updated:** 2026-10-27
 > **Owner:** maintained by the `database` agent
 
 The complete Phase 1 schema of the ATOM database, table by table, as it is
@@ -9,10 +9,12 @@ defined in `migrations/`. Section 11 is the Phase 2 schema. Its first two tables
 are created by `migrations/0004_expense_claims.sql` and are served by the twelve
 claim operations of chains `R2`-`R4`; its next three are created by
 `migrations/0005_job_applications.sql` and are served by the fourteen
-operations of chains `J2`-`J4`; and its last, `embeddings`, is created by
+operations of chains `J2`-`J4`; `embeddings` is created by
 `migrations/0006_embeddings.sql` and is served by the three machine-learning
-operations built in chains `M3`-`M6`. No table in §11 is proposed any more, and
-`migrations/` ends at `0006`.
+operations built in chains `M3`-`M6`; and `api_keys` is created by
+`migrations/0007_api_keys.sql` and is served by the three key-management
+operations of chain `K1`. No table in §11 is proposed any more, and
+`migrations/` ends at `0007`.
 
 The conventions the schema follows are in
 [`../project-truth.md`](../project-truth.md) §12. The rules for changing it
@@ -31,6 +33,8 @@ users ──1:N──► refresh_sessions
   ├──1:N──► companies ──1:N──► job_applications ──1:N──► application_events
   │                                   └─(next_action_task_id, SET NULL)──► tasks
   │
+  ├──1:N──► api_keys
+  │
   └──1:N──► projects ──1:N──► tasks
 ```
 
@@ -47,16 +51,19 @@ users ──1:N──► refresh_sessions
 | `job_applications` | `migrations/0005_job_applications.sql` | One row per role being pursued at a company (§11.4). Served by the five application operations of `J3`. |
 | `application_events` | `migrations/0005_job_applications.sql` | One row per dated entry in an application's timeline (§11.5). Served by the four event operations of `J4`. |
 | `embeddings` | `migrations/0006_embeddings.sql` | One row per source, model and owner (§11.6). Read and written by `src/ml/repository.rs` and purged by the delete statement of each source. |
+| `api_keys` | `migrations/0007_api_keys.sql` | One row per issued API key (§11.7). The secret is never stored — only its SHA-256 digest — and the row is read on every request that presents a key. |
 
 Two enum types are created by `migrations/0003_projects_and_tasks.sql`:
 `task_status` and `task_priority`. `migrations/0004_expense_claims.sql` adds a
 third, `expense_claim_status`, and `migrations/0005_job_applications.sql` adds
-`job_application_status` and `application_event_kind` (§11.7).
+`job_application_status` and `application_event_kind` (§11.8).
 `migrations/0006_embeddings.sql` adds no type:
-`embeddings.source_type` is a `CHECK`ed `TEXT`, for the reason §11.7 gives.
+`embeddings.source_type` is a `CHECK`ed `TEXT`, for the reason §11.8 gives.
+`migrations/0007_api_keys.sql` adds no type either: every controlled value in
+`api_keys` is a regular-expression `CHECK` (§11.7).
 
-No table of §11 is still proposed. The last one, `embeddings` (§11.6), is
-created by `migrations/0006_embeddings.sql`, and `migrations/` ends at `0006`.
+No table of §11 is still proposed. The last one, `api_keys` (§11.7), is created
+by `migrations/0007_api_keys.sql`, and `migrations/` ends at `0007`.
 
 ### 1.1 A stale comment in an applied migration
 
@@ -83,6 +90,22 @@ would refuse to run. The correction is recorded here and in
 [`../engineering/change-log.md`](../engineering/change-log.md) instead. The
 rule is in [`migration-policy.md`](migration-policy.md): an applied migration
 is never edited, and a schema change is a new migration.
+
+### 1.2 A section number that moved after `0006` was applied
+
+The comment on `embeddings.source_type` in
+[`../../migrations/0006_embeddings.sql`](../../migrations/0006_embeddings.sql)
+points at "§11.7" for the reason the column is `CHECK`ed `TEXT` rather than an
+enum type. That section is **§11.8** today: `0007` inserted `api_keys` as
+§11.7, so the enum discussion and the cross-cutting invariants moved down by
+one (§11.8 and §11.9).
+
+The comment is **not** corrected in place for the reason §1.1 gives — `0006` is
+applied and its checksum is fixed. The target of the reference is unambiguous
+from its subject ("the new enum types"), so the stale number misdirects nobody
+who follows it once. It also stands as a reminder that a section number is not a
+stable identifier, and that a document which is allowed to be edited must not be
+treated as one.
 
 ---
 
@@ -382,7 +405,7 @@ written with that in mind, and the policy in
 
 ## 11. Phase 2 (Proposed, except what has been built)
 
-> **Status:** **Proposed**, except for the six tables three migrations already
+> **Status:** **Proposed**, except for the seven tables four migrations already
 > create. `expense_claims` and `expense_items` are served by the twelve claim
 > operations of chains `R2`-`R4` (§11.1). `companies`, `job_applications` and
 > `application_events` are created by `migrations/0005_job_applications.sql`
@@ -422,6 +445,15 @@ written with that in mind, and the policy in
 > clean scratch database and its constraints and indexes were exercised; the
 > access-path measurements quoted in §11.6 are recorded evidence for those two
 > indexes, not a claim that a running endpoint uses them today.
+>
+> `migrations/0007_api_keys.sql` creates `api_keys` with the three `CHECK`s, the
+> unique digest constraint and the owner index named in §11.7, and nothing else:
+> no enum type, no extension, no child table and no trigger. The table stores a
+> digest and a display prefix, never the secret. It was applied from `0001` to a
+> clean scratch database and every constraint was exercised — a duplicate
+> digest, both halves of the prefix grammar, a short and an upper-case digest,
+> both name bounds, the two `NULL`-defaulted timestamps and the account
+> cascade — before this section was written.
 
 Six provisional assumptions underlie this section: **A1** (a claim has one
 currency and there is no FX), **A2** (a receipt is a reference), **A3**
@@ -430,8 +462,8 @@ currency and there is no FX), **A2** (a receipt is a reference), **A3**
 string with four decimals). All six are **provisional defaults, owner decision
 O1**; they were never confirmed by the owner. A1, A5 and A6 shape the columns
 most directly, and A4 shapes §11.6. A revision of any of them changes this
-section, and for §11.1-§11.6 it needs a new migration as well because `0004`,
-`0005` and `0006` are applied; the requirements in
+section, and for §11.1-§11.7 it needs a new migration as well because `0004`,
+`0005`, `0006` and `0007` are applied; the requirements in
 [`../project-truth.md`](../project-truth.md) §18.4 say how.
 
 The design follows the conventions of §10 and the rules of
@@ -443,6 +475,7 @@ users ─┬─► expense_claims ──► expense_items
        │        └─(project_id, SET NULL)──► projects
        ├─► companies ──► job_applications ──► application_events
        │                      └─(next_action_task_id, SET NULL)──► tasks
+       ├─► api_keys
        └─► embeddings        (source_id is polymorphic: note | application)
 ```
 
@@ -458,7 +491,7 @@ the total live here, the amounts live in `expense_items`.
 | `title` | `TEXT` | no | — | Trimmed, 1 to 200 characters. |
 | `description` | `TEXT` | no | `''` | At most 5 000 characters. Optional at the API, `''` in the database, exactly like `notes.content`. |
 | `currency` | `CHAR(3)` | no | — | ISO 4217, three upper-case letters. Immutable after creation (`REIMB-R02`). |
-| `total_amount` | `NUMERIC(19,4)` | no | `0` | Never negative, and always equal to the sum of the items (§11.8). |
+| `total_amount` | `NUMERIC(19,4)` | no | `0` | Never negative, and always equal to the sum of the items (§11.9). |
 | `status` | `expense_claim_status` | no | `'draft'` | The five-state lifecycle (`REIMB-R04`). |
 | `project_id` | `UUID` | yes | `NULL` | `REFERENCES projects (id) ON DELETE SET NULL`. Optional link; the project must belong to the same user (`REIMB-R09`). |
 | `submitted_at` | `TIMESTAMPTZ` | yes | `NULL` | Set exactly when the status requires it. |
@@ -973,7 +1006,194 @@ The choice is recorded in [`ADR-0008`](../decisions/ADR-0008-local-pure-rust-ml.
 indexed in [`../decisions/README.md`](../decisions/README.md), and `ML-R08` is
 the requirement that makes the read-side predicate mandatory.
 
-### 11.7 The new enum types
+### 11.7 `api_keys`
+
+One row per long-lived credential a machine client holds. The table is created
+by `migrations/0007_api_keys.sql`; the migration is the enforced copy of this
+section.
+
+The table exists because the Phase 1 credential cannot serve an unattended
+client. An access token expires in fifteen minutes, and the refresh token
+rotates with reuse detection, so a workflow (today: n8n) that stores either one
+either stops working on rotation or trips the reuse alarm and revokes the
+account's sessions. A key is the credential that survives being used by a
+machine. It is **not** a second account: a key is an authority derived from one
+account, `user_id` is its owner, and every statement that reads or writes it —
+including the authentication lookup's follow-up — carries `user_id` in the
+`WHERE` clause. A key never moves between owners.
+
+| Column | Type | Null | Default | Notes |
+| ------ | ---- | ---- | ------- | ----- |
+| `id` | `UUID` | no | — | Primary key, generated by the application. |
+| `user_id` | `UUID` | no | — | `REFERENCES users (id) ON DELETE CASCADE`. The owner. |
+| `name` | `TEXT` | no | — | Owner-chosen label, 1 to 100 characters. Not unique: two keys may share a label, and the id tells them apart. |
+| `prefix` | `TEXT` | no | — | The display half of the secret: `atom_` plus 8 lower-case hex characters. Not an identity, and deliberately **not** unique. |
+| `key_hash` | `TEXT` | no | — | SHA-256 hex digest of the secret, 64 lower-case hex characters. Unique. **Not Argon2** — see below. |
+| `last_used_at` | `TIMESTAMPTZ` | yes | `NULL` | The last authenticated use. Written at most once an hour per key (`K1` I5); the database stores the instant and does not throttle. |
+| `created_at` | `TIMESTAMPTZ` | no | `NOW()` | |
+| `revoked_at` | `TIMESTAMPTZ` | yes | `NULL` | `NULL` means active. Set once, never cleared. |
+
+There is no `updated_at`, unlike the other Phase 2 tables. The row is immutable
+apart from the two stamps above, and the only writer that touches it after
+creation is the hourly `last_used_at` touch and the revocation; an `updated_at`
+would be rewritten by exactly those statements and would say nothing they do not
+already record.
+
+#### Constraints
+
+| Name | Definition |
+| ---- | ---------- |
+| `api_keys_user_id_fkey` | `FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE` |
+| `api_keys_name_length_chk` | `CHECK (CHAR_LENGTH(name) BETWEEN 1 AND 100)` |
+| `api_keys_prefix_chk` | `CHECK (prefix ~ '^atom_[0-9a-f]{8}$')` |
+| `api_keys_key_hash_chk` | `CHECK (key_hash ~ '^[0-9a-f]{64}$')` |
+| `api_keys_key_hash_key` | `UNIQUE (key_hash)` — one row per secret. Named explicitly rather than left to PostgreSQL's default, because the authentication lookup documents its access path by this name and a default name follows the column list. |
+
+The two regular-expression `CHECK`s pin the **form** of each value, so a row the
+issuing code could never have produced is unrepresentable whatever writes it.
+That is not only tidiness: the authentication middleware decides "is this bearer
+token a JWT or an API key?" from the `atom_` prefix, so a stored prefix outside
+that grammar would be a credential the router could not classify, and a digest
+that is not 64 lower-case hex characters could never be matched by a correctly
+computed lookup. An upper-case digest fails `api_keys_key_hash_chk`; the stored
+form is the form the comparison uses, so there is one spelling of it.
+
+`name` is bounded in the database because the API bounds it: a length the
+application enforces but the table does not is a rule a second writer can
+break.
+
+#### Indexes
+
+| Name | Definition | Why |
+| ---- | ---------- | --- |
+| `api_keys_key_hash_key` | the `UNIQUE` constraint's index, `btree (key_hash)` | The authentication lookup and the arbiter of "one row per secret". A hash is computed from the presented key and matched here; the row's `user_id` then scopes the request. |
+| `api_keys_user_id_idx` | `INDEX (user_id)` | The owner's listing (`GET /api/v1/api-keys`, newest first), the owner predicate of the revoke and delete statements, and the lookup the account cascade performs. |
+
+The first row is the same object as `api_keys_key_hash_key` in the constraints
+table: a `UNIQUE` constraint is enforced by an index, and PostgreSQL names that
+index after the constraint, so `\d api_keys` lists it once under each heading.
+It is written as a named table constraint rather than a bare
+`CREATE UNIQUE INDEX`, which is what `0001` does for `users_email_unique_idx`
+and `0005` for `companies_user_id_lower_name_unique_idx`, because the
+credential lookup in `src/api_keys/repository.rs` cites its access path by the
+name `api_keys_key_hash_key`, and an unnamed column `UNIQUE` would derive that
+name from the column list. The index the constraint creates is the same object
+either way; the name is what differs, and this is the name the code expects.
+
+`key_hash` is unique because two rows holding the same digest are one credential
+stored twice: authentication would have to pick one, and which one it picked
+would be up to the planner. A secret is 256 bits of CSPRNG output, so a
+collision between two independently generated keys is not "unlikely and
+therefore tolerable" — it is a defect, and the constraint turns it into a
+`23505` that the insert reports instead of a silent ambiguity. Uniqueness is
+enforced by the database, not by a check-then-insert in the service, so two
+concurrent creations cannot both succeed.
+
+`api_keys_user_id_idx` is one column, not `(user_id, created_at DESC)`. A person
+holds a handful of keys, so sorting that owner's rows after the index seek costs
+nothing; a second column would be written on every row for a read it does not
+serve. It is also the index that keeps `ON DELETE CASCADE` from scanning the
+table when an account is deleted.
+
+#### The digest is SHA-256, and that is deliberate
+
+`key_hash` is SHA-256, exactly as `0001` treats a refresh token, and **it must
+not be "fixed" into Argon2.** The two credentials in this database have
+different threat models, and the difference decides the algorithm:
+
+- A password is low-entropy and human-chosen. An attacker holding its digest can
+  enumerate plausible candidates, so the only defence left is to make each guess
+  expensive. That is why `users.password_hash` is Argon2 and it is right there.
+- A key is chosen by nobody. It is 32 bytes from a CSPRNG, rendered as `atom_`
+  plus 64 lower-case hex characters — 69 characters in total — so the candidate
+  space is 2^256: no dictionary, no pattern, no guess. A memory-hard function
+  buys nothing when there is nothing to guess.
+- The digest is verified on **every authenticated request**. Argon2id at this
+  project's password parameters (`config/auth.toml`: 19 MiB, two iterations,
+  with an 8 MiB floor) deliberately costs tens of milliseconds and most of
+  20 MiB per verification. On the hot path that turns a leaked-database risk
+  which this table already survives into unauthenticated CPU and memory
+  amplification against the API itself — a self-inflicted denial of service
+  triggered by a header.
+
+So the asymmetry is the design, not an inconsistency: SHA-256 for a key, Argon2
+for a password. The reasoning is recorded in
+[`../decisions/ADR-0011-api-keys.md`](../decisions/ADR-0011-api-keys.md);
+changing the column needs a new ADR and a measured argument, not a consistency
+edit.
+
+#### Why the prefix is not a key
+
+`prefix` is the first 13 characters of the secret, stored so that a key can be
+shown, logged and correlated without the secret: in the list response, in an
+operator's screenshot, in a support ticket. It is not a lookup key and must not
+be made unique. Eight hex characters are 32 bits, so two keys of one owner can
+legitimately share a prefix; a collision leaks nothing and disambiguates
+nothing. `key_hash` is the identity and authentication seeks on it, never on the
+prefix. A `UNIQUE` constraint on `prefix` would reject a legal key because of a
+collision that carries no meaning, and the only way to avoid it would be a
+longer prefix, which is a secret fragment on display for no benefit.
+
+#### Revocation and `last_used_at`
+
+`revoked_at` is a timestamp, not a status column. A key is never un-revoked, so
+`revoked_at IS NULL` *is* "active", and there is no second representation of the
+same fact to drift from it. `last_used_at` is nullable for the same reason: it
+records an event, not a state.
+
+The once-an-hour write throttle (`K1` I5) is **not** a database rule. A row
+`CHECK` sees one row and cannot compare against the value it is replacing, and a
+`BEFORE UPDATE` trigger would be the only way to express "only if older than an
+hour". No rule of this schema lives in a trigger, because a hidden write is
+harder to audit than the statement that owns it. The throttle is therefore one
+`UPDATE ... WHERE id = $1 AND user_id = $2 AND (last_used_at IS NULL OR
+last_used_at < NOW() - INTERVAL '1 hour')` in the request path, and a test
+asserts the second request inside the hour does not move the stamp.
+
+#### Ownership and deletion
+
+The key belongs to one account and is deleted with it: an authority derived from
+an account has no meaning without it, so `CASCADE` is the only correct
+behaviour. There is no child table, so there is no composite ownership key to
+enforce — and no path that moves a key to another owner, because `user_id` is in
+no `SET` clause of any statement.
+
+A caller who names a key id that belongs to somebody else gets `404`, never
+`403` (§11.9 item 3): the delete and revoke statements carry
+`AND user_id = $1` alongside the id, so the row is not found at all.
+
+#### Measured access paths
+
+Measured on a scratch database created from `0001`-`0007` (PostgreSQL 18.1),
+filled with 5 000 keys across two owners and analysed:
+
+| Statement | Plan | Buffers | Duration |
+| --------- | ---- | ------- | -------- |
+| The authentication lookup: `WHERE key_hash = $1` | `Index Scan using api_keys_key_hash_key`, 1 row | 3 shared | 0.12 ms |
+| The owner listing, an owner with 3 keys among 5 003 | `Sort` → `Index Scan using api_keys_user_id_idx`, 3 rows | 3 index, 9 total | 0.12 ms |
+| The account cascade: `DELETE ... WHERE user_id = $1`, 3 keys | `Index Scan using api_keys_user_id_idx`, 3 rows, the owner's `count` 3 → 0 | 3 index, 6 total | 0.40 ms |
+| The owner listing when **one owner holds half the table** (2 500 of 5 000) | `Seq Scan` + `Sort`, 2 500 rows returned | 97 seq, 103 total | 1.91 ms |
+
+The first three are the plans a real deployment sees. The fourth is the same
+owner-listing statement as the second, run when the synthetic data gave one owner
+half of the table: at 50 % selectivity the planner is right to scan, and the
+index is not a defect. A human creates keys by hand, so an owner holds a handful
+among however many the table has — the second row is the shape that matters, and
+there the index is chosen.
+
+#### What the database does not enforce
+
+- **The secret is never in the database**, so nothing here can prove that a
+  stored digest was issued by this API. The `CHECK` bounds its form; the
+  middleware treats a malformed or unknown key as `401`, never `500` (`K1` I6).
+- **A revoked key and an inactive account are `401`s**, not constraint
+  failures. Revocation is a column change and account deactivation is
+  `users.is_active`; both are read by the authentication statement in the same
+  lookup, and both are covered by tests.
+- **The secret is returned once** (`K1` I1) is a property of the response, not
+  of a column: the database holds no value that could be returned again.
+
+### 11.8 The new enum types
 
 Three enum types are created with the tables, following the convention of §8.
 A fourth controlled value, `embeddings.source_type`, is `TEXT` with a `CHECK`
@@ -1005,7 +1225,7 @@ it chooses a static statement, and the ML feature's storage design fixes it as
 guarantee that matters; the difference is where the Rust type is declared, not
 whether the database refuses the value.
 
-### 11.8 Cross-cutting invariants
+### 11.9 Cross-cutting invariants
 
 These hold for every table above, and a change that breaks one is a defect even
 if every table-level constraint still passes.
@@ -1079,6 +1299,7 @@ if every table-level constraint still passes.
    | `0004_expense_claims.sql` | `expense_claim_status`, `expense_claims`, `expense_items` and their indexes | `REIMB-R01`…`R10` |
    | `0005_job_applications.sql` | `job_application_status`, `application_event_kind`, `companies`, `job_applications`, `application_events` and their indexes | `JOB-R01`…`R09` |
    | `0006_embeddings.sql` | `embeddings` and its indexes, with `source_type` a `CHECK`ed `TEXT` | `ML-R01`…`R09` |
+   | `0007_api_keys.sql` | `api_keys`, its three `CHECK`s, its unique digest constraint and its owner index | `K1` I1…I6 |
 
    Each migration lands with its Rust models, its repository statements, its
    DTOs and its seeder extension in the same change
@@ -1098,5 +1319,5 @@ if every table-level constraint still passes.
   the tables.
 - [`../architecture/data-architecture.md`](../architecture/data-architecture.md)
   — why the model is shaped this way.
-- [`../project-truth.md`](../project-truth.md) §18 — the requirements the six
-  Phase 2 tables serve.
+- [`../project-truth.md`](../project-truth.md) §18 — the requirements the Phase 2
+  tables serve.

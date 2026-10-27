@@ -35,7 +35,7 @@ use uuid::Uuid;
 /// with its own test in a later chain; here it only has to be valid.
 const ROLE_TITLE: &str = "a job application";
 
-/// The seven stages the enum admits, in the order §11.7 lists them.
+/// The seven stages the enum admits, in the order §11.8 lists them.
 const STAGES: [&str; 7] = [
     "wishlist",
     "applied",
@@ -457,8 +457,8 @@ async fn the_job_tables_apply_from_an_empty_database() {
     );
     assert_eq!(
         probe.versions,
-        vec![1, 2, 3, 4, 5, 6],
-        "an empty database must end up carrying every migration, including 0005"
+        vec![1, 2, 3, 4, 5, 6, 7],
+        "an empty database must end up carrying every migration, including 0005 to 0007"
     );
     assert!(
         probe.company_table,

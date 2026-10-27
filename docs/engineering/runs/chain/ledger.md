@@ -1,7 +1,7 @@
 # Phase 2 run — ledger
 
 > **Status:** In progress (run state)
-> **Last updated:** 2026-10-25 (D4 and D5.H1/H2/H4 recorded; first executable gate verdict in `ATOM-REVIEW-20261024-011`)
+> **Last updated:** 2026-10-26 (queue complete through `D5`; closing the independent verdicts and reconciling this file with the tree)
 > **Owner:** maintained by the orchestrator
 
 This file is the only source of truth for resuming the run. It is updated after
@@ -119,10 +119,10 @@ step deliberately, and the rows are renamed only between runs.
 | D2.R6 | Close: review, gate, commit | **done** | `a9b2db1` | Two independent reviews ran: `code-reviewer` FAIL on documentation plus one rank-1 requirement contradiction, all fixed; `quality-gate` could not execute (shell denied) and reported every gate as not run rather than passing, and its four static findings were fixed. 302 tests. The seeder already carried claims from `R1` (S2), so no seeder work remained. |
 | D3 | Job applications | **done** (J6 review outstanding) | `57788a6`, `5a125e5`, `c273f29` | Schema, 14 operations, stage machine, flow. 387 tests. |
 | D3.S3 | Seeder: companies and applications | **done** | `57788a6` | Landed in `J1` as `S3`: companies 5/12/18, applications 1/20/40, events 1/50/100. |
-| D4 | Local ML | **done** (encoder built and measured) | `bfd1288`, `c28b353`, `a4d33a3`, `ba198ff`, `ba91008` | Spike measured, ADR finalised, migration `0006`, module, three operations, degradation and seeder flag. 481 tests at the close-out; **`ML-R02` is met** (no Burn encoder) so the feature is `Implemented`, not `Verified`. |
+| D4 | Local ML | **done** (encoder built and measured) | `bfd1288`, `c28b353`, `a4d33a3`, `ba198ff`, `ba91008`, `97d7b4b`, `a3e8c46` | Spike measured, ADR finalised, migration `0006`, module, three operations, degradation and seeder flag. 481 tests at the close-out, **511 on `4df383e`**. **`ML-R02` is met**: `97d7b4b` adds the six-layer Burn encoder and the WordPiece tokenizer and `a3e8c46` records the measurement. The feature stays `Implemented` because the encoder span had no independent review until 2026-10-26 and its quality evidence is one manual run. |
 | D4.S4 | Seeder: embeddings | **done** | `ba198ff` | `--with-embeddings` uses the deterministic embedder, never a network call; `--reset` purges `embeddings`; `SEEDED_TABLES` names the table. |
-| D5 | Hardening and handover | **done** | `c2f9bad`..`8ba0a90` | `H1` contract sweep 51/51, `H2` ownership 32/32, `H3` performance (`docs/database/performance.md`), `H4` handover, `H5` re-verdict recorded, `H6` tag. `S5` (seeder CI smoke) is not wired into the workflow and remains open. |
-| D5.S5 | Seeder: CI smoke and final proof | pending | — | Runs the seeder against the CI database and asserts the counts. |
+| D5 | Hardening and handover | **done** | `c2f9bad`..`8ba0a90` (+ `a44d625`) | `H1` contract sweep 51/51, `H2` ownership 32/32, `H3` performance (`docs/database/performance.md`), `H4` handover (`docs/api/frontend-handover.md`), `H5` re-verdict recorded, `H6` `phase-2-complete` tagged at `a44d625`. |
+| D5.S5 | Seeder: CI smoke and final proof | **done** | `e9499ea` | **Closed 2026-10-26 after re-reading the workflow, not the row.** `.github/workflows/ci.yml` seeds `atom_dev` with `--reset`, re-runs without it to prove idempotency, asserts the scoped counts `22002520` (2 users, 200 notes, 25 claims, 20 applications) with `test "$(cat /tmp/seed-counts.txt)" = "22002520"`, and asserts that `APP_ENV=prod` is refused. CI run `40207493953` and Container `40207494177` are **success** on `4df383e`, so the job executes. The row said `pending` because it was written before `e9499ea`. |
 
 A day is one paste of [prompt.md](prompt.md). A chain is one row above.
 
@@ -739,6 +739,61 @@ skipping the gate:
 3. Roll forward into `PHASE=2` in queue order (`D2.R1`), which §4 authorises
    once the checkpoints are clean and 90 minutes remain.
 
+**Phase-1 run preflight, 2026-10-26 (this session, resumed `RUN PHASE=1`).**
+The 2026-10-24 session above was interrupted by a server restart during its
+preflight. This session re-ran every check against the tree, and the tree is no
+longer the one that preflight described: the queue has been completed by later
+sessions while this one was down.
+
+| Fact | Value |
+| ---- | ----- |
+| HEAD | `4df383e`, branch `develop`; `develop` == `origin/develop` (0 ahead, 0 behind) |
+| Tree | **clean** — no modified, no untracked path |
+| Writers | `Get-Process cargo,rustc,python,atom-api` → no output at the start of the run; no `STOP-RUN` sentinel; the unattended runner scripts were deleted on 2026-10-24 by the owner's decision |
+| Database | `psql -h 127.0.0.1 -U atom -d atom_test -c "select 1"` → `1`, exit 0 |
+| Disk | 31.7 GB free — above the 3 GB floor |
+| `gh` | authenticated as `g-zenr` |
+| CI | `gh run list --limit 6` → CI `40207493953` and Container `40207494177` **success** on `4df383e`; the four runs below them, on `ba666f4` and `484e77d`, are also success |
+| Tag | `phase-2-complete` → `a44d625`; the tip is three commits later and the tag was deliberately not moved (`O2` forbids a force-push) |
+| Migrations | `0001`–`0006` |
+
+Gates measured on `4df383e` through the single read-only entry point the run
+added for exactly this purpose, `scripts/gate.ps1`, which captures
+`$LASTEXITCODE` itself:
+
+| # | Gate | Exit |
+| - | ---- | ---- |
+| 1 | `cargo fmt --all -- --check` | **0** |
+| 2 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | **0** |
+| 3 | `cargo test --all-targets --locked` | **0** — **511 passed, 0 failed** across 22 targets (216 lib, 13 `atom-seed` binary, 3 `atom-docs`, 29 `auth_api`, 56 `claims_api`, 3 `claims_flow`, 10 `claims_schema`, 2 `contract_sweep`, 2 `docs_route`, 51 `job_applications_api`, 2 `job_applications_flow`, 11 `jobs_schema`, 4 `list_query`, 41 `ml_api`, 12 `notes_api`, 10 `openapi_contract`, 25 `projects_tasks_api`, 21 `seeder`, 0 `shutdown` — unix-only) |
+| 4 | `cargo check --no-default-features --all-targets --locked` | **0** |
+| 5 | `cargo run --quiet --bin atom-docs` | **0** |
+| 6 | `cargo run --quiet --bin atom-docs -- --strict` | **0** |
+
+**§0.3 ruling for this session.** Phase 0 is closed and green, and the
+`PHASE=1` block is **complete**: `D1` was committed twice (`ec41105`,
+`f88733c`) and pushed (`f27d100`), with CI green on it. Beyond it, the queue
+has been carried to the end of the run: `D2` (seeder, reimbursements), `D3`
+(job applications), `D4` (local ML) and `D5` (hardening) all have commits, and
+`phase-2-complete` is tagged. `D5.S5`, the last row any record called
+`pending`, is in fact done at `e9499ea`; this session corrected that row after
+reading the workflow rather than the row.
+
+There is therefore **no phase left to execute**, and re-running the intake
+would rewrite documents that are now `Accepted` — which the run's own rules
+forbid. What is genuinely outstanding is the obligation every checkpoint in
+this file records as `Fail`:
+
+| Obligation | State before this session |
+| ---------- | ------------------------- |
+| An independent `code-reviewer` verdict on the span after `58f9532` | Never run; 50 files, +5 434/-864, including the encoder, the score floor, the seed `V6` change and the `S5` CI wiring |
+| A `quality-gate` verdict that closes `ATOM-REVIEW-20261024-011` | `-011` explicitly records "no re-gate"; the repairs are in the tree but nothing judged them |
+| A ledger that matches the tree | `## Resume` says HEAD `8ba0a90`, 504 tests, `ML-R02` unmet; the tree is `4df383e`, 511 tests, and `ML-R02` has an encoder |
+
+This session closes those three and reports. It does not re-open a chain that
+is already committed, and it does not mark anything `Verified` on its own
+authority.
+
 ### D0 completion, 2026-10-24 (this session) — the real results
 
 All six gates, run from the repository root on the integrated tree, in this
@@ -820,6 +875,21 @@ is the observed response, which is quoted in each case.
 `quality-gate` could not reproduce any of these: its shell was denied, so it
 reported them as unverified rather than accepting them. That is recorded in its
 scorecard row above, not papered over.
+
+### Close-out evidence, 2026-10-26
+
+Commands run by the orchestrator on `4df383e`, plus the two reviews' own runs.
+
+| Command | Result |
+| ------- | ------ |
+| `git status --short` | empty - a clean tree before the session started |
+| `git rev-parse --abbrev-ref HEAD`, `git rev-list --left-right --count origin/develop...HEAD` | `develop`, `0 0` |
+| `scripts/gate.ps1` (orchestrator) | **exit 0** - `fmt 0, clippy 0, test 0, nodefault 0, docs 0, strict 0` |
+| `cargo test --all-targets --locked` | **exit 0** - **511 passed, 0 failed**, 19 non-empty targets |
+| `git diff --stat 58f9532..HEAD` | 50 files, +5 434 / -864 |
+| `gh run list --limit 6` | CI `40207493953` and Container `40207494177` **success** on `4df383e`; the four runs below, on `ba666f4` and `484e77d`, also success |
+| `scripts/gate.ps1` (`quality-gate`, independently) | **exit 0** - same six zeros; it also ran `cargo test -- --list` and reproduced the 511 split target for target |
+| `Select-String .github/workflows/ci.yml` for the seeder job | `--profile dev --reset`, a second run without `--reset`, `test "$(cat /tmp/seed-counts.txt)" = "22002520"`, and a step that fails if the seeder runs under `APP_ENV=prod` |
 
 ## Failures
 
@@ -1381,6 +1451,15 @@ Commit `c2f9bad`; `tests/contract_sweep.rs`. Agents: `test-engineer`, `docs`.
 published surface rather than one feature's slice of it; a handler that answers
 the wrong status for any of the 51 operations now fails.
 
+**Note on the three totals (2026-10-26).** This chain's row 3 says `481 -> 483`
+while its row 1 cites a **504**-test run for "that tree". Both cannot describe
+`c2f9bad`. The figure that can be placed is `ba198ff` at 481 and `c2f9bad` at
+483; the 504 belongs to a later commit in the same span (the `-011` repairs), and
+the 506 in that review is its CI count. None of the three is reproducible from
+`4df383e`, which is 511. The numbers are left as the historical record and this
+note is the reconciliation; a future session should not quote any of them as the
+current suite.
+
 ### D5.H2 - The ownership sweep, 2026-10-24
 
 Same commit `c2f9bad`; `no_operation_reaches_another_accounts_row`. Agents:
@@ -1426,6 +1505,122 @@ Commit `c2f9bad`; `docs/api/frontend-handover.md`. Agents: `docs`, `architect`.
 degradation rule as a client contract, which is what makes `ML-R02`'s gap
 visible to a frontend rather than only to this repository.
 
+### RUN CLOSE - the re-gate and the ledger reconciliation, 2026-10-26
+
+Not a new chain: the queue was already complete. This closes the obligation every
+scorecard records as `Fail` (an independent verdict) and makes this file match
+the tree. Agents: `code-reviewer` and `quality-gate` read-only; `docs`,
+`database` and `rust-backend` for the repairs.
+
+| # | Criterion | Evidence | Pass |
+| - | --------- | -------- | ---- |
+| 1 | All six gates green | `scripts/gate.ps1` **exit 0** on `4df383e`, run twice: once by the orchestrator, once independently by the `quality-gate`. See `### Close-out evidence` | **Pass** |
+| 2 | Every acceptance criterion maps to a test | Not applicable to this session: it adds no requirement. For the run, the mapping is in [`testing/strategy.md`](../../../testing/strategy.md) and in each chain's scorecard | **N/A** |
+| 3 | New tests at least the contract's target | **0 new** from this session; the suite is **511** on Windows, and both reviewers reproduced the number from `cargo test -- --list` | **Pass** |
+| 4 | A flow test exercises the chain end to end | `tests/contract_sweep.rs` walks all 51 published operations; `the_whole_reimbursement_journey_from_registration_to_payment` and `the_whole_job_application_journey_from_lead_to_offer` cover their features end to end | **Pass** |
+| 5 | Ownership: the second account gets 404 | `no_operation_reaches_another_accounts_row` probes every published operation as a second account; the collection cases assert `200` with `total: 0` rather than a false `404` | **Pass** |
+| 6 | Docs updated (feature, schema, api, change log) | `features/ml/*`, `project-truth.md` §17/§18, `README.md`, `api/README.md`, `api/frontend-handover.md`, `architecture/module-boundaries.md`, `ADR-0008`, `ADR-0010`, `testing/strategy.md`, `roadmap.md`, `database/seeding.md`, `features/reimbursements/status.md`, `features/job-applications/status.md`, `engineering/implementation-status.md`, `engineering/review-log.md`, `engineering/change-log.md`, this ledger | **Pass** |
+| 7 | Seeder updated for every new table | `USER_TABLES` is the single list behind both `--reset` and `V6`, pinned by a unit test; CI seeds `atom_dev`, proves idempotency and asserts the scoped counts `22002520` | **Pass** |
+| 8 | OpenAPI changed only as intended | Unchanged by this session: 51 operations, pinned in both test files and compared in both directions | **Pass** |
+| 9 | No forbidden construct added | `src/` and `tests/`: 0 `#[allow]`, 0 `#[ignore]`, 0 `TODO`/`FIXME`. Four `unsafe` occurrences, all inside the Windows-only peak-RSS probe of the measurement binaries and none on a request path. One `format!`-built SQL string, inside a test that asserts its target and its single bind | **Pass** |
+| 10 | code-reviewer pass on the chain diff | `ATOM-REVIEW-20261026-001`: **FAIL on documentation** with no correctness, security, SQL, money or degradation defect; seven blocking findings, all repaired. The per-chain row 10 for `D1`-`D5` remains `Fail` and is **not** closed by this | **Pass for the span; per-chain rows still `Fail`** |
+| 11 | quality-gate pass on the evidence | `ATOM-REVIEW-20261026-002`: **FAIL on the documentation record, PASS on execution**, and it executed the gates itself. Its findings are repaired in this change, and **no re-gate of those repairs is recorded**, so this row is not a clean pass | **Fail, declining to record it** |
+
+**Decision: the run closes with nothing promoted.** The queue is complete, the
+tree is green, two independent reviews exist and their findings are repaired.
+Three things are stated rather than glossed:
+
+1. **No re-gate of the repairs.** `-002` judged the tree *before* this session's
+   documentation repairs. A green gate run does not re-review prose.
+2. **The per-chain rows 10 and 11 stay `Fail`.** A whole-span review at the end
+   does not retroactively give `D2.R2` a reviewer, and pretending otherwise is
+   the failure mode this file spends its length avoiding.
+3. **Nothing moves to `Verified`.** Reimbursements, job applications and ML stay
+   `Implemented`; the encoder's quality evidence is one manual run by the author,
+   not reproducible on a machine without the weights.
+
+### C-K1 - Scoped API keys for machine clients (locked 2026-10-27, PHASE=K)
+
+Scope: the user has decided to integrate their deployed n8n with ATOM. That needs a credential a workflow can hold, which today ATOM does not have: `AuthUser` accepts only a user JWT (15-minute access, rotating refresh with reuse detection). An n8n workflow holding a refresh token will either lock the account out or break on rotation.
+
+**ENDPOINTS** - three, under `API_PREFIX`, all `bearer`-authenticated by an **existing** credential (a user JWT or another API key):
+
+| Method | Path | Success | Errors |
+| ------ | ---- | ------- | ------ |
+| `POST` | `/api-keys` | `201` `ApiKeyCreatedResponse` (carries the secret **once**) | 400, 401, 422 |
+| `GET` | `/api-keys` | `200` `ApiKeyPage` (never a secret) | 400, 401 |
+| `DELETE` | `/api-keys/{key_id}` | `204` | 400, 401, 404 |
+
+**TYPES** - `ApiKeyCreatedResponse { id, name, key, prefix, created_at }` where `key` is the only time the secret is ever returned; `ApiKeyResponse { id, name, prefix, last_used_at, created_at, revoked_at }`; `ApiKeyPage`; `CreateApiKeyRequest { name }`.
+
+**THE SECRET** - `atom_` + 32 random bytes as lowercase hex (68 chars total). Distinguishable from a JWT by the `atom_` prefix, which is how the middleware routes it. Stored as **SHA-256 hex**, not Argon2: the secret is 256 bits of CSPRNG output, so there is nothing to brute-force and a 20 ms memory-hard hash per request would be a self-inflicted denial of service. **Record that reasoning in the ADR** - it is deliberately different from the password rule and must not be "fixed" later.
+
+**SQL** - `migrations/0007_api_keys.sql`:
+- `api_keys (id uuid pk, user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE, name text NOT NULL, prefix text NOT NULL, key_hash text NOT NULL UNIQUE, last_used_at timestamptz, created_at timestamptz NOT NULL DEFAULT NOW(), revoked_at timestamptz)`
+- `CHECK (CHAR_LENGTH(name) BETWEEN 1 AND 100)`, `CHECK (prefix ~ '^atom_[0-9a-f]{8}$')`, `CHECK (key_hash ~ '^[0-9a-f]{64}$')`
+- `INDEX api_keys_user_id_idx ON api_keys (user_id)`
+
+**INVARIANTS** - I1 the secret is returned once and never again, not in logs, not in errors, not in a list; I2 every query is scoped by `user_id` and a foreign key id is `404`; I3 a revoked key is `401` on the next request; I5 `last_used_at` is updated at most once per hour per key, so a hot key does not write on every request; I6 a malformed or unknown key is `401`, never `500`.
+
+**I4 (amended before any code exists, `A-C-K1-1`)** - an inactive account's key is `403` with `messages.auth.account_disabled`, **not** `401`. The first draft said `401`, which would have given the same disabled account two different answers: `authenticate_bearer` already returns `403 account_disabled` for a valid JWT of an inactive account (`src/auth/service.rs:402`), and a second credential type must not contradict it. `401` is kept for the cases where the credential itself is not accepted - unknown, malformed, or revoked.
+
+**`A-C-K1-2` - the secret is 69 characters, not 68.** `atom_` is five characters, so `atom_` + 32 bytes as hex is `5 + 64 = 69`. The first draft said 68, counting the prefix as four characters; its own `prefix` rule (`atom_` + 8 hex = 13 characters) and the database CHECK assume five. Implemented as **69**, derived from `SECRET_BYTES` rather than typed, and recorded as 69 in `ADR-0011`. Do not "fix" the code down to 68: the CHECK `^atom_[0-9a-f]{8}$` on `prefix` already proves the prefix is five characters long.
+
+**TESTS** - `tests/api_keys_api.rs`: `a_key_is_returned_once_and_never_again`, `a_key_authenticates_a_request`, `a_revoked_key_is_unauthorized`, `a_key_of_an_inactive_account_is_forbidden`, `a_foreign_key_is_not_found`, `the_listing_never_contains_a_secret`, `a_malformed_key_is_unauthorized`, `a_key_cannot_manage_keys_of_another_account`, `last_used_is_recorded_once_an_hour`, `a_key_is_scoped_to_its_owner`. `CONTRACT_OPERATIONS` moves **51 -> 54**.
+
+**FILES** (exclusive)
+
+| Owner | Files |
+| ----- | ----- |
+| `database` | `migrations/0007_api_keys.sql`, `docs/database/schema.md` |
+| `rust-backend` | `src/api_keys/**`, `src/api/middleware.rs`, `src/api/routes.rs`, `src/state.rs`, `src/lib.rs`, `config/messages.toml` + `src/config/messages.rs` |
+| `test-engineer` | `tests/api_keys_api.rs`, `tests/openapi_contract.rs`, `tests/contract_sweep.rs` |
+| `docs` | `docs/decisions/ADR-0011-api-keys.md`, `docs/api/README.md`, `docs/security/security-architecture.md`, `docs/features/README.md` index if needed |
+| orchestrator | `docs/engineering/**` |
+
+**SEEDER** - no table change to seed; keys are operator-created. `V6` gains `api_keys` in its table list because it is a user table.
+
+### K1 - Scoped API keys, 2026-10-27
+
+The contract above was implemented in one wave: `database` (migration and
+schema), `rust-backend` (module, middleware, routes, state, messages, seeder
+list), `test-engineer` (ten integration cases, the contract assertions, the
+`51 -> 54` pin) and `docs` (the ADR, the API inventory, the security documents,
+the feature card and the stale-statement sweep).
+
+| Row | What was checked | Result |
+| --- | ---------------- | ------ |
+| 1 | The migration, applied to a scratch database | **Pass** - `api_keys` with three named `CHECK`s, `UNIQUE (key_hash)`, `api_keys_user_id_idx`, `ON DELETE CASCADE`; duplicate digest `23505`; bad prefix, bad digest, empty and 101-character name all `23514`; cascade proven; both nullable stamps null-then-set |
+| 2 | `cargo fmt --all -- --check` | **Pass** (`0`) |
+| 3 | `cargo clippy --all-targets --all-features --locked -- -D warnings` | **Pass** (`0`) |
+| 4 | `cargo test --all-targets --locked` | **Pass** (`0`) - **535 passed, 0 failed** on Windows; 537 on CI, which runs the two unix-only `shutdown` cases |
+| 5 | `cargo check --no-default-features --all-targets --locked` | **Pass** (`0`) |
+| 6 | `cargo run --bin atom-docs` and `-- --strict` | **Pass** - `OK (0 warning(s))` |
+| 7 | `scripts/gate.ps1` | **All gates passed.** (all six `0`) |
+| 8 | The feature's own cases | **Pass** - 10 in `tests/api_keys_api.rs`, 13 unit tests in `src/api_keys/`, the three routes swept by `contract_sweep` and pinned by `openapi_contract` at 54 operations |
+| 9 | Hand-run on `atom_dev` | **Pass** - create `201` (secret printed once, 69 characters), `GET /auth/me` with the key `200` for the same account, listing `200` with no secret, revoke `204`, the key afterwards `401`, second `DELETE` `204`, foreign or unknown id `404`, `atom_deadbeef` `401` and not `500`, `422` naming `name`, a disabled account's key `403` with the same envelope as its JWT |
+| 10 | Break-and-restore | **Pass** - three expectations inverted and observed red, restored and observed green (`a_revoked_key_is_unauthorized`, `the_listing_never_contains_a_secret`, `CONTRACT_OPERATIONS`) |
+| 11 | The integration the chain exists for | **Pass** - the local API behind a Cloudflare quick tunnel; an n8n Header-Auth credential holding a key; a webhook-triggered workflow on the deployed n8n reached `GET /api/v1/claims?status=approved` and returned `{"reached_atom":true,"approved_claims":0,"claims_on_page":0}`; n8n recorded execution `4` as `status=success mode=webhook finished=True` |
+| 12 | An independent `code-reviewer` over the diff | **Not run yet** when this row was written |
+| 13 | A `quality-gate` verdict | **Not run yet** when this row was written |
+
+**Nothing is promoted to `Verified`.** Rows 12 and 13 are the two records that
+would do it, and this checkpoint cannot write them on its own authority.
+
+Two things the chain found that the contract had wrong, both corrected in place
+before any code existed: `A-C-K1-1` (a disabled account's key is `403`, not
+`401`, so that one account state has one answer) and `A-C-K1-2` (the secret is
+**69** characters, because `atom_` is five).
+
+One thing the live integration found that a unit test could not: the first
+`Digest` expression, `$items('Approved claims').length`, reports **1** for an
+empty result. The ATOM list envelope is a single item (`{items, pagination}`),
+so that expression counts responses, not claims. Both workflows now read
+`$json.pagination.total`, and the probe returns `0`, which is the truth. The
+scaffold committed earlier had the same defect.
+
+---
+
 ## Parked
 
 | Item | Blocker | Next step |
@@ -1437,19 +1632,37 @@ visible to a frontend rather than only to this repository.
 | A concurrent session | Between 05:21 and 06:50 another session renamed `docs/engineering/runs/phase-2/` → `runs/chain/`, wrote the `D1` intake, then began `D2.S1`: it added `src/bin/atom-seed.rs`, a `[[bin]]` stanza in `Cargo.toml`, and edits to `.env.example`, `ci.yml`, `Makefile`, `docker-compose.yml`, `README.md`, `docs/architecture/**` and `docs/security/secure-development.md`. Two `opencode` processes are running and a `STOP-RUN` sentinel exists in the repository root. | **Kept, not discarded, not committed.** The `D1` documents were committed because the already-committed `docs/README.md`, `project-truth.md` and `api/conventions.md` link them; leaving them untracked is what failed CI run `40033433607` (16 broken links). The in-progress `D2.S1` code was **left uncommitted**: `src/bin/atom-seed.rs` and its `Cargo.toml` stanza go together, and neither has run a gate. Next session: decide whether that work is finished and commit it, or reset it deliberately — never `git checkout --` over it. |
 | `D1` review | Rows 10 and 11 of the `D1` checkpoint did not run: both reviewers were aborted by a server restart. | Run `code-reviewer` and `quality-gate` over the intake commit before `D2` starts. Commands: `git diff 775dc57..HEAD -- docs/features docs/decisions docs/project-truth.md`, then review against `C-D1` in this ledger and the acceptance criteria in §18. |
 | **`D2.S1`/`D2.R1` open defects found by the reviews** | Non-blocking, but real, and not yet fixed: (a) the seeder's `V6` asserts `schema ⊆ SEEDED_TABLES` but never compares that constant with the `--reset` statement list, so a table added to the constant and nowhere else passes - the re-attachment failure `A-C-S1-10` exists to prevent; (b) `the_seeder_refuses_a_database_that_holds_foreign_rows` cannot fail on the `G3` preflight ordering, because it migrates before reading `_sqlx_migrations`, so `A-C-S1-7` is implemented but untested; (c) Argon2 hashing and `dotenvy` run on the async runtime without `spawn_blocking`; (d) `tests/claims_schema.rs` builds `CREATE`/`DROP DATABASE` with `format!`, where a bind is impossible but a format check of the generated name is not; (e) the `--reset` help text states one fact twice; (f) the seeder's claim-to-project link is owner-safe only because every profile's project count is even or one, and nothing says so. | Fix (a) by deriving the checked list from the reset statements, (b) with a scratch database that has no `_sqlx_migrations`, and (c)-(f) as small edits. Each is recorded where the reviewer found it; none blocks `D2.R2`, which touches different files. |
+| **Correction to the row above (2026-10-26)** | (a) and (b) are closed by the tree, not still open. (a) `USER_TABLES` is now the **only** list: each entry carries its own `DELETE`, `reset_seeded_rows` executes it, and `the_user_table_list_is_the_reset_order_and_each_statement_targets_it` pins the order and the statement target (`484e77d`). (b) `the_foreign_account_guard_runs_before_the_migration_step` exists and runs. (c)-(f) were **not re-checked by this session** and stay open as recorded. |
 | **`C-R2` is designed but not locked** | The architect produced `docs/architecture/reimbursements-crud-design.md` (five endpoints, the money-input rule, the tri-state `project_id` serde rule, the test names). It is not yet a contract in this ledger. | Lock it from the design document, then fan out `R2` with `database` (nothing to do), `rust-backend`, `test-engineer` and `docs`. The architect also names three corrections that belong to `database`/`docs` and one `C-R1` line that is mine. |
+| **The re-gate of the repairs, 2026-10-26** | `ATOM-REVIEW-20261026-002` judged the tree before this session's documentation repairs and returned FAIL. The repairs have a green gate run behind them but **no reviewer has read them**, so its verdict cannot be reused to close row 11. | Run `code-reviewer` over the repair commit and `quality-gate` over it, then record the verdict in `review-log.md`. Until then the reimbursements, job-application and ML features stay `Implemented`. |
+| **The encoder's numbers are not reproducible here** | The latency, memory and 15-of-15 retrieval figures are one recorded run by the author (`ADR-0008` §12.1, `features/ml/status.md` §5). The weights are operator-supplied and absent from the repository, so no session on this machine can re-measure them, and no test loads a model. | Nothing blocks the code. If the owner wants the numbers to be evidence rather than a record, publish the model artifacts (or a checksum) with a documented `atom-ml-bench` invocation, and record the transcript in the repository. |
+| **Per-chain review rows 10-11** | `D2.R2`…`D5.H4` never had a per-chain reviewer; the run has one whole-span review of `58f9532..HEAD` and one re-gate instead. | Owner decision: either accept the whole-span verdicts as the record, or commission a per-chain sweep. The ledger does not close those rows on its own authority, and the scorecards say so. |
 
 ---
 
 ## Resume
 
-**State at the end of this session.** HEAD `8ba0a90`, branch `run/day-1`.
-**504 tests pass on Windows** (506 on CI, where the two unix-only `shutdown`
-tests run), all six gates are `0`, and `migrations/` ends at `0006`. The working
-tree carries one uncommitted change: the two
-`#[allow(clippy::cast_possible_truncation)]` attributes are removed from
-`src/ml/burn_embedder.rs` (`B5` of the gate). The removal itself has not been
-gated yet - run `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\gate.ps1`.
+**State at the end of the K1 session (2026-10-27).** Branch `develop`, working
+tree carrying the `K1` change. **`K1` scoped API keys are `Implemented`**:
+migration `0007`, the three operations, the `atom_` branch in
+`AuthUser::from_request_parts`, 10 integration cases and 13 unit tests. The six
+gates are `0` through `scripts/gate.ps1` and `cargo test --all-targets --locked`
+reports **535 passed, 0 failed** on Windows (537 on CI, where the two unix-only
+`shutdown` tests run). `migrations/` ends at `0007`; the surface is **54**
+operations. Nothing is `Verified`; see the `K1` checkpoint below.
+
+**State at the end of the Phase 2 session.** HEAD `4df383e`, branch `develop`,
+`develop` == `origin/develop`, working tree committed. **511 tests passed on
+Windows** (513 on CI, where the two unix-only `shutdown` tests run), all six
+gates are `0` through `scripts/gate.ps1`, and `migrations/` ended at `0006`.
+
+The queue is **complete**: `D0` to `D5` all have a commit, and the last row any
+record called pending, `D5.S5`, is done at `e9499ea` - the CI job seeds
+`atom_dev`, re-runs to prove idempotency, asserts the scoped counts `22002520`
+and asserts that `APP_ENV=prod` is refused. `phase-2-complete` is tagged at
+`a44d625`; the tip is four commits later (`e9499ea` the seeder smoke, `5023f97`
+the tag note, and `484e77d`, `ba666f4`, `4df383e` the semantic scan bound, the
+hybrid score floor and the recorded evaluation).
 
 `D0` closed the Phase 1 leftovers the audit had deferred: the version prefix is
 declared once and mounted from that constant, the route table and the OpenAPI
@@ -1457,44 +1670,51 @@ document are asserted against each other in both directions, each list endpoint
 parses its query string once, and the documentation checker compares integer and
 boolean setting **values** against both operator reference tables - which is what
 caught `app.limits.shutdown_grace_seconds` documented as `100` against a file
-value of `10`. `D1` committed the Phase 2 intake: `project-truth.md` §18, three
-feature directories, three ADRs, the proposed schema and the seeding
-specification. `D2` delivered the seeder and the twelve reimbursement
-operations, and `D3` the fourteen job-application operations. Their per-chain
-scorecards are in `## Checkpoints`.
+value of `10`. `D1` committed the Phase 2 intake. `D2` delivered the seeder and
+the twelve reimbursement operations, `D3` the fourteen job-application
+operations, `D4` local machine learning and `D5` the sweeps, the performance
+measurement and the handover. Their per-chain scorecards are in `## Checkpoints`.
 
-`D4` delivered local machine learning. `M1` is the spike at `bfd1288`, corrected
-in `c28b353`; `M2` the finalised `ADR-0008` at `a4d33a3`; `M3`-`M5` the `0006`
-migration, the module, the three operations, the degradation rule and the
-seeder's `--with-embeddings` at `ba198ff`; `M6` the close-out at `ba91008`. The
-surface is 51 operations and the close-out tree is 481 tests. **`ML-R02` is not
-met**: the Burn encoder produces vectors (measured, ADR-0008 §12), so `ml.backend = flex` selects the
-disabled embedder and the scored modes degrade. The feature is `Implemented`,
-not `Verified`.
+**`ML-R02` is met.** `97d7b4b` adds the six-layer Burn encoder and the WordPiece
+tokenizer; `a3e8c46` records the measurement; `embedder::select` returns a
+`BurnEmbedder` when both artifacts load and `Disabled("model_missing")` when they
+do not, so the scored modes degrade rather than fail. The feature stays
+`Implemented`: its quality evidence is one recorded manual run, not a CI gate,
+and the per-chain `code-reviewer` rows were never run for `D4`.
 
-`D5` is **in progress**: `H1` (the whole-surface contract sweep), `H2` (the
-ownership sweep) and `H4` (`docs/api/frontend-handover.md`) are `c2f9bad`, which
-takes the suite to 483. `H3` (performance), `H5` (the final review) and `H6`
-(the close) did not run, and `D5.S5` (the seeder CI smoke) is still pending.
+**Two independent reviews were recorded on 2026-10-26, and both returned FAIL on
+the documentation record with PASS on execution.** `ATOM-REVIEW-20261026-001`
+read `58f9532..HEAD` end to end and found no ownership, SQL, money or degradation
+defect; `ATOM-REVIEW-20261026-002` is the re-gate of `-011`, and it executed the
+six gates and the 511-test list itself. Every blocking finding is repaired under
+`ATOM-CHANGE-20261026-001`. **Nothing was promoted to `Verified`**: the reviews
+closed the process gap, not the evidence gap.
 
-**The first executable quality-gate verdict is recorded.**
-`ATOM-REVIEW-20261024-011` returned **FAIL on documentation**, with all six gates
-at `0` and 504 tests, and five blocking findings (`B1`-`B5`). `B5` is fixed in
-`src/ml/burn_embedder.rs`; `B1`-`B4` and the required corrections `R1`-`R4` are
-fixed in the documents changed with this record. **No re-gate is recorded**, so
-nothing moves to `Verified` and `ML-R02` is met.
+What this session did **not** do, so the next reader is not misled:
 
-**The first command of the next session** is the re-gate, then the remaining
-`D5` chains:
+- The per-chain `code-reviewer` and `quality-gate` rows (10 and 11) remain `Fail`
+  for every chain before this one. Two whole-span reviews do not substitute for
+  a per-chain verdict, and the scorecards say so.
+- No test loads a real model. The encoder's latency, memory and retrieval
+  figures are one recorded run by the author; they were not re-measured here,
+  because the weights are operator-supplied and absent from the repository.
+- The historical totals `481`, `483` and `504` describe different commits in the
+  `D4`/`D5` span and cannot all be placed; the reconciliation note is under
+  `D5.H1`. Do not quote any of them as the current suite - it is **511**.
+- `Q-13` (the six provisional Phase 2 assumptions `A1`-`A6`) is still open for
+  the owner. Nothing in the run presents them as approved.
+
+**The first command of the next session** is the same command this one used, and
+there is no queue item waiting behind it:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\gate.ps1
 ```
 
-If it is green, run `code-reviewer` over `git diff 58f9532..HEAD` and
-`quality-gate` over the repairs. Then `D5.H3` (performance), `D5.H5` (the final
-review) and `D5.H6`/`D5.S5` (the close and the seeder CI smoke) are the only
-queue rows left.
+If it is green, the run is finished. What remains is an owner decision, not
+engineering: review `Q-13`/`A1`-`A6`, and decide whether the per-chain review
+rows should be closed individually or whether two whole-span verdicts are the
+record the owner wants.
 
 **The unattended automation is gone, deliberately.** `scripts/run-phase-2-overnight.ps1`,
 `scripts/watchdog-phase-2.ps1` and `scripts/watch-phase-2.ps1` were deleted on
@@ -1516,11 +1736,13 @@ whose targets were untracked, which is what turned run `40033433607` red. Read
 the newest preflight record in this file, and run the checker on what is
 committed, before assuming the tree is yours.
 
-**Tag and tip (2026-10-25).** `phase-2-complete` points at `a44d625`; the branch
-tip is one commit later, which wires the seeder into CI (`D5.S5`). The tag was
-deliberately **not** moved: a published tag can only be moved by deleting and
-re-pushing it, which is a force-push, and this run forbids that (`O2`). The tag
-message says so, and that commit records the seeder's CI evidence: 425 rows
-inserted with verification passed, 0 inserted and 425 skipped on the second run,
-counts `2 200 25 20` scoped to the seeded accounts, and `G1` refusing
-`APP_ENV=prod`.
+**Tag and tip (2026-10-26).** `phase-2-complete` points at `a44d625`. The branch
+tip is four commits later: `e9499ea` wires the seeder into CI (`D5.S5`),
+`5023f97` records why the tag sits behind, and `484e77d` / `ba666f4` / `4df383e`
+are the semantic scan bound, the hybrid score floor and the recorded
+evaluation. The tag was deliberately **not** moved: a published tag can only be
+moved by deleting and re-pushing it, which is a force-push, and this run forbids
+that (`O2`). The tag message says so, and the commits after it carry the seeder's
+CI evidence: 425 rows inserted with verification passed, 0 inserted and 425
+skipped on the second run, counts `2 200 25 20` scoped to the seeded accounts,
+and `G1` refusing `APP_ENV=prod`.

@@ -1,13 +1,13 @@
 # ATOM — module boundaries
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-25
+> **Last updated:** 2026-10-27
 > **Owner:** maintained by the `architect` agent
 
 What each module owns, what it may depend on, and which invariant it is
-responsible for. §1–§7 describe the modules that **exist**; the last section
-describes the Phase 2 modules — the two that are built and the one still
-planned — and marks each.
+responsible for. §1–§7 describe the modules that **exist**, and so does the
+unnumbered `api_keys` section below §2; the last section describes the Phase 2
+modules — the two that are built and the one still planned — and marks each.
 The layering rule that this document enforces is fixed by
 [`../../AGENTS.md`](../../AGENTS.md) §2:
 
@@ -61,6 +61,33 @@ Source: `src/auth/handlers.rs`, `src/auth/service.rs`, `src/auth/token.rs`,
 | Security boundary | The authentication boundary (TB-5 in [`../security/threat-model.md`](../security/threat-model.md)). The identity of a caller comes only from the credential. The three public endpoints — `register`, `login`, `refresh` — are rate limited per client by `api::middleware::enforce_rate_limit`. |
 | Testing approach | `tests/auth_api.rs` covers registration, normalization, the duplicate-registration conflict, the password policy, login, the generic failure message, refresh rotation, reuse detection, logout, the rejection of missing or invalid credentials, `GET /api/v1/auth/me` and the cross-account logout attempt. Unit tests cover the token service (`src/auth/token.rs`), the password hasher (`src/auth/password.rs`) and the email and password policy (`src/users/service.rs`). |
 | Known limitations | `AuthService::revoke_all_sessions` is **not reachable through any endpoint**: there is no user-facing session list and no per-session revocation surface. The expired sessions are removed by the background pruning task in `src/main.rs`, which calls `RefreshSessionRepository::delete_expired` every hour with a one-day grace. The refresh token is returned in the response body rather than in an HTTP-only cookie (open question Q2). There is one absolute refresh-token lifetime and no idle timeout (Q3). The timing equalisation for an unknown email address is a dummy Argon2 verification, not a measured constant. |
+
+---
+
+## `api_keys` — the long-lived credential for a machine client
+
+Source: `src/api_keys/handlers.rs`, `src/api_keys/service.rs`,
+`src/api_keys/repository.rs`, `src/api_keys/models.rs`, `src/api_keys/dto.rs`,
+`src/api_keys/secret.rs`. Built by the `K1` chain (`Implemented`).
+
+*The heading is unnumbered on purpose:* §7 and §8 are cited by number — from
+[`../decisions/ADR-0006-configuration-source-of-truth.md`](../decisions/ADR-0006-configuration-source-of-truth.md)
+§7.1 and from other documents — so inserting a number here would quietly
+repoint those references.
+
+| Aspect | Description |
+| ------ | ----------- |
+| Responsibility | The long-lived bearer credential an unattended client holds: create, list, revoke, and authenticate a presented secret. It owns the shape and the hashing of the secret itself, and it is the **only** place a key secret is ever produced. |
+| Internal layering | The five layers in five files — `handlers.rs`, `service.rs`, `repository.rs`, `models.rs`, `dto.rs` — plus `secret.rs`, which is the *inside* of the service layer rather than a layer of its own: `generate`, `hash`, `is_api_key`, `is_well_formed` and the `GeneratedKey` type. `secret.rs` is the one file that knows how a secret is built and how it is hashed. |
+| Public interface | `ApiKeyService` with `create`, `list`, `revoke`, `authenticate`; `ApiKeyRepository` with `insert`, `list_owned` (the page and the collection total), `revoke_owned`, `find_identity_by_hash`, `touch_last_used`; the types `KeyPrincipal`, `KeyIdentity` and `ApiKey`; the DTOs `CreateApiKeyRequest`, `ApiKeyCreatedResponse`, `ApiKeyResponse`, `ApiKeyPage`; the constant `MAX_KEY_NAME_LENGTH` (100); the free functions `identity_refusal` and `validate_name`. A handler reaches it as `state.api_keys`, and `api::middleware::AuthUser` calls `authenticate` when the bearer token begins `atom_`. |
+| May depend on | `error`, `pagination`, `helpers` (the label is trimmed and bounded by the shared `required_text`), `config` (the message catalogue and the pagination bounds), `api::extract` and `api::middleware` (from `handlers.rs` only), and `sha2`/`rand` for the secret. It reads the `users` table inside the authentication join and writes no table but its own. |
+| Must not depend on | `auth`, the `users` service, or any feature module. It holds **no business rule of any other module**: it learns that an account is active because the join returns `users.is_active`, not by re-implementing the account rules or the token lifecycle. It never mints a JWT and never touches `refresh_sessions`. |
+| Data ownership | The `api_keys` table (`0007_api_keys.sql`). `user_id` is the owner and the predicate of every statement. The secret is never stored: only its SHA-256 hex digest in `key_hash`. `prefix` (`atom_` + eight hex characters) is a display label, not a lookup key, and is deliberately not unique. |
+| Invariants | Every statement carries the caller's `user_id`, so a foreign or unknown key id is `404`, never `403`. `key_hash` is unique, so one secret is one row. `revoked_at` is written once and never cleared, and a second revoke is still `204` while keeping the first instant. `last_used_at` is written at most once per hour per key, decided by the guarded `UPDATE` rather than by the read. The listing is ordered `created_at DESC, id DESC` and cannot carry the secret: `ApiKey` has no `key_hash` field and `ApiKeyResponse` has no `key` field, so there is no shape to select one into. |
+| Error handling | `422` naming `name` for an empty or over-long label; `401` `unauthorized` with `messages.auth.access_token_invalid` for an unknown, malformed or revoked key; `403` `forbidden` with `messages.auth.account_disabled` for the key of a disabled account — the same answer that account's JWT already receives (amendment `A-C-K1-1`), decided in one place, `identity_refusal`; `404` for a key id that is absent or foreign. A failure to record `last_used_at` is logged and does not fail the request. |
+| Security boundary | The second form of the authentication boundary (TB-5 in [`../security/threat-model.md`](../security/threat-model.md)). The secret leaves the module in exactly one place, the create response, and nothing derived from it is logged — not the secret, not the digest, not the prefix. A key has the **full authority of its owner**: there is no scope model and no reduced principal, which is also the module's largest limitation. |
+| Testing approach | `tests/api_keys_api.rs` (10 cases) covers create, list and revoke, the one-time secret, the absence of a secret in the listing, the `401`/`403` split, the idempotent revoke, the foreign `404`, the pagination and the hourly usage stamp. `tests/openapi_contract.rs` asserts the three success statuses, the `key_id` path parameter, and that `ApiKeyCreatedResponse` publishes `key` while `ApiKeyResponse` publishes neither `key`, `key_hash` nor `user_id`. `tests/contract_sweep.rs` proves a second account sees none of the first account's keys and that a foreign revoke leaves the credential working. Unit tests in the module (13: `secret.rs` 5, `service.rs` 4, `models.rs` 3, `dto.rs` 1) pin the secret's shape, the refusal table and the stamp boundary. |
+| Known limitations | No scope model, no expiry and no per-key rate limit: a key is a full-authority credential until it is revoked. A key can create and revoke keys, so revoking a leaked key does not by itself end access if the holder already minted another — stated as the honest limitation in [`../security/README.md`](../security/README.md) §3. `last_used_at` is the only usage signal and it is hourly, so a forensic timeline is coarse. There is no hard delete: a revoked key stays in the listing, with its `revoked_at`. |
 
 ---
 
@@ -159,8 +186,9 @@ Source: `src/tasks/handlers.rs`, `src/tasks/service.rs`,
 > `tests/job_applications_api.rs` and `tests/job_applications_flow.rs` prove the
 > constraints and the behaviour. `migrations/0006_embeddings.sql` creates
 > `embeddings`; `src/ml/` serves the three published operations, and `tests/ml_api.rs`
-> proves them. `ml` is `Implemented`, not `Verified`: `ML-R02` is met because no
-> Burn encoder produces an embedding.
+> proves them. `ml` is `Implemented`, not `Verified`: `ML-R02` **is met**, because
+> `embedder::select` returns a `BurnEmbedder` when both artifacts load; the
+> feature waits on a review of the encoder span and the re-gate, not on code.
 
 **What "every module" means from here.** §1–§7 describe every module that
 **exists**. From this section on, the phrase means "every Phase 2 module",
@@ -439,10 +467,10 @@ Source: `src/state.rs`.
 | Aspect | Description |
 | ------ | ----------- |
 | Responsibility | Holds the shared dependencies and passes them to the handlers explicitly. There is no global mutable state. |
-| Public interface | `AppState` with the public fields `config`, `db`, `rate_limiter`, `auth`, `notes`, `projects` and `tasks`. The five services are reached through their field, which is the only idiom. The `tokens` and `passwords` fields, the `sessions()` accessor, the `auth_service()` accessor and the `prune_expired_sessions(grace)` method were removed: nothing outside the module used them, and the authentication service already holds the `TokenService`, the `PasswordHasher` and the session repository. |
-| May depend on | `config`, `auth`, `users`, `notes`, `projects`, `tasks`, `ratelimit`. |
+| Public interface | `AppState` with the public fields `config`, `db`, `rate_limiter`, `auth`, `api_keys`, `notes`, `projects`, `tasks`, `reimbursements`, `job_applications` and `ml`, in that order. The eight services are reached through their field, which is the only idiom: the authentication service, the API-key service and the six feature services. The `tokens` and `passwords` fields, the `sessions()` accessor, the `auth_service()` accessor and the `prune_expired_sessions(grace)` method were removed: nothing outside the module used them, and the authentication service already holds the `TokenService`, the `PasswordHasher` and the session repository. |
+| May depend on | `config`, `auth`, `api_keys`, `users`, `notes`, `projects`, `tasks`, `reimbursements`, `job_applications`, `ml`, `ratelimit`. |
 | Data ownership | The `PgPool`. It shares the pool with every repository, but each repository holds its own clone of the handle. |
-| Invariants | `AppState` is cheap to clone: every field is `Arc`-backed or a `PgPool` handle. The authentication service and the three feature services are constructed **once**, at start-up, and are never rebuilt per request: a handler reaches the use cases through `state.notes`, `state.projects` and `state.tasks`. There is no per-request service constructor. |
+| Invariants | `AppState` is cheap to clone: every field is `Arc`-backed or a `PgPool` handle. The authentication service, the API-key service and the six feature services are constructed **once**, at start-up, and are never rebuilt per request: a handler reaches the use cases through `state.auth`, `state.api_keys`, `state.notes`, `state.projects`, `state.tasks`, `state.reimbursements`, `state.job_applications` and `state.ml`. There is no per-request service constructor. |
 | Error handling | None of its own. `AppState::new` takes an already validated `Config` and an already connected pool, and fails only when the password hasher cannot be built from the configured Argon2 parameters. |
 | Security boundary | The signing secret and the Argon2 parameters are reachable only through the authentication service, which holds the `TokenService` and the `PasswordHasher`. Neither is exposed in a `Debug` rendering. |
 | Testing approach | No dedicated test file. `tests/common/mod.rs` builds the state through `AppState::new` with a test configuration. |

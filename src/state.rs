@@ -11,6 +11,8 @@ use std::sync::Arc;
 
 use sqlx::PgPool;
 
+use crate::api_keys::repository::ApiKeyRepository;
+use crate::api_keys::service::ApiKeyService;
 use crate::auth::password::PasswordHasher;
 use crate::auth::service::AuthService;
 use crate::auth::token::TokenService;
@@ -42,6 +44,9 @@ pub struct AppState {
     pub rate_limiter: Arc<RateLimiter>,
     /// The authentication use cases.
     pub auth: AuthService,
+    /// The API-key use cases. The authentication middleware resolves an
+    /// `atom_` bearer token through this service.
+    pub api_keys: ApiKeyService,
     /// The note use cases.
     pub notes: NoteService,
     /// The project use cases.
@@ -100,6 +105,15 @@ impl AppState {
         let note_repository = NoteRepository::new(db.clone());
         let job_repository = JobRepository::new(db.clone());
 
+        // API keys are independent of the JWT machinery: they authenticate
+        // against their own table, not against a token service, so the service
+        // is built from the pool and the catalogue alone.
+        let api_keys = ApiKeyService::new(
+            ApiKeyRepository::new(db.clone()),
+            messages.clone(),
+            config.api.pagination,
+        );
+
         let notes = NoteService::new(
             note_repository.clone(),
             messages.clone(),
@@ -141,6 +155,7 @@ impl AppState {
             db,
             rate_limiter,
             auth,
+            api_keys,
             notes,
             projects,
             tasks,

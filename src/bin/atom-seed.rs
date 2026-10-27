@@ -123,8 +123,12 @@ struct UserTable {
 /// column, and `users` is last because every other row references it.
 ///
 /// `refresh_sessions` is deleted but never inserted; `embeddings` is purged
-/// before the notes and applications it belongs to are deleted.
-const USER_TABLES: [UserTable; 11] = [
+/// before the notes and applications it belongs to are deleted. `api_keys` is
+/// the same shape as `refresh_sessions`: a credential table the seeder never
+/// writes a row into, listed because `--reset` must still be able to delete a
+/// key an operator created through the API, and because `V6` refuses a user
+/// table that is absent from this list.
+const USER_TABLES: [UserTable; 12] = [
     UserTable {
         name: "application_events",
         delete: "DELETE FROM application_events WHERE user_id = ANY($1)",
@@ -152,6 +156,10 @@ const USER_TABLES: [UserTable; 11] = [
     UserTable {
         name: "refresh_sessions",
         delete: "DELETE FROM refresh_sessions WHERE user_id = ANY($1)",
+    },
+    UserTable {
+        name: "api_keys",
+        delete: "DELETE FROM api_keys WHERE user_id = ANY($1)",
     },
     UserTable {
         name: "notes",
@@ -2889,7 +2897,7 @@ mod tests {
         // `verify_table_list` reads the same list, so this test is what keeps
         // the list itself honest: a new table must arrive with its own
         // statement, in a position whose children precede it.
-        const EXPECTED: [&str; 11] = [
+        const EXPECTED: [&str; 12] = [
             "application_events",
             "embeddings",
             "expense_items",
@@ -2897,6 +2905,7 @@ mod tests {
             "job_applications",
             "companies",
             "refresh_sessions",
+            "api_keys",
             "notes",
             "tasks",
             "projects",

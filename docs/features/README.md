@@ -1,7 +1,7 @@
 # ATOM features
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-25
+> **Last updated:** 2026-10-27
 > **Owner:** maintained by the `docs` agent
 
 This directory holds the per-feature documentation. A *feature* is a coherent
@@ -9,7 +9,10 @@ slice of product behaviour that a user can observe: a set of endpoints, the
 rules behind them, and the data they own.
 
 Every feature directory contains the same five documents. The contract for
-each of them is in [§2](#2-the-per-feature-document-contract).
+each of them is in [§2](#2-the-per-feature-document-contract). The one
+exception is `api-keys/`, which is a single `status.md` card: one credential and
+three operations, whose decision is recorded in an accepted ADR rather than in a
+requirement of [`project-truth.md`](../project-truth.md).
 
 ---
 
@@ -24,6 +27,7 @@ each of them is in [§2](#2-the-per-feature-document-contract).
 | Reimbursements | `ATOM-FEAT-REIMB-001` | Implemented | [specification](reimbursements/specification.md) · [architecture](reimbursements/architecture.md) · [api](reimbursements/api.md) · [testing](reimbursements/testing.md) · [status](reimbursements/status.md) |
 | Job application tracking | `ATOM-FEAT-JOB-001` | Implemented | [specification](job-applications/specification.md) · [architecture](job-applications/architecture.md) · [api](job-applications/api.md) · [testing](job-applications/testing.md) · [status](job-applications/status.md) |
 | Local machine learning | `ATOM-FEAT-ML-001` | Implemented | [specification](ml/specification.md) · [architecture](ml/architecture.md) · [api](ml/api.md) · [testing](ml/testing.md) · [status](ml/status.md) |
+| API keys (machine credential) | — (see the note below) | Implemented | [status](api-keys/status.md) |
 
 The three Phase 2 features were accepted in
 [`project-truth.md`](../project-truth.md) §18 with acceptance criteria.
@@ -38,9 +42,24 @@ and all fourteen published operations, with `tests/jobs_schema.rs`,
 job-application review (`ATOM-REVIEW-20261024-010`) found no code defect but
 returned FAIL on documentation only; a passing suite
 is not a review. Local machine learning is `Implemented`: the three operations,
-migration `0006`, the seven `ml.*` settings and 40 cases in `tests/ml_api.rs`
-exist, and the suite is recorded green in `ATOM-CHANGE-20261024-011`; `ML-R02` is
-not met, so nothing is `Verified`.
+migration `0006`, the seven `ml.*` settings and 41 cases in `tests/ml_api.rs`
+exist, and the suite is measured green at `4df383e` (511 passed, 0 failed);
+`ML-R02` is met, and nothing is `Verified` because no reviewer has read the
+encoder span and the re-gate of `ATOM-REVIEW-20261024-011` returned FAIL on
+documentation.
+
+**API keys are different in kind.** The machine credential has no
+`ATOM-FEAT-` identifier, because no requirement in
+[`project-truth.md`](../project-truth.md) defines it: the accepted authority is
+[`ADR-0011`](../decisions/ADR-0011-api-keys.md), and its card is the single
+[`api-keys/status.md`](api-keys/status.md). It is `Implemented`:
+`migrations/0007_api_keys.sql`, `src/api_keys/` and the three published
+operations exist, with 10 cases in `tests/api_keys_api.rs` and 13 unit tests
+passing in the measured run of 2026-10-27 (535 passed, 0 failed, with the six
+gates green). It is not `Verified`: no independent review of the diff and no
+quality-gate verdict is recorded. Its limitations — no scope, no expiry, an
+hourly `last_used_at` and a key that can mint another key — are recorded as
+`KI-024` in [`known-issues.md`](../engineering/known-issues.md).
 
 The status column summarises the feature as a whole. The per-requirement
 evidence behind it is in each feature's `status.md`; a feature can contain both
@@ -70,7 +89,10 @@ Cross-cutting contracts live outside this directory:
 | `status.md` | The status line, the evidence for the status, what is still missing to reach `Verified`, and links to the other four documents. | A status outside the vocabulary below. |
 
 A feature is documented in the same five files even when it is small. The
-files are short when the feature is small; they are never merged.
+files are short when the feature is small; they are never merged. `api-keys/` is
+the single exception, for the reason §1 gives: it is a card for a capability whose
+decision is an accepted ADR and whose endpoints are already in the
+[API index](../api/README.md), not a feature with a requirement of its own.
 
 ## 3. The status vocabulary
 

@@ -2,12 +2,13 @@
 
 use axum::Router;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch, post};
+use axum::routing::{delete, get, patch, post};
 use utoipa::OpenApi;
 use utoipa::openapi::OpenApi as OpenApiDocument;
 #[cfg(feature = "docs")]
 use utoipa_swagger_ui::SwaggerUi;
 
+use crate::api_keys::handlers as api_key_handlers;
 use crate::auth::handlers;
 use crate::config::Config;
 use crate::error::AppError;
@@ -36,6 +37,9 @@ use crate::tasks::handlers as task_handlers;
         handlers::refresh,
         handlers::logout,
         handlers::me,
+        api_key_handlers::create_api_key,
+        api_key_handlers::list_api_keys,
+        api_key_handlers::revoke_api_key,
         note_handlers::list_notes,
         note_handlers::create_note,
         note_handlers::get_note,
@@ -144,12 +148,20 @@ use crate::tasks::handlers as task_handlers;
             crate::ml::dto::MatchResponse,
             crate::ml::dto::ReindexResponse,
             crate::pagination::Pagination,
+            crate::api_keys::dto::ApiKeyCreatedResponse,
+            crate::api_keys::dto::ApiKeyResponse,
+            crate::api_keys::dto::ApiKeyPage,
+            crate::api_keys::dto::CreateApiKeyRequest,
         )
     ),
     modifiers(&SecurityAddon),
     tags(
         (name = "health", description = "Liveness and readiness probes"),
         (name = "auth", description = "Registration, login and token lifecycle"),
+        (
+            name = "api-keys",
+            description = "Long-lived credentials for machine clients"
+        ),
         (name = "notes", description = "Personal notes"),
         (name = "projects", description = "Project tracking"),
         (name = "tasks", description = "Tasks belonging to a project"),
@@ -227,6 +239,13 @@ pub const ROUTE_TABLE: &[(&str, &str)] = &[
     ("POST", "/auth/refresh"),
     ("POST", "/auth/logout"),
     ("GET", "/auth/me"),
+    // --- api keys ---
+    // The three operations are authenticated by `AuthUser`, so a user JWT and
+    // another API key are equally able to reach them: a workflow must be able
+    // to rotate its own credential.
+    ("POST", "/api-keys"),
+    ("GET", "/api-keys"),
+    ("DELETE", "/api-keys/{key_id}"),
     // --- notes ---
     ("GET", "/notes"),
     ("POST", "/notes"),
@@ -312,6 +331,15 @@ pub fn api_routes() -> Router<AppState> {
         .route("/auth/refresh", post(handlers::refresh))
         .route("/auth/logout", post(handlers::logout))
         .route("/auth/me", get(handlers::me))
+        // --- api keys ---
+        .route(
+            "/api-keys",
+            post(api_key_handlers::create_api_key).get(api_key_handlers::list_api_keys),
+        )
+        .route(
+            "/api-keys/{key_id}",
+            delete(api_key_handlers::revoke_api_key),
+        )
         // --- notes ---
         .route(
             "/notes",

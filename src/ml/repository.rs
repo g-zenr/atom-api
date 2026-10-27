@@ -26,7 +26,7 @@ use crate::error::AppResult;
 /// What an embedding was derived from.
 ///
 /// The column is `TEXT` with a `CHECK`, not a PostgreSQL enum
-/// ([`schema.md`](../../docs/database/schema.md) §11.7): the value is a closed
+/// ([`schema.md`](../../docs/database/schema.md) §11.8): the value is a closed
 /// set of two, and an enum type would be a second migration to change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SourceType {

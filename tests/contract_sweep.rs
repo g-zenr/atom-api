@@ -18,9 +18,9 @@
 //!
 //! Both tests are driven by `ROUTE_TABLE` rather than a hand-written list, so an
 //! operation added later is swept automatically. `tests/claims_api.rs`,
-//! `tests/job_applications_api.rs` and `tests/ml_api.rs` sweep their own
-//! features in depth; this file is the cross-feature net that catches a route
-//! added *without* an ownership predicate.
+//! `tests/job_applications_api.rs`, `tests/ml_api.rs` and `tests/api_keys_api.rs`
+//! sweep their own features in depth; this file is the cross-feature net that
+//! catches a route added *without* an ownership predicate.
 //!
 //! The two tests share nothing but the harness: each registers its own accounts,
 //! counts only the ids it created, and never truncates a table.
@@ -40,11 +40,13 @@ use atom_api::api::routes::{API_PREFIX, ROUTE_TABLE, UNVERSIONED_ROUTE_TABLE, op
 
 /// The number of operations the locked contract publishes.
 ///
-/// It mirrors the private constant of `tests/openapi_contract.rs`: 49 operations
-/// under [`API_PREFIX`] plus the two unversioned probes. The duplication is
-/// deliberate and the two constants change together - that test pins the surface
-/// so it cannot shrink, this one pins the sweep so it cannot drive less of it.
-const CONTRACT_OPERATIONS: usize = 51;
+/// It mirrors the private constant of `tests/openapi_contract.rs`: 52 operations
+/// under [`API_PREFIX`] - the nine cross-feature groups of `C-D0` to `D5` plus
+/// the three API-key operations `C-K1` adds (create, list and revoke) - plus the
+/// two unversioned probes. The duplication is deliberate and the two constants
+/// change together: that test pins the surface so it cannot shrink, this one
+/// pins the sweep so it cannot drive less of it.
+const CONTRACT_OPERATIONS: usize = 54;
 
 /// The three operations that are public by contract.
 ///
@@ -296,6 +298,7 @@ struct Fixtures {
     company: Uuid,
     application: Uuid,
     event: Uuid,
+    api_key: Uuid,
 }
 
 impl Fixtures {
@@ -314,6 +317,7 @@ impl Fixtures {
             "company_id" => self.company,
             "application_id" => self.application,
             "event_id" => self.event,
+            "key_id" => self.api_key,
             other => panic!(
                 "the ownership sweep has no fixture for the path placeholder `{{{other}}}`: create \
                  one in `no_operation_reaches_another_accounts_row` and add the field to \
@@ -452,6 +456,21 @@ fn id_of(body: &Value) -> Uuid {
         .unwrap_or_else(|error| panic!("the created id `{id}` is not a UUID: {error}"))
 }
 
+/// The identifiers a key listing carries.
+///
+/// `C-K1` publishes the page type without fixing whether the keys sit under an
+/// `items` field or are the body itself, so both published spellings are read.
+/// An empty page is a valid answer; a body under neither spelling is not.
+fn api_key_ids(page: &Value) -> Vec<Uuid> {
+    let items = page
+        .get("items")
+        .and_then(Value::as_array)
+        .or_else(|| page.as_array())
+        .unwrap_or_else(|| panic!("the api-key listing must carry this account's keys: {page}"));
+
+    items.iter().map(id_of).collect()
+}
+
 /// One operation reads another account's row, and the row survives.
 ///
 /// Account A creates one of every resource the contract publishes a collection
@@ -564,6 +583,22 @@ async fn no_operation_reaches_another_accounts_row() {
         .await,
     );
 
+    // An API key is a credential, so the sweep needs its secret as well as its
+    // id: the id is what account B addresses, and the secret is what proves
+    // afterwards that B's delete did not revoke it.
+    let api_key_body = created(
+        &app,
+        owner_token,
+        "/api/v1/api-keys",
+        json!({ "name": "swept api key" }),
+    )
+    .await;
+    let api_key = id_of(&api_key_body);
+    let api_key_secret = api_key_body["key"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the create response must carry the secret: {api_key_body}"))
+        .to_string();
+
     let fixtures = Fixtures {
         note,
         project,
@@ -573,6 +608,7 @@ async fn no_operation_reaches_another_accounts_row() {
         company,
         application,
         event,
+        api_key,
     };
 
     // ------------------------------------------------------- state before
@@ -610,7 +646,7 @@ async fn no_operation_reaches_another_accounts_row() {
 
     // ------------------------------------------------------------- sweep
     let mut used_bodies: BTreeSet<(String, String)> = BTreeSet::new();
-    let mut swept = 0usize;
+    let mut swept_operations: BTreeSet<String> = BTreeSet::new();
 
     for &(method, path) in ROUTE_TABLE {
         if !path.contains('{') {
@@ -645,11 +681,32 @@ async fn no_operation_reaches_another_accounts_row() {
             response.body
         );
 
-        swept += 1;
+        swept_operations.insert(format!("{method} {API_PREFIX}{path}"));
     }
 
+    // Every id-taking entry of the table was driven, and the api-key revoke is
+    // named explicitly: a route that quietly disappeared from the table would
+    // otherwise leave this sweep passing with one operation fewer.
+    let id_taking = ROUTE_TABLE
+        .iter()
+        .filter(|(_, path)| path.contains('{'))
+        .count();
+
+    assert_eq!(
+        swept_operations.len(),
+        id_taking,
+        "the sweep drove {} id-taking operations, but the route table declares {id_taking}: a \
+         route was skipped rather than probed",
+        swept_operations.len()
+    );
     assert!(
-        swept > 0,
+        swept_operations.contains("DELETE /api/v1/api-keys/{key_id}"),
+        "the sweep must have addressed account A's api key with account B's token; it drove \
+         {swept_operations:?}"
+    );
+
+    assert!(
+        !swept_operations.is_empty(),
         "the route table publishes no id-taking operation, so this sweep asserted nothing"
     );
 
@@ -724,4 +781,54 @@ async fn no_operation_reaches_another_accounts_row() {
             "account B must see none of account A's rows through {path}: {body}"
         );
     }
+
+    // --------------------------------------------------------- api keys
+    //
+    // The key collection is asserted directly rather than through the loop
+    // above: `C-K1` leaves the page unpaginated in the contract, so
+    // `pagination.total` is not published for it, while "A holds its key and B
+    // does not see it" is.
+    let keys = common::send(
+        &app,
+        common::request(Method::GET, "/api/v1/api-keys", Some(owner_token), None),
+    )
+    .await
+    .expect_status(StatusCode::OK);
+
+    assert!(
+        api_key_ids(&keys).contains(&api_key),
+        "account A must still hold the api key this sweep created: {keys}"
+    );
+
+    let keys = common::send(
+        &app,
+        common::request(Method::GET, "/api/v1/api-keys", Some(intruder_token), None),
+    )
+    .await
+    .expect_status(StatusCode::OK);
+
+    assert!(
+        !api_key_ids(&keys).contains(&api_key),
+        "account B must see none of account A's api keys: {keys}"
+    );
+
+    // The key account B tried to revoke still authenticates as account A, so
+    // the ownership predicate refused the write rather than half-applying it.
+    let profile = common::send(
+        &app,
+        common::request(
+            Method::GET,
+            "/api/v1/auth/me",
+            Some(api_key_secret.as_str()),
+            None,
+        ),
+    )
+    .await
+    .expect_status(StatusCode::OK);
+
+    assert_eq!(
+        profile["id"],
+        owner.id.to_string(),
+        "account B's delete must not have revoked account A's key: {profile}"
+    );
 }

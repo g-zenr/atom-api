@@ -1,7 +1,7 @@
 # ATOM — security architecture
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-22
+> **Last updated:** 2026-10-27
 > **Owner:** maintained by the `architect` agent
 
 The trust model of the Phase 1 backend: where the boundaries are, what
@@ -63,6 +63,11 @@ The path is:
    refuses a disabled account.
 5. The extractor yields `AuthUser { user_id, email }`.
 
+That is the path for a **user access token**. A value with the `atom_` prefix
+takes the second path described in §2.5, and both paths converge on the same
+`AuthUser`, so a handler cannot tell which credential form was used and cannot
+behave differently because of it.
+
 ### 2.2 The failure modes
 
 Every failure of the boundary is designed to be uninformative.
@@ -77,6 +82,9 @@ Every failure of the boundary is designed to be uninformative.
 | A token whose `sub` is not a UUID | `401`, code `unauthorized` | Nothing. |
 | A token for a user that no longer exists | `401`, code `unauthorized` | Nothing. |
 | A valid token for a disabled account | `403`, code `forbidden` | That the account exists and is disabled. |
+| A revoked API key | `401`, code `unauthorized` | Nothing. |
+| A malformed or unknown API key | `401`, code `unauthorized` | Nothing. |
+| A valid API key of an inactive account | `403`, code `forbidden` | That the account exists and is disabled — the same answer a JWT of that account gets. |
 | A wrong password at login | `401`, "Invalid email or password." | Nothing. |
 | An unknown email address at login | `401`, "Invalid email or password." | Nothing. |
 | A reused refresh token | `401`, "The refresh token has already been used. All sessions have been revoked." | That the token was already used. |
@@ -86,6 +94,13 @@ indistinguishable from each other: `decode_access_token` maps every failure
 onto the same message. The **login** failures are indistinguishable from each
 other as well, and the unknown-email path additionally performs a dummy
 Argon2 verification so that the two paths take a comparable amount of time.
+
+The two credential forms agree about account state on purpose. A **valid JWT of
+a disabled account** and a **valid API key of an inactive account** both answer
+`403` with `messages.auth.account_disabled`; the key's other failures are `401`.
+Giving one credential form `401` and the other `403` for the same account would
+be a contradiction inside this boundary, and that is why the chain contract's
+`A-C-K1-1` amendment exists (§2.5).
 
 ### 2.3 The token lifecycle
 
@@ -125,6 +140,49 @@ Rotation and reuse detection:
   stored hash returns `false` rather than an error.
 - The plain password is never stored, never logged and never returned.
 
+### 2.5 The second credential form: an API key
+
+The decision is [`../decisions/ADR-0011-api-keys.md`](../decisions/ADR-0011-api-keys.md).
+A machine client — today an n8n workflow — cannot use a refresh token, because
+the token is rotated on every use and presenting a superseded one revokes every
+session of the account (§2.3). ATOM therefore accepts a **second form of bearer
+credential**.
+
+| Property | How it works |
+| -------- | ------------ |
+| Presentation | The same header as an access token: `Authorization: Bearer atom_…`. The `atom_` prefix is what routes the value to the API-key path instead of the JWT validator. |
+| Resolution | A key resolves to **exactly one** `user_id`, and that is the whole identity the handler sees. There is no service identity, no second tenant and no impersonation field. |
+| Authority | **Equal to its owner's.** A key can do everything that user can do, and nothing else. There is no scope table and no read-only key. |
+| Revocation | A row update (`revoked_at`), effective on the next request. It does not touch the owner's sessions, the password or the signing secret, and it needs no restart. |
+| Storage | Only the SHA-256 digest of the secret, with the `atom_` plus eight-hex `prefix` kept in the clear so a key can be listed without being recoverable. |
+| Lifetime | No expiry. A key is valid until it is revoked. |
+| Observability | `last_used_at` is updated at most once per hour per key, so the owner can find an unused key without the table being written on every request. |
+
+**Why the digest is SHA-256 and not Argon2id, next to a password rule that is
+Argon2id.** The secret is 256 bits of operating-system CSPRNG output, so there
+is no dictionary to guess and no pattern to exploit; a memory-hard hash would add
+tens of milliseconds and roughly 19 MiB of memory by default (`auth.argon2`
+in `config/auth.toml`, with an 8 MiB floor) to **every authenticated request**
+for no protection at all, and a malformed value would make the process pay that
+cost before rejecting it. Passwords remain Argon2id because a human-chosen
+password *is* guessable. The difference is deliberate and is not a defect to be
+"corrected" — the reasoning is written out in ADR-0011.
+
+**The risk this form adds.** An API key is a **bearer secret with the full
+authority of its owner**, it does not expire, and the listing never shows it
+again. Anyone who reads it can read and delete every note, claim and application
+of that account, and can mint a further key. The compensating controls are that
+it is returned exactly once, that only a digest is stored, that it is revocable
+individually, and that `last_used_at` makes an unused key visible. **A deployment
+must therefore not expose a key to a client that cannot keep it**: it belongs in
+a server-side credential store, not in a browser bundle, a mobile app, a
+client-side script or a URL. The API enforces none of that; it is an operator
+obligation, and it is why the feature targets a workflow rather than an
+end-user client. Because the exposure is total, **a key that may have leaked is
+revoked**, not watched: revocation is one row update and takes effect on the next
+request, while monitoring a live full-authority credential only records the
+damage as it happens.
+
 ## 3. The authorization model
 
 **Ownership is enforced in SQL.** This is the decision recorded in
@@ -136,10 +194,12 @@ Rotation and reuse detection:
 | A task inherits its ownership from its project | A join on `projects`, so `p.user_id = $n` is part of every task statement. |
 | A resource the caller does not own is `404`, never `403` | The repository returns no row; the service turns that into `AppError::NotFound`. |
 | The caller never names itself | The owner id comes from `AuthUser`, and no DTO carries a settable `user_id`. |
-| A disabled account cannot use a valid token | `AuthService::authenticate_bearer` checks `is_active` on every request. |
+| A disabled account cannot use a valid token or API key | `AuthService::authenticate_bearer` checks `is_active` on every request, and `ApiKeyService::authenticate` checks it on the key path. |
+| An API key acts as its owner and gains nothing more | The middleware resolves the key to its `user_id`; every statement is then scoped by that id. No scope, role or grant is attached to a key, so it cannot reach a row its owner cannot reach. |
 
 There is exactly one role: the owner of the resource. There is no
-role table, no permission table and no sharing model in Phase 1.
+role table, no permission table and no sharing model in Phase 1. An API key does
+not add a role — it stands in for its owner — so that sentence still holds.
 
 The consequence to keep in mind: the ownership predicate is a **convention
 that a reviewer must check**, not a property the compiler enforces. Every new
@@ -156,12 +216,14 @@ for every private endpoint.
 | The database URL | `DATABASE_URL` — an environment variable, **with no file layer** | In `DatabaseSettings.url` | `DatabaseSettings`'s `Debug` prints `[REDACTED]`. |
 | Password hashes | The database | In `users.password_hash` | Argon2id. Never returned: `UserResponse` has no such field. |
 | Refresh tokens | Generated by the server | Only the SHA-256 hash is stored | A database disclosure does not yield a usable token. |
+| API keys | Generated by the server, returned once in the `201` that creates them | Only the SHA-256 digest in `api_keys.key_hash`, plus the public `prefix` | A database disclosure does not yield a usable key. Deliberately not Argon2id; the reasoning is in §2.5 and in [`../decisions/ADR-0011-api-keys.md`](../decisions/ADR-0011-api-keys.md). |
 | Access tokens | Issued to the client | In the client | Short-lived, signed, never logged. |
 
 The configuration directory holds **no secret at all**. The files in `config/`
 are committed and embedded in the binary, so a setting that needs a
-credential is an environment variable; the two above are the only ones, and
-they have no file layer.
+credential is an environment variable; the two above are the only secrets that
+are settings, and they have no file layer. An API key is not a setting: it is
+created by a user at run time and stored only as a digest.
 
 Rules that hold everywhere:
 
@@ -179,7 +241,8 @@ Rules that hold everywhere:
 
 The signing secret has **no rotation procedure**. There is no key identifier
 in the token and no revocation list, so a compromised secret cannot be
-retired without restarting every instance with a new one.
+retired without restarting every instance with a new one. An API key is the
+opposite case: it is individual, revocable and needs no restart (§2.5).
 
 ## 5. The CORS allowlist
 
@@ -272,7 +335,8 @@ hold for any code written inside the rules.
    failure carries the same message, and the unknown-account path spends a
    comparable amount of time.
 5. **A stolen database does not yield usable credentials.** Passwords are
-   Argon2id hashes and refresh tokens are SHA-256 hashes.
+   Argon2id hashes, refresh tokens are SHA-256 hashes, and API keys are
+   SHA-256 digests.
 6. **A bug does not leak the internals.** `AppError` has one rendering, and
    it redacts the server-side detail.
 7. **A panic does not take the process down for the client.** It becomes a
@@ -283,6 +347,10 @@ hold for any code written inside the rules.
    validation refuses it before the socket is bound.
 10. **A forged client address cannot buy more requests.** The
     `X-Forwarded-For` header is never consulted.
+11. **A machine credential is no stronger than its owner.** An API key resolves
+    to one `user_id` and inherits that user's authority exactly; it cannot be
+    issued a role, a scope or a grant that the user does not have, because no
+    such thing exists to attach.
 
 ## 9. What is **not** implemented
 
@@ -293,6 +361,7 @@ hold for any code written inside the rules.
 | A trusted-proxy declaration | Not implemented. `X-Forwarded-For` is ignored entirely, and there is no configured list of trusted proxies. Open question Q-07. |
 | Account lockout, breached-password checking | Not implemented. Accepted risk AR-6. |
 | A session-management surface for the user | Not implemented. The user cannot list or revoke their own sessions, and cannot change their password. Open question Q-08. |
+| An expiry or a scope on an API key | Not implemented. A key carries its owner's full authority until it is revoked, and nothing expires it: `last_used_at` is the only signal that a key is unused. See [`../decisions/ADR-0011-api-keys.md`](../decisions/ADR-0011-api-keys.md). |
 | A signing-secret rotation procedure | Not implemented. |
 | A security audit trail, alerting, metrics | Not implemented. Only structured logs and a correlation id exist. |
 | Dependency and container scanning | Not implemented. There is no container image, and the CI pipeline does not run a dependency or a container scan. |
@@ -311,6 +380,9 @@ hold for any code written inside the rules.
 - [`../decisions/ADR-0006-configuration-source-of-truth.md`](../decisions/ADR-0006-configuration-source-of-truth.md)
   — the configuration layers and the rule that no file in `config/` holds a
   secret.
+- [`../decisions/ADR-0011-api-keys.md`](../decisions/ADR-0011-api-keys.md) — the
+  API-key decision: the credential a machine client can hold, and why it is
+  hashed differently from a password.
 - [`request-lifecycle.md`](request-lifecycle.md) — where each control sits in
   the request path.
 - [`deployment.md`](deployment.md) — the operator obligations.

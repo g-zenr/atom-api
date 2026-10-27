@@ -1,7 +1,7 @@
 # ATOM API
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-25
+> **Last updated:** 2026-10-27
 > **Owner:** maintained by the `docs` agent
 
 This directory holds the HTTP contract of the ATOM API. It describes the
@@ -26,23 +26,42 @@ The per-feature endpoint references are:
 | Job applications | [`../features/job-applications/api.md`](../features/job-applications/api.md) | 14 |
 | Machine learning | [`../features/ml/api.md`](../features/ml/api.md) | 3 specified, all 3 published |
 
-**The document describes 51 operations**: 49 under `/api/v1` and the two health
+**The document describes 54 operations**: 52 under `/api/v1` and the two health
 probes outside it. The reimbursement feature contributes twelve of them - five
 claim operations, three item operations and four lifecycle actions - the
 job-application feature fourteen - five company, five application and four event
-operations - and the machine-learning feature three. A reader who counts the
+operations - the machine-learning feature three, and the API-key feature the
+three that create, list and revoke a machine credential. A reader who counts the
 inventory below must agree with those numbers; the contract test
 `the_route_table_and_the_document_describe_the_same_operations` fails if they
 disagree in either direction.
 
+**The three API-key operations have no per-feature reference document.** Their
+single card is [`../features/api-keys/status.md`](../features/api-keys/status.md).
+The decision, the credential format, the storage rule and the failure modes are
+recorded in [`../decisions/ADR-0011-api-keys.md`](../decisions/ADR-0011-api-keys.md),
+and the boundary they sit on is described in
+[`../architecture/security-architecture.md`](../architecture/security-architecture.md)
+§2. They are authenticated like every other private operation: the `Auth` column
+below means an `Authorization: Bearer` credential, which is either a user access
+token or an API key. The three are mounted in `api_routes()` and published in
+the document (`src/api_keys/handlers.rs`). **A run of `tests/api_keys_api.rs` is
+recorded**: its 10 cases pass in the measured run of 2026-10-27 (535 passed,
+0 failed, with the six gates green), and the three routes are asserted by
+`tests/contract_sweep.rs` and `tests/openapi_contract.rs`. That is evidence
+about the cases; the feature is still `Implemented` and not `Verified`, because
+no independent review of the diff and no quality-gate verdict is recorded yet.
+
 **The three machine-learning operations are published.** They answer, and they
 degrade as their contract says: a scored search returns lexical results with
 `200` when `ml.enabled` is `false` (the default), a match and a reindex return
-`409`. The suite ran green: 40 cases in `tests/ml_api.rs` pass in the run
-recorded in [`ATOM-CHANGE-20261024-011`](../engineering/change-log.md). The
-feature is `Implemented` and not `Verified`, because `ML-R02` — an embedding
-produced by Burn — is unmet; see [`../features/ml/status.md`](../features/ml/status.md)
-and [`../features/ml/testing.md`](../features/ml/testing.md).
+`409`. The suite ran green: 41 cases in `tests/ml_api.rs` pass in the measured
+run of 2026-10-27 (535 passed, 0 failed, with the six gates green). The feature
+is `Implemented` and not `Verified`, because no reviewer has read the encoder span
+and the re-gate of `ATOM-REVIEW-20261024-011` returned FAIL on documentation. The missing half is the
+review, not `ML-R02`: `embedder::select` returns a `BurnEmbedder` when both
+artifacts load. See [`../features/ml/status.md`](../features/ml/status.md)
+§1.3 and [`../features/ml/testing.md`](../features/ml/testing.md).
 
 ## 1. Where the OpenAPI document lives
 
@@ -117,16 +136,16 @@ curl -s http://127.0.0.1:3000/api/v1/openapi.json
 ```
 
 To change the document, change the `#[utoipa::path(...)]` annotations on the
-handlers in `src/auth/handlers.rs`, `src/notes/handlers.rs`,
-`src/projects/handlers.rs`, `src/tasks/handlers.rs`,
+handlers in `src/auth/handlers.rs`, `src/api_keys/handlers.rs`,
+`src/notes/handlers.rs`, `src/projects/handlers.rs`, `src/tasks/handlers.rs`,
 `src/reimbursements/handlers.rs`, `src/job_applications/handlers.rs`,
 `src/ml/handlers.rs` and `src/health.rs`, and add any new schema to
 the `components(schemas(...))` list in `src/api/routes.rs`.
 
 ## 3. Endpoint inventory
 
-Every path is relative to the API root. `Auth` states whether a bearer token
-is required.
+Every path is relative to the API root. `Auth` states whether a bearer
+credential — a user access token or an API key — is required.
 
 | Method | Path | Auth | Success | Feature |
 | ------ | ---- | ---- | ------- | ------- |
@@ -181,10 +200,13 @@ is required.
 | `POST` | `/api/v1/notes/search` | bearer | `200` | machine learning |
 | `POST` | `/api/v1/job-applications/{application_id}/match` | bearer | `200` | machine learning |
 | `POST` | `/api/v1/ml/reindex` | bearer | `200` | machine learning |
+| `POST` | `/api/v1/api-keys` | bearer | `201` | API keys |
+| `GET` | `/api/v1/api-keys` | bearer | `200` | API keys |
+| `DELETE` | `/api/v1/api-keys/{key_id}` | bearer | `204` | API keys |
 | `GET` | `/api/v1/openapi.json` | — | `200` | the document itself |
 | `GET` | `/api/v1/docs/` | — | `200` | the explorer |
 
-The first 51 rows are the operations the document describes and the two route
+The first 54 rows are the operations the document describes and the two route
 tables declare, and `tests/openapi_contract.rs` holds them together in both
 directions. The last two rows are the explorer and the document itself: they are
 served, but they are mounted by `swagger_ui` and are **not** operations in the
@@ -206,6 +228,13 @@ results with `200` while `ml.enabled` is `false`, which is the shipped default, 
 match returns `409`, and a reindex returns `409`. See
 [`../features/reimbursements/api.md`](../features/reimbursements/api.md) and
 [`../features/job-applications/api.md`](../features/job-applications/api.md).
+
+The three API-key operations are published too: they create, list and revoke a
+machine credential for the caller. Only the `201` response of
+`POST /api/v1/api-keys` carries the secret; the listing returns the `prefix`, so
+a key can be recognised after the one time it is shown. The credential format,
+the storage rule and the failure modes are in
+[`../decisions/ADR-0011-api-keys.md`](../decisions/ADR-0011-api-keys.md).
 
 `GET /api/v1/notes/search` is **not** the search operation: the dynamic
 `{note_id}` segment matches it first and answers `400`, because `search` is not a

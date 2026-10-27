@@ -1,7 +1,7 @@
 # ATOM — data architecture
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-27
 > **Owner:** maintained by the `architect` agent
 
 How the data is shaped, owned, searched and indexed, and how the migrations
@@ -347,14 +347,18 @@ The defect that broke this property, and its resolution, are recorded as
 
 ## Phase 2 data (proposed, except what is built)
 
-> **Proposed, except what is built.** `migrations/` ends at `0005`:
-> `0004_expense_claims.sql` and `0005_job_applications.sql` exist, and the five
-> tables they create are owned by Rust models in `src/reimbursements/` and
-> `src/job_applications/` and served by their repositories and endpoints.
-> `embeddings` (§11.6 of [`../database/schema.md`](../database/schema.md)) is the
-> only table here that is still proposed. All of them are the schema implied by
-> the **accepted** Phase 2 requirements
-> ([`../project-truth.md`](../project-truth.md) §18), and they are described
+> **Proposed, except what is built.** `migrations/` ends at `0007`, and
+> **everything in this section is built**: `0004_expense_claims.sql`,
+> `0005_job_applications.sql`, `0006_embeddings.sql` and `0007_api_keys.sql`
+> exist, and the seven tables they create are owned by Rust models in
+> `src/reimbursements/`, `src/job_applications/`, `src/ml/` and `src/api_keys/`
+> and served by their repositories and endpoints. Nothing here is still
+> proposed. The first three migrations are the schema implied by the
+> **accepted** Phase 2 requirements
+> ([`../project-truth.md`](../project-truth.md) §18); `0007` implements the
+> accepted decision of
+> [`../decisions/ADR-0011-api-keys.md`](../decisions/ADR-0011-api-keys.md),
+> which `project-truth.md` does not list. All of them are described
 > column by column in [`../database/schema.md`](../database/schema.md) §11 —
 > which is the authority for the physical definition. This section records only
 > what the *data architecture* has to say about them: how the conventions of §1
@@ -366,8 +370,9 @@ repoint that reference.
 
 ### The migrations, and the number of tables
 
-Three migrations, one per feature, in this order. The numbers are fixed by
-[`../database/schema.md`](../database/schema.md) §11.8 and the append-only rule
+Four migrations, the first three one per Phase 2 feature and the fourth the
+machine credential. The numbers are fixed by
+[`../database/schema.md`](../database/schema.md) §11.9 and the append-only rule
 of §5 above applies unchanged: each lands with its Rust models, its repository
 statements, its DTOs and its seeder extension in the same change, and none edits
 a migration that has been applied.
@@ -377,8 +382,10 @@ a migration that has been applied.
 | `0004_expense_claims.sql` | `expense_claim_status`, `expense_claims`, `expense_items`, with their constraints and indexes | `REIMB-R01`…`R10` |
 | `0005_job_applications.sql` | `job_application_status`, `application_event_kind`, `companies`, `job_applications`, `application_events`, with their constraints and indexes | `JOB-R01`…`R09` |
 | `0006_embeddings.sql` | `embeddings`, with its constraints and indexes | `ML-R01`…`R09` |
+| `0007_api_keys.sql` | `api_keys`, with its constraints and indexes | `ADR-0011` |
 
-Six tables and three enum types. No migration creates a PostgreSQL extension:
+Seven tables and three enum types. `0007` adds no enum type.
+No migration creates a PostgreSQL extension:
 `REAL[]` is a built-in type, and the reason the `vector` extension is not used is
 recorded in [`../decisions/ADR-0008-local-pure-rust-ml.md`](../decisions/ADR-0008-local-pure-rust-ml.md).
 
@@ -469,7 +476,7 @@ implementing change had to satisfy before `0004` was written:
    [`module-boundaries.md`](module-boundaries.md) under the `money` module.
 4. **`sqlx` has no enabled feature that can decode `NUMERIC` today** — no
    `rust_decimal`, no `bigdecimal`
-   ([`../database/schema.md`](../database/schema.md) §11.8, item 1). `0004` must
+   ([`../database/schema.md`](../database/schema.md) §11.9, item 1). `0004` must
    either add one (a dependency change with its recorded reason) or keep the
    `::text` cast on every money read. What it must not do is decode through
    `f64`.

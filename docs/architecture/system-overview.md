@@ -1,7 +1,7 @@
 # ATOM — system overview
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-25
+> **Last updated:** 2026-10-27
 > **Owner:** maintained by the `architect` agent
 
 The ATOM Phase 1 backend in one page: what it is, how it runs, what it is
@@ -110,6 +110,7 @@ the service.
 | --------- | ------ | -------------- |
 | `api` | `src/api/` | The router, the middleware stack, the shared extractors, the route table, the OpenAPI document and the API explorer. |
 | `auth` | `src/auth/` | Registration, login, the access/refresh token lifecycle, session rotation, reuse detection and revocation, and Argon2id password hashing. |
+| `api_keys` | `src/api_keys/` | The long-lived bearer credential for an unattended client: create, list and revoke a key, and resolve a presented `atom_` secret to exactly one active account. It is the second credential form `AuthUser` accepts, and the only place a key secret is produced. |
 | `users` | `src/users/` | The user record, email normalization, the password policy, the display-name policy and the safe public representation of a user. |
 | `notes` | `src/notes/` | Notes: create, list, read, partially update, delete, archive and search. |
 | `projects` | `src/projects/` | Projects: create, list, read, partially update, delete. |

@@ -215,6 +215,13 @@ application_not_found = "The requested job application does not exist."
 # addressed under an application it does not belong to.
 event_not_found = "The requested application event does not exist."
 
+# 404, when the API key does not exist, or is not owned by the caller.
+#
+# A revoked key is still found: revocation is a stamp on the row, not a delete,
+# so revoking an already-revoked key is a `204` and only an id that is unknown
+# or another account's is a `404`.
+api_key_not_found = "The requested API key does not exist."
+
 [messages.conflicts]
 # 409, when an item is written on a claim that is no longer a draft.
 #

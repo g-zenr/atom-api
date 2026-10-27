@@ -1,7 +1,7 @@
 # ATOM documentation
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-25
+> **Last updated:** 2026-10-26
 > **Owner:** maintained by the `docs` agent
 
 This directory is ATOM's knowledge base. It is written so that a contributor
@@ -117,7 +117,8 @@ A feature is never `Verified` because its code exists or compiles.
 | [`features/tasks/`](features/tasks/) | Tasks, status, priority, ordering, filtering. |
 | [`features/reimbursements/`](features/reimbursements/) | Expense claims, line items, money and the claim lifecycle. `Implemented`: all twelve published operations, the schema and the tests exist; `Verified` waits on the chain reviews. |
 | [`features/job-applications/`](features/job-applications/) | Companies, applications, stages and events. `Implemented`: migration `0005`, the six-module `src/job_applications/` and the fourteen operations exist; `Verified` waits on a re-review and a clean re-gate after the review's fixes. |
-| [`features/ml/`](features/ml/) | Local embeddings, hybrid search and match ranking. `Implemented`: the three operations, the schema and the suite exist; the suite is recorded green in `ATOM-CHANGE-20261024-011`, and `ML-R02` is met, so nothing is `Verified`. |
+| [`features/ml/`](features/ml/) | Local embeddings, hybrid search and match ranking. `Implemented`: the three operations, the schema, the suite and the Burn encoder exist; the suite is measured green at `4df383e`, and `ML-R02` is met. Nothing is `Verified`: no reviewer has read the encoder span and no re-gate of `ATOM-REVIEW-20261024-011` is recorded. |
+| [`features/api-keys/`](features/api-keys/status.md) | The machine credential a workflow can hold: `atom_` + 32 CSPRNG bytes, stored as a SHA-256 digest, revocable, owner-scoped. `Implemented`: migration `0007`, the three operations, 10 integration cases and 13 unit tests pass in the 2026-10-27 run (535 tests, six gates green). Not `Verified`: no independent review and no quality-gate verdict are recorded. Its authority is `ADR-0011`, because no `project-truth.md` requirement defines the capability. |
 
 Each feature directory contains the same five documents:
 
