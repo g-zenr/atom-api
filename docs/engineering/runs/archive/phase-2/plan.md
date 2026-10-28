@@ -10,7 +10,7 @@ a complete database seeder so the frontend can be built against realistic data
 from the first phase.
 
 Nothing here is agreed product scope until Phase 1 writes it into
-[the product requirements](../../../project-truth.md) with acceptance criteria.
+[the product requirements](../../../../project-truth.md) with acceptance criteria.
 The roadmap items remain `Proposed` until then.
 
 ---
@@ -45,8 +45,8 @@ Out of scope for Phase 2, and not to be pre-wired:
 - **n8n automation.** It is a later integration, not part of the API runtime: a
   separate Node service that calls the API, never the reverse, and never inside
   the data path of a private record. It is `Proposed` in
-  [the roadmap](../../../roadmap.md), not Phase 2 scope.
-- Everything in [the roadmap](../../../roadmap.md) that is still `Proposed`.
+  [the roadmap](../../../../roadmap.md), not Phase 2 scope.
+- Everything in [the roadmap](../../../../roadmap.md) that is still `Proposed`.
 - Compile-time SQLx verification (`KI-004`) and account lockout (`KI-012`).
 
 ## 3. Assumptions to confirm
@@ -133,7 +133,7 @@ Stage machine: `wishlist → applied → screening → interview → offer`;
 `rejected` and `withdrawn` are terminal. A company and an application always
 share an owner; a foreign key that crosses owners is rejected by the service and
 the tests. The accepted statement of this machine is
-[`project-truth.md`](../../../project-truth.md) §18.2 `JOB-R04`; where this sketch
+[`project-truth.md`](../../../../project-truth.md) §18.2 `JOB-R04`; where this sketch
 and §18.2 differ, §18.2 wins.
 
 ### 5.3 Embeddings
@@ -301,7 +301,7 @@ unnecessarily slow.
 (`A-C-S1-6`), the two-phase foreign-rows guard (`A-C-S1-7`), the redaction tests
 (`A-C-S1-8`) and the ten tests locked in `C-S1` — twelve integration tests in
 total, listed in
-[`../../database/seeding.md`](../../../database/seeding.md) §9.
+[`../../database/seeding.md`](../../../../database/seeding.md) §9.
 
 ### Documentation
 
@@ -323,7 +323,7 @@ deployment document says so.
 ## 10. Decisions that block
 
 - A1–A6 above, before Phase 1 writes acceptance criteria.
-- [Open questions](../../open-questions.md) `Q-01` … `Q-12`. None blocks the
+- [Open questions](../../../open-questions.md) `Q-01` … `Q-12`. None blocks the
   engineering work in this plan; each blocks the product behaviour it describes.
 - pgvector versus `REAL[]`: settled for Phase 2 by the non-superuser finding,
   unless the owner prefers to make `CREATE EXTENSION` a deployment prerequisite.
@@ -333,13 +333,13 @@ deployment document says so.
 - [The run procedure](prompt.md)
 - [The live ledger](ledger.md)
 - [The run folder](README.md)
-- [The product requirements](../../../project-truth.md)
-- [The roadmap](../../../roadmap.md)
-- [The schema](../../../database/schema.md)
-- [The API conventions](../../../api/conventions.md)
-- [The test strategy](../../../testing/strategy.md)
-- [Known issues](../../known-issues.md)
-- [Open questions](../../open-questions.md)
+- [The product requirements](../../../../project-truth.md)
+- [The roadmap](../../../../roadmap.md)
+- [The schema](../../../../database/schema.md)
+- [The API conventions](../../../../api/conventions.md)
+- [The test strategy](../../../../testing/strategy.md)
+- [Known issues](../../../known-issues.md)
+- [Open questions](../../../open-questions.md)
 
 ### Reference standards
 

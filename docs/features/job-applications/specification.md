@@ -35,7 +35,7 @@ FAIL on documentation only; no gate run after the review's fixes is recorded,
 so nothing is `Verified`. See [status.md](status.md).
 
 The model rests on assumptions **A3** and **A6** in
-[`../../engineering/runs/chain/plan.md`](../../engineering/runs/chain/plan.md) §3,
+[`../../engineering/runs/archive/phase-2/plan.md`](../../engineering/runs/archive/phase-2/plan.md) §3,
 which the owner did not explicitly confirm (owner decision O1). They are
 recorded as **provisional defaults** in
 [`../../project-truth.md`](../../project-truth.md) §18.4 and are **not**

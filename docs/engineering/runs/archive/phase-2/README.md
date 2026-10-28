@@ -51,7 +51,7 @@ The detail of each phase is in [plan.md](plan.md) §7.
 
 ## The rules that do not change
 
-- [AGENTS.md](../../../../AGENTS.md) is binding. The short version:
+- [AGENTS.md](../../../../../AGENTS.md) is binding. The short version:
   ownership in SQL, `404` never `403`, no secret in a log, migrations
   append-only, no new dependency without a recorded reason, no lint suppressed.
 - A feature is `Verified` only when a recorded check passes. Never before.
@@ -60,9 +60,9 @@ The detail of each phase is in [plan.md](plan.md) §7.
 
 ## Where the rest of the knowledge lives
 
-- [The documentation index](../../../README.md)
-- [The product requirements](../../../project-truth.md)
-- [The roadmap](../../../roadmap.md)
-- [The remediation backlog](../../../audit/remediation-backlog.md)
-- [Known issues](../../known-issues.md)
-- [Open questions](../../open-questions.md)
+- [The documentation index](../../../../../README.md)
+- [The product requirements](../../../../project-truth.md)
+- [The roadmap](../../../../roadmap.md)
+- [The remediation backlog](../../../../audit/remediation-backlog.md)
+- [Known issues](../../../known-issues.md)
+- [Open questions](../../../open-questions.md)

@@ -15,7 +15,7 @@ requirements are `ML-R01`…`ML-R09` in
 Four constraints decide the shape, and three of them are not negotiable.
 
 1. **The technology stack is Rust only** (owner decision **O6** in
-   [`../engineering/runs/chain/ledger.md`](../engineering/runs/chain/ledger.md)).
+   [`../engineering/runs/archive/phase-2/ledger.md`](../engineering/runs/archive/phase-2/ledger.md)).
    There is no Python, Node or Go runtime in the API, and no external model
    server such as Ollama. `AGENTS.md` §4.12 additionally fixes the framework:
    **Burn v0.22**, the **`flex`** backend, weights stored with
@@ -30,9 +30,9 @@ Four constraints decide the shape, and three of them are not negotiable.
 **The pgvector finding.** The PostgreSQL server on the development machine has
 the `vector` extension available (0.8.1), but the `atom` role is **not** a
 superuser, and `CREATE EXTENSION vector` is denied locally
-([`../engineering/runs/chain/ledger.md`](../engineering/runs/chain/ledger.md),
+([`../engineering/runs/archive/phase-2/ledger.md`](../engineering/runs/archive/phase-2/ledger.md),
 baseline). The plan records that CI's `atom` role *is* a superuser
-([`../engineering/runs/chain/plan.md`](../engineering/runs/chain/plan.md) §6).
+([`../engineering/runs/archive/phase-2/plan.md`](../engineering/runs/archive/phase-2/plan.md) §6).
 A migration containing `CREATE EXTENSION vector` would therefore **pass CI and
 fail on the development machine** — the worst possible divergence, because the
 failure would appear only where nobody expects it. No requirement needs a
@@ -718,8 +718,8 @@ such here rather than bought by enlarging a timeout that no inference needs.
 | --------- | ------------ |
 | [`../project-truth.md`](../project-truth.md) §18.3 `ML-R01`…`ML-R09` | The requirements this decision serves. |
 | [`../project-truth.md`](../project-truth.md) §6.1 | The amendment that permits local inference and keeps outbound AI excluded. |
-| [`../engineering/runs/chain/plan.md`](../engineering/runs/chain/plan.md) §6 | The pgvector finding and the design this ADR formalises. |
-| [`../engineering/runs/chain/ledger.md`](../engineering/runs/chain/ledger.md) | Owner decisions O1, O6 and O7. |
+| [`../engineering/runs/archive/phase-2/plan.md`](../engineering/runs/archive/phase-2/plan.md) §6 | The pgvector finding and the design this ADR formalises. |
+| [`../engineering/runs/archive/phase-2/ledger.md`](../engineering/runs/archive/phase-2/ledger.md) | Owner decisions O1, O6 and O7. |
 | [`../features/ml/architecture.md`](../features/ml/architecture.md) | How the decision is built. |
 | [`../features/ml/api.md`](../features/ml/api.md) | The search, match and reindex contracts. |
 | [`../api/conventions.md`](../api/conventions.md) §17 | The published search modes and the degradation rule. |
@@ -727,7 +727,7 @@ such here rather than bought by enlarging a timeout that no inference needs.
 | [`ADR-0002-rust-axum-postgresql.md`](ADR-0002-rust-axum-postgresql.md) | The stack this decision extends. |
 | [`../engineering/change-log.md`](../engineering/change-log.md) | The change that implements it, and `ATOM-CHANGE-20261024-010` with its Correction block: the measured result recorded in §8. |
 | [`../engineering/known-issues.md`](../engineering/known-issues.md) `KI-022` | The build cost and MSRV consequence of §7.3 and §8.2. |
-| [`../engineering/runs/chain/plan.md`](../engineering/runs/chain/plan.md) §7, Phase 4 | Chains `M1`–`M6`; `M3`–`M6` build against [`../features/ml/architecture.md`](../features/ml/architecture.md) §12. |
+| [`../engineering/runs/archive/phase-2/plan.md`](../engineering/runs/archive/phase-2/plan.md) §7, Phase 4 | Chains `M1`–`M6`; `M3`–`M6` build against [`../features/ml/architecture.md`](../features/ml/architecture.md) §12. |
 
 ## Supersedes / Superseded by
 

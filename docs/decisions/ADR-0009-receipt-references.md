@@ -11,10 +11,10 @@ has to let the owner attach the proof — the receipt — to the expense. The
 requirement is `REIMB-R08` in
 [`../project-truth.md`](../project-truth.md) §18.1, and the assumption behind
 it is **A2**: "receipts are a URL/reference in Phase 2, not uploaded files"
-([`../engineering/runs/chain/plan.md`](../engineering/runs/chain/plan.md) §3).
+([`../engineering/runs/archive/phase-2/plan.md`](../engineering/runs/archive/phase-2/plan.md) §3).
 A2 is a **provisional default**; the owner did not explicitly confirm it
 (owner decision O1 in
-[`../engineering/runs/chain/ledger.md`](../engineering/runs/chain/ledger.md)).
+[`../engineering/runs/archive/phase-2/ledger.md`](../engineering/runs/archive/phase-2/ledger.md)).
 
 An upload looks like a small feature and is not one. Accepting a file means
 the API becomes a **store** as well as a **record**, and the obligations that

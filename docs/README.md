@@ -155,13 +155,14 @@ Each feature directory contains the same five documents:
 
 | Document | Contents |
 | -------- | -------- |
-| [`engineering/change-log.md`](engineering/change-log.md) | Newest-first chronological record of substantial changes. Append-only. |
+| [`engineering/change-log.md`](engineering/change-log.md) | Newest-first chronological record of substantial changes. Append-only. Entries from before 2026-10-27 are in [`engineering/archive/`](engineering/archive/README.md). |
 | [`engineering/implementation-status.md`](engineering/implementation-status.md) | The current verified state of every feature. |
-| [`engineering/review-log.md`](engineering/review-log.md) | Substantive reviews: findings, required fixes, resolution, re-review evidence. |
+| [`engineering/review-log.md`](engineering/review-log.md) | Substantive reviews: findings, required fixes, resolution, re-review evidence. Full records older than 2026-10-27 are in [`engineering/archive/`](engineering/archive/README.md). |
+| [`engineering/archive/`](engineering/archive/README.md) | Cold storage: the archived change-log and review-log entries and the closed known issues, byte-identical, linked from their hot documents. |
 | [`engineering/git-workflow.md`](engineering/git-workflow.md) | The branch model, the branch and commit naming rules, the six gates, the pull-request process, and how a review is conducted. |
 | [`engineering/release-and-promotion.md`](engineering/release-and-promotion.md) | How a change moves through DEV, UAT and PROD: the gate at each stage, what is verified, what is recorded, and what infrastructure does not exist yet. |
-| [`engineering/runs/chain/`](engineering/runs/chain/) | The Phase 2 run: the plan, the self-healing daily prompt and the live ledger for reimbursements, job applications, local ML and the database seeder. |
-| [`engineering/known-issues.md`](engineering/known-issues.md) | Confirmed defects, limitations, workarounds and remediation status. |
+| [`engineering/runs/chain/`](engineering/runs/chain/) | Run state: no run is active; the stub ledger points at the archived Phase 2 run ([`engineering/runs/archive/phase-2/`](engineering/runs/archive/phase-2/) — the plan, the prompt and the live ledger of the completed run). |
+| [`engineering/known-issues.md`](engineering/known-issues.md) | Confirmed defects, limitations, workarounds and remediation status. Closed issues (full text) are in [`engineering/archive/known-issues-closed.md`](engineering/archive/known-issues-closed.md). |
 | [`engineering/open-questions.md`](engineering/open-questions.md) | Unresolved product or architecture decisions. |
 
 ### The audits

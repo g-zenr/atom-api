@@ -35,7 +35,7 @@ migration, the module and the tests to match; no reviewer has read the chain
 that completed them, so nothing is `Verified`. See [status.md](status.md).
 
 The claim model and the lifecycle rest on assumptions **A1** and **A6** in
-[`../../engineering/runs/chain/plan.md`](../../engineering/runs/chain/plan.md) §3,
+[`../../engineering/runs/archive/phase-2/plan.md`](../../engineering/runs/archive/phase-2/plan.md) §3,
 which the owner did not explicitly confirm (owner decision O1). They are
 recorded as **provisional defaults** in
 [`../../project-truth.md`](../../project-truth.md) §18.4 and are **not**

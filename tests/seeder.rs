@@ -35,7 +35,7 @@
 //! asserts its own dataset, and no test depends on the order another one ran
 //! in.
 //!
-//! The contract is `C-S1` in `docs/engineering/runs/chain/ledger.md`, as
+//! The contract is `C-S1` in `docs/engineering/runs/archive/phase-2/ledger.md`, as
 //! amended by `A-C-S1-5` … `A-C-S1-10`, with the detail in
 //! `docs/database/seeding.md`.
 

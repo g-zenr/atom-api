@@ -19,7 +19,7 @@ is [`../../src/bin/atom-seed.rs`](../../src/bin/atom-seed.rs), and
 status is `Implemented`, not `Verified`: rows 10 and 11 of the `D2.S1`
 checkpoint — `code-reviewer` on the seeder diff and `quality-gate` on the
 evidence — have not been closed (the table in
-[`../engineering/runs/chain/ledger.md`](../engineering/runs/chain/ledger.md)
+[`../engineering/runs/archive/phase-2/ledger.md`](../engineering/runs/archive/phase-2/ledger.md)
 names them).
 
 The seeder is **development tooling, not product behaviour**. It is not a
@@ -56,7 +56,7 @@ binary's; without it, `cargo run` consumes `--profile` itself.
 
 - The parser is hand-written over `std::env::args_os`, because the contract
   forbids a new dependency (`C-S1` in
-  [`../engineering/runs/chain/ledger.md`](../engineering/runs/chain/ledger.md)).
+  [`../engineering/runs/archive/phase-2/ledger.md`](../engineering/runs/archive/phase-2/ledger.md)).
   There is no `clap`.
 - `--profile dev` and `--profile=dev` are both accepted. An unknown flag, a
   missing `--profile` value and an unknown profile name are usage errors: a
@@ -1041,7 +1041,7 @@ failed verification, a SQLx error and a usage error.
 ## 11. Traceability to the locked contract
 
 The seeder contract `C-S1` is in
-[`../engineering/runs/chain/ledger.md`](../engineering/runs/chain/ledger.md),
+[`../engineering/runs/archive/phase-2/ledger.md`](../engineering/runs/archive/phase-2/ledger.md),
 with the security-review amendments **A-C-S1-5 … A-C-S1-10**. `G1` and `G2` in
 the body of `C-S1` are **superseded** by A-C-S1-5 and A-C-S1-6; this document
 implements the amended rule.
@@ -1061,7 +1061,7 @@ implements the amended rule.
 | A-C-S1-10 | every user table is in `USER_TABLES`, which is also the `--reset` order; the insert list is not compared (§7.6) | §7.6 |
 
 The plan's profiles and the credential policy are in
-[`../engineering/runs/chain/plan.md`](../engineering/runs/chain/plan.md) §8.
+[`../engineering/runs/archive/phase-2/plan.md`](../engineering/runs/archive/phase-2/plan.md) §8.
 Where this document is more specific than either — the id algorithm, the
 timestamp offsets, the verification queries, the test database's
 `--allow-non-empty` requirement — the detail is what makes the contract
@@ -1107,9 +1107,9 @@ implementable, and it does not change the contract.
   writes to; §11 is the proposed Phase 2 schema.
 - [`migration-policy.md`](migration-policy.md) — why the seeder adds no
   migration file and why every schema change comes with its model change.
-- [`../engineering/runs/chain/plan.md`](../engineering/runs/chain/plan.md) §8 —
+- [`../engineering/runs/archive/phase-2/plan.md`](../engineering/runs/archive/phase-2/plan.md) §8 —
   the plan's seeder section.
-- [`../engineering/runs/chain/ledger.md`](../engineering/runs/chain/ledger.md) —
+- [`../engineering/runs/archive/phase-2/ledger.md`](../engineering/runs/archive/phase-2/ledger.md) —
   the locked `C-S1` contract and the run's evidence.
 - [`../architecture/deployment.md`](../architecture/deployment.md) — the
   development-only rule in the deployment context.

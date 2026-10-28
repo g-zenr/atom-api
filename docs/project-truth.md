@@ -213,7 +213,7 @@ What changed, precisely:
    model server, no LLM provider, no paid service, at build time or at run
    time. This is also §8 ("the build must not require a hosted or paid
    service") and owner decision O6 in
-   [`engineering/runs/chain/ledger.md`](engineering/runs/chain/ledger.md).
+   [`engineering/runs/archive/phase-2/ledger.md`](engineering/runs/archive/phase-2/ledger.md).
 3. **No second language runtime.** Adding Python, Node, Go or an external
    model server to the API runtime is excluded, by the same decision.
 4. **Text generation remains excluded**, including cover letters, summaries
@@ -540,9 +540,9 @@ requirements:
 | [`ADR-0009`](decisions/ADR-0009-receipt-references.md) | A receipt is a reference, not an uploaded file. |
 
 The **Origin** column names where each requirement comes from. `A1`–`A6` are
-the assumptions in [`engineering/runs/chain/plan.md`](engineering/runs/chain/plan.md)
+the assumptions in [`engineering/runs/archive/phase-2/plan.md`](engineering/runs/archive/phase-2/plan.md)
 §3; **they were never explicitly confirmed by the owner** (owner decision
-O1 in [`engineering/runs/chain/ledger.md`](engineering/runs/chain/ledger.md)).
+O1 in [`engineering/runs/archive/phase-2/ledger.md`](engineering/runs/archive/phase-2/ledger.md)).
 They are recorded here as **provisional defaults**, not as owner-approved
 requirements. §18.4 says what that means for a change.
 

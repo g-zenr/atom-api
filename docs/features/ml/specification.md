@@ -41,7 +41,7 @@ span and no re-gate of `ATOM-REVIEW-20261024-011` is recorded; see
 [status.md](status.md) §1.3.
 
 The model rests on assumption **A4** in
-[`../../engineering/runs/chain/plan.md`](../../engineering/runs/chain/plan.md) §3,
+[`../../engineering/runs/archive/phase-2/plan.md`](../../engineering/runs/archive/phase-2/plan.md) §3,
 which the owner did not explicitly confirm (owner decision O1). **The stack is
 not provisional:** O6 fixes Rust-only, Burn v0.22 and the `flex` backend, and
 `AGENTS.md` §4.12 repeats it. The decision is

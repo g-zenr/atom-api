@@ -951,7 +951,7 @@ by reading `api.md`, `schema.md` §11, the `C-R1` contract and the migration.
 | [`../features/reimbursements/testing.md`](../features/reimbursements/testing.md) §2.1 | `a_claim_can_be_partially_updated` sends `{"currency":"USD","status":"paid"}`, expects the currency and status unchanged — i.e. `200`. |
 | [`../database/schema.md`](../database/schema.md) §11.1 | "`currency` is immutable (`REIMB-R02`). That is a service rule with a `422` and a test, not a trigger." |
 | [`../features/reimbursements/status.md`](../features/reimbursements/status.md) §1 | "Immutability is a service rule with a `422`". |
-| [`C-R1`](../engineering/runs/chain/ledger.md) `I6` | "`currency` is immutable (service rule with `422`, from R2)". |
+| [`C-R1`](../engineering/runs/archive/phase-2/ledger.md) `I6` | "`currency` is immutable (service rule with `422`, from R2)". |
 
 **The resolution: `api.md` wins, and the others are corrected.** A `PATCH`
 carrying `currency` (or `status`, or `total_amount`) is accepted with `200` and
@@ -1213,7 +1213,7 @@ the rule makes its test fail, then restore it.
 | `test-engineer` | `tests/claims_api.rs` (new), `tests/openapi_contract.rs`, `tests/common/mod.rs` (only if a `create_claim` helper is genuinely missing) |
 | `docs` | `docs/features/reimbursements/{api,architecture,testing,status}.md` (the §9.1 corrections and the "planned" markers), `docs/api/README.md` if it indexes the operations, `docs/engineering/implementation-status.md` |
 | `database` | `docs/database/schema.md` §11.1 (the §9.1 and §9.3 corrections) |
-| orchestrator | `docs/engineering/{change-log,review-log,implementation-status}.md`, `docs/engineering/runs/chain/ledger.md` (`C-R2`, the checkpoint, the `C-R1` `I6` correction) |
+| orchestrator | `docs/engineering/{change-log,review-log,implementation-status}.md`, `docs/engineering/runs/archive/phase-2/ledger.md` (`C-R2`, the checkpoint, the `C-R1` `I6` correction) |
 
 No migration, no `Cargo.toml` change, no configuration setting.
 

@@ -173,28 +173,46 @@ task follows this protocol.** The full version lives in
 
 ### Before implementation
 
+The intake is tiered: read what the task touches, not the whole knowledge
+base. The index and the one feature card are the default; everything else is
+retrieved on demand.
+
+Always (every task):
+
 1. Read this file and any other applicable repository instructions.
-2. Read [`docs/README.md`](docs/README.md) — the documentation index.
-3. Read [`docs/project-truth.md`](docs/project-truth.md) — the accepted product
-   requirements.
-4. Read the relevant feature specification under `docs/features/`.
-5. Read the related architecture documents and ADRs under `docs/architecture/`
-   and `docs/decisions/`.
-6. Check `docs/engineering/known-issues.md` and
-   `docs/engineering/open-questions.md`.
-7. Read the configuration reference in
+2. Read [`docs/README.md`](docs/README.md) — the documentation index — and the
+   `status.md` of the one feature area the task touches. The feature card is
+   the single source of its status and evidence; index rows point at it and
+   do not restate it.
+3. Read the section of [`docs/project-truth.md`](docs/project-truth.md) that
+   governs the task (the index names the sections), not necessarily the whole
+   file.
+4. Inspect the real source, migrations, tests and `git diff`.
+5. Decide whether the task conflicts with an accepted requirement or an
+   unresolved decision. If it does, **stop and say so** instead of silently
+   changing product behaviour.
+
+On demand (only when the task touches what they govern):
+
+6. Architecture documents and ADRs under `docs/architecture/` and
+   `docs/decisions/`, when the task changes structure, invariants or a
+   decision.
+7. The **summary tables** of `docs/engineering/known-issues.md` and
+   `docs/engineering/open-questions.md`; read a full entry only when its ID is
+   cited by the task or by a code comment. Closed issues live in
+   [`docs/engineering/archive/`](docs/engineering/archive/README.md).
+8. The configuration reference in
    [`docs/architecture/deployment.md`](docs/architecture/deployment.md) and
    [`config/README.md`](config/README.md) before changing a setting, and
    update both when a setting changes.
-8. Inspect the real source, migrations, tests and `git diff`.
-9. Decide whether the task conflicts with an accepted requirement or an
-   unresolved decision. If it does, **stop and say so** instead of silently
-   changing product behaviour.
-10. Read the reference standards in §4.12 when the task writes or reviews Rust
-    code or machine learning.
+9. The reference standards in §4.12 when the task writes or reviews Rust code
+   or machine learning.
 
-Do not dump every document into context for a small change. Read the canonical
-overview first, then retrieve what the task actually needs.
+Never paste a document into a prompt or a subagent brief when a path will do:
+a subagent loads the file into its own context, and the orchestrator's stays
+small. Historical records — the change-log and review-log archives, the closed
+known issues, a finished run's ledger — are linked from their hot document and
+read only when a task explicitly needs the history.
 
 ### After implementation
 

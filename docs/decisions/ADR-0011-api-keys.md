@@ -273,7 +273,7 @@ workflow shows up as load rather than as a `429`.
 | [`../architecture/security-architecture.md`](../architecture/security-architecture.md) §2 | The authentication boundary this adds a second credential form to. |
 | [`../api/README.md`](../api/README.md) §3 | The published surface, which moves from 51 to 54 operations. |
 | [`../roadmap.md`](../roadmap.md) | The n8n integration. It stays `Proposed`; this ADR decides the credential, not the integration, which remains outside the agreed scope. |
-| [`../engineering/runs/chain/ledger.md`](../engineering/runs/chain/ledger.md) `C-K1` | The locked contract that specifies the schema, the types, the invariants and the test names for the implementation, including the `A-C-K1-1` amendment on the inactive-account answer. |
+| [`../engineering/runs/archive/phase-2/ledger.md`](../engineering/runs/archive/phase-2/ledger.md) `C-K1` | The locked contract that specifies the schema, the types, the invariants and the test names for the implementation, including the `A-C-K1-1` amendment on the inactive-account answer. |
 | [`../engineering/change-log.md`](../engineering/change-log.md) | The append-only record; the entry for this change is appended with the chain. |
 
 ## Supersedes / Superseded by

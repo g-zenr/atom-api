@@ -419,7 +419,7 @@ NULL`. Deleting a project clears the reference and leaves the claim.
 The physical definition — column types, the `CHECK` constraints, the indexes —
 belongs in [`schema.md`](../../database/schema.md) §11, which is the
 authority the migration implements. The plan's working sketch is in
-[`plan.md`](../../engineering/runs/chain/plan.md) §5.1.
+[`plan.md`](../../engineering/runs/archive/phase-2/plan.md) §5.1.
 
 ### 3.1 The seeded claims
 

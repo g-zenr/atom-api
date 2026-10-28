@@ -314,7 +314,7 @@ defines the phases: Phase 1 is the backend foundation; **Phase 2 is the personal
 workspace** — reimbursements, job-application tracking, local machine learning
 and the database seeder — with its requirements recorded in
 [`../project-truth.md`](../project-truth.md) §18 and its delivery waves in
-[`runs/chain/plan.md`](runs/chain/plan.md) §7. Phase 3 and later stay
+[`runs/archive/phase-2/plan.md`](runs/archive/phase-2/plan.md) §7. Phase 3 and later stay
 unassigned text in the roadmap, so this answer commits to one phase, not to a
 numbered plan for everything.
 
@@ -374,9 +374,9 @@ specialist.
 **State:** Open · **Blocks:** nothing in Phase 2's engineering; it blocks the product behaviour each assumption describes
 
 **Context.** The Phase 2 intake rests on six working assumptions — `A1`–`A6` in
-[`runs/chain/plan.md`](runs/chain/plan.md) §3 — that were **not explicitly
+[`runs/archive/phase-2/plan.md`](runs/archive/phase-2/plan.md) §3 — that were **not explicitly
 confirmed** by the owner (owner decision `O1`, recorded in
-[`runs/chain/ledger.md`](runs/chain/ledger.md)). The intake therefore recorded
+[`runs/archive/phase-2/ledger.md`](runs/archive/phase-2/ledger.md)). The intake therefore recorded
 them as **provisional defaults**: a claim with line items and one currency per
 claim (`A1`), receipts as references rather than uploaded files (`A2`),
 applications tracked but never generated (`A3`), machine learning local only
@@ -395,7 +395,7 @@ note is [`../project-truth.md`](../project-truth.md) §18.4.
 **Who decides.** The product owner.
 
 **Related.** [`../project-truth.md`](../project-truth.md) §18.4;
-[`runs/chain/plan.md`](runs/chain/plan.md) §3;
+[`runs/archive/phase-2/plan.md`](runs/archive/phase-2/plan.md) §3;
 [`../decisions/ADR-0007-money-representation.md`](../decisions/ADR-0007-money-representation.md);
 [`../decisions/ADR-0009-receipt-references.md`](../decisions/ADR-0009-receipt-references.md).
 

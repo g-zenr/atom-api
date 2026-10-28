@@ -575,9 +575,9 @@ the status is [`../features/ml/status.md`](../features/ml/status.md).
 | Whole suite | **179** on Windows, **181** on a unix host | **roughly 330** | 179 + 150 = 329. The two `shutdown` tests remain unix-only, so the platform difference stays. Exceeded: 536 on Windows today. |
 
 The old figure of 177 in
-[`plan.md`](../engineering/runs/chain/plan.md) §4 is stale; the measured
+[`plan.md`](../engineering/runs/archive/phase-2/plan.md) §4 is stale; the measured
 baseline in
-[`ledger.md`](../engineering/runs/chain/ledger.md) is 179 on Windows.
+[`ledger.md`](../engineering/runs/archive/phase-2/ledger.md) is 179 on Windows.
 
 An indicative allocation, not a quota:
 

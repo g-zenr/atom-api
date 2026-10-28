@@ -7,7 +7,7 @@
 //! features read. It is specified in `docs/database/seeding.md`, locked by the
 //! `C-S1` contract (with the security amendments `A-C-S1-5` ... `A-C-S1-10`)
 //! and extended by `C-R1` and `C-J1` §SEEDER, all in
-//! `docs/engineering/runs/chain/ledger.md`.
+//! `docs/engineering/runs/archive/phase-2/ledger.md`.
 //!
 //! ```text
 //! cargo run --bin atom-seed -- --profile minimal --reset

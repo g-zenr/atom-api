@@ -25,9 +25,9 @@ Three properties have to hold at once:
 
 The representation was not settled by an owner decision. It is provisional
 default **A6** in
-[`../engineering/runs/chain/plan.md`](../engineering/runs/chain/plan.md) §3,
+[`../engineering/runs/archive/phase-2/plan.md`](../engineering/runs/archive/phase-2/plan.md) §3,
 which the owner did not explicitly confirm (owner decision **O1** in
-[`../engineering/runs/chain/ledger.md`](../engineering/runs/chain/ledger.md)).
+[`../engineering/runs/archive/phase-2/ledger.md`](../engineering/runs/archive/phase-2/ledger.md)).
 This ADR records the default as a decision, so that the implementing change
 has one answer rather than a choice per module. It is provisional in the sense
 that the *value* can be revised by the owner; the *decision* is in force until

@@ -19,7 +19,7 @@
 //! database itself, which the harness refuses to use unless its name contains
 //! `test`.
 //!
-//! The contract is `C-J1` in `docs/engineering/runs/chain/ledger.md`; the
+//! The contract is `C-J1` in `docs/engineering/runs/archive/phase-2/ledger.md`; the
 //! constraints are defined in `docs/database/schema.md` §11.3, §11.4 and §11.5.
 
 pub mod common;
