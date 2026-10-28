@@ -22,15 +22,23 @@ recorded.
 
 ## The entries so far
 
-Fourteen reviews have been performed:
+Fifteen reviews have been performed:
 
+- `ATOM-REVIEW-20261029-001`, the **final read of the repaired `K1` tree** at
+  `65898e5`. `CODE_REVIEW` **PASS**, `PRODUCT_CONTRACT` **PASS WITH FINDINGS**
+  (three index rows still claimed no verdict was recorded — corrected in the
+  same change that performs the promotion), `NEW_REGRESSIONS` **PASS**; the
+  suite arithmetic was re-derived per file from the tree (536 Windows / 538
+  unix). It closes the gap `-027-001` left, and `K1` is **`Verified`** as of
+  this review.
 - `ATOM-REVIEW-20261027-001`, the API-keys change (`K1`). The `quality-gate`
   returned **PASS** (six gates `0`, 536 tests, 54 operations asserted in both
   directions). The `code-reviewer` read the diff three times and returned
   **FAIL on the documentation figures** each time - eleven stale "51 operations"
   claims, then eight more stale figures, then one - while finding no ownership,
   SQL, secret-handling or contract defect in the code. Every finding is repaired;
-  no read of the final tree exists, so the feature stays `Implemented`.
+  the read of the final tree that did not exist then is recorded as
+  `ATOM-REVIEW-20261029-001` above, which promotes the feature to `Verified`.
 
 - `ATOM-REVIEW-20261026-002`, the **re-gate** of `-011` over the whole Phase 2
   run. It executed `scripts/gate.ps1` itself (six gates `0`) and
@@ -188,6 +196,62 @@ happened.** The first real entry is below.
   answer.
 - [`../testing/verification-policy.md`](../testing/verification-policy.md) —
   the rules this log implements.
+
+---
+
+### ATOM-REVIEW-20261029-001 - The final read of the repaired `K1` tree
+
+**Date:** 2026-10-29 (UTC)
+**Reviewer:** the `code-reviewer` agent, read-only, one read
+**Change reviewed:** the final tree at `65898e5` — the whole `K1` chain
+(`dcda97f` feature + `65898e5` repairs) as it stands, not the diff narrative.
+**Verdict:** `CODE_REVIEW` **PASS** · `PRODUCT_CONTRACT` **PASS WITH FINDINGS**
+· `NEW_REGRESSIONS` **PASS** — the tree is fit for `K1` to be recorded as
+`Verified`.
+
+#### What it verified from the tree
+
+- **Code (no finding).** Ownership statement by statement: `LIST_OWNED`,
+  `COUNT_OWNED`, `REVOKE_OWNED` and `TOUCH_LAST_USED` all carry `user_id`;
+  `FIND_KEY_IDENTITY` is the one unscoped read, justified as the pre-credential
+  digest lookup whose result never reaches a response. The secret exists only
+  in `GeneratedKey` and `ApiKeyCreatedResponse`; `ApiKey` has no `key_hash`
+  field; zero `unwrap`/`expect` outside `#[cfg(test)]` in `src/api_keys/`; no
+  `#[allow]`; no string-built SQL. The `atom_` branch refuses a malformed key
+  before hashing and before SQL; the `401` / `403 account_disabled` / `404`
+  split is exactly `A-C-K1-1`.
+- **Figures re-derived, not quoted.** `CONTRACT_OPERATIONS = 54` in both test
+  files, with a decomposition that sums 52 versioned + 2 probes; `ROUTE_TABLE`
+  counted by hand at 52; 11 `#[tokio::test]` cases in `tests/api_keys_api.rs`
+  with zero `#[ignore]`; unit tests 5+3+4+1 = 13; the full-suite arithmetic
+  re-derived per file to **536 on Windows / 538 on unix**; 69 = `atom_` + 32
+  bytes × 2 hex; `migrations/` ends at `0007`. No stale current-surface figure
+  survives: every remaining "51" is explicit history, the
+  `job_applications_api` suite's own 51 cases, or a dated record.
+- **Regressions (none).** The repair commit's only test addition is the
+  repository-level usage-throttle case (+131 lines, `#[ignore]` count 0); the
+  contract assertions and both sweep pins are intact.
+
+#### Findings (all corrected in the same change that records this verdict)
+
+| # | Severity | Finding | Disposition |
+| - | -------- | ------- | ----------- |
+| 1 | Medium | `docs/README.md`, `docs/features/README.md` and `docs/api/README.md` claimed no independent review and no quality-gate verdict are recorded, contradicting `-027-001` in the same tree | Rewritten in the promotion change: the gate is PASS, the review FAILs are repaired, the final read is this one |
+| 2 | Low | `runs/chain/ledger.md` rows 8 and 12 carry review-time "10"/"ten" counts beside post-repair figures without a marker | One dated clause each, marking them as counts at review time |
+| 3 | Low | The `-027-001` change-log entry had been corrected in place ("ten" → "eleven" cases) against the log's own append-only rule | A dated **Correction** block appended to that entry, covering both the in-place edit and this promotion |
+
+#### Gate evidence for the promotion
+
+`scripts/gate.ps1` re-run by the orchestrator on the same tree immediately after
+this read: **all six gates at `0`** (fmt, clippy, test, nodefault, docs,
+strict).
+
+#### Limitations
+
+The reviewer's shell was denied, so the read is by file inspection — the same
+posture as the three earlier reads; the executing evidence is the gate run
+above. The live n8n integration recorded in the `K1` checkpoint remains an
+external claim that is not reproducible from this repository.
 
 ---
 

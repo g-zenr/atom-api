@@ -68,7 +68,7 @@ Source: `src/auth/handlers.rs`, `src/auth/service.rs`, `src/auth/token.rs`,
 
 Source: `src/api_keys/handlers.rs`, `src/api_keys/service.rs`,
 `src/api_keys/repository.rs`, `src/api_keys/models.rs`, `src/api_keys/dto.rs`,
-`src/api_keys/secret.rs`. Built by the `K1` chain (`Implemented`).
+`src/api_keys/secret.rs`. Built by the `K1` chain (`Verified`).
 
 *The heading is unnumbered on purpose:* §7 and §8 are cited by number — from
 [`../decisions/ADR-0006-configuration-source-of-truth.md`](../decisions/ADR-0006-configuration-source-of-truth.md)

@@ -1,15 +1,17 @@
-**Status:** Implemented
+**Status:** Verified
 
 # API keys — status
 
-> **Last updated:** 2026-10-27
+> **Last updated:** 2026-10-29
 > **Owner:** maintained by the `docs` agent
 > **Feature:** the machine credential of `K1`; the accepted decision is
 > [`ADR-0011`](../../decisions/ADR-0011-api-keys.md)
-> **Read this first:** the three operations are published, and their cases pass
-> in the measured run of 2026-10-27. The feature is still **`Implemented`**,
-> because an independent review of the diff and a quality-gate verdict are what
-> `Verified` requires, and neither is recorded. §3 is that sentence in full.
+> **Read this first:** the three operations are published, their cases pass in
+> the measured run of 2026-10-27, the `quality-gate` verdict is **PASS**
+> (`ATOM-REVIEW-20261027-001`), and the final independent read of the repaired
+> tree is recorded as [`ATOM-REVIEW-20261029-001`](../../engineering/review-log.md)
+> — **PASS** on code, contract and regressions. The feature is **`Verified`**.
+> §3 is that record in full.
 
 This is a **card**, not a five-document feature set: the capability is one
 credential and three operations, and its design is recorded once in
@@ -58,22 +60,30 @@ the reason limitation 1 in §4 is real.
 A green suite is not a review. Nothing in this section is a reviewer's opinion
 of the code.
 
-## 3. What `Verified` would need
+## 3. What made it `Verified`
 
-Both records now exist, and they disagree, which is why the status is still
-`Implemented`:
+All three records exist:
 
 1. **The quality-gate verdict** is **PASS** and is recorded in
    [`../../engineering/review-log.md`](../../engineering/review-log.md) as
    `ATOM-REVIEW-20261027-001`: six gates at `0`, 536 tests, 54 operations
    asserted in both directions.
-2. **The independent review** of the diff is **FAIL on documentation**, three
+2. **The independent review** of the diff was **FAIL on documentation**, three
    reads, with no ownership, SQL, secret-handling or contract defect found in
-   the code. Every finding is repaired, and no read of the final tree exists.
+   the code. Every finding was repaired at `65898e5`.
+3. **The final read of the repaired tree** is
+   [`ATOM-REVIEW-20261029-001`](../../engineering/review-log.md):
+   `CODE_REVIEW` **PASS**, `PRODUCT_CONTRACT` **PASS WITH FINDINGS** (three
+   index rows still claimed no verdict was recorded; corrected in the same
+   change that performs this promotion), `NEW_REGRESSIONS` **PASS**. It
+   re-derived the figures from the tree rather than quoting them —
+   `CONTRACT_OPERATIONS = 54` with a decomposition that sums, 11 integration
+   cases, 13 unit tests, 536 on Windows / 538 on unix, the 69-character
+   credential, and the ownership scoping statement by statement.
 
-Until that last read is written down, the status is `Implemented` as
-[`AGENTS.md`](../../../AGENTS.md) §6 defines it, and no document may say
-otherwise.
+The status is `Verified` as [`AGENTS.md`](../../../AGENTS.md) §6 defines it:
+implemented, and covered by a test or a recorded check that passes. The
+limitations in §4 are unchanged and remain accepted.
 
 ## 4. Limitations
 

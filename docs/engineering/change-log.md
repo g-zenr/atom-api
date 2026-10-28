@@ -134,6 +134,16 @@ request-lifecycle,module-boundaries,system-overview,data-architecture}.md`,
 `docs/testing/strategy.md`, `docs/features/api-keys/status.md` (new),
 `docs/features/README.md`, `docs/roadmap.md` and the root `README.md`.
 
+**Correction (2026-10-29).** The status line and case counts of this entry were
+edited in place during the repairs of 2026-10-27 ("ten integration cases" became
+"eleven"), which deviated from this log's append-only rule; the deviation is
+recorded here rather than hidden. The gap the entry records — no read of the
+final tree — is closed by
+[`ATOM-REVIEW-20261029-001`](review-log.md): `CODE_REVIEW` PASS,
+`PRODUCT_CONTRACT` PASS WITH FINDINGS (three index rows corrected in the same
+change), `NEW_REGRESSIONS` PASS, with all six gates at `0` on the same tree.
+**The feature is `Verified` as of that review.**
+
 ### ATOM-CHANGE-20261026-001 - The re-gate of `-011`, and the false record it found
 
 **Date:** 2026-10-26 (UTC)

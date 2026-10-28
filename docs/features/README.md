@@ -27,7 +27,7 @@ requirement of [`project-truth.md`](../project-truth.md).
 | Reimbursements | `ATOM-FEAT-REIMB-001` | Implemented | [specification](reimbursements/specification.md) · [architecture](reimbursements/architecture.md) · [api](reimbursements/api.md) · [testing](reimbursements/testing.md) · [status](reimbursements/status.md) |
 | Job application tracking | `ATOM-FEAT-JOB-001` | Implemented | [specification](job-applications/specification.md) · [architecture](job-applications/architecture.md) · [api](job-applications/api.md) · [testing](job-applications/testing.md) · [status](job-applications/status.md) |
 | Local machine learning | `ATOM-FEAT-ML-001` | Implemented | [specification](ml/specification.md) · [architecture](ml/architecture.md) · [api](ml/api.md) · [testing](ml/testing.md) · [status](ml/status.md) |
-| API keys (machine credential) | — (see the note below) | Implemented | [status](api-keys/status.md) |
+| API keys (machine credential) | — (see the note below) | Verified | [status](api-keys/status.md) |
 
 The three Phase 2 features were accepted in
 [`project-truth.md`](../project-truth.md) §18 with acceptance criteria.
@@ -52,12 +52,13 @@ documentation.
 `ATOM-FEAT-` identifier, because no requirement in
 [`project-truth.md`](../project-truth.md) defines it: the accepted authority is
 [`ADR-0011`](../decisions/ADR-0011-api-keys.md), and its card is the single
-[`api-keys/status.md`](api-keys/status.md). It is `Implemented`:
+[`api-keys/status.md`](api-keys/status.md). It is `Verified`:
 `migrations/0007_api_keys.sql`, `src/api_keys/` and the three published
 operations exist, with 11 cases in `tests/api_keys_api.rs` and 13 unit tests
 passing in the measured run of 2026-10-27 (536 passed, 0 failed, with the six
-gates green). It is not `Verified`: no independent review of the diff and no
-quality-gate verdict is recorded. Its limitations — no scope, no expiry, an
+gates green). The quality-gate verdict is PASS (`ATOM-REVIEW-20261027-001`) and
+the final independent read of the repaired tree is PASS
+(`ATOM-REVIEW-20261029-001`). Its limitations — no scope, no expiry, an
 hourly `last_used_at` and a key that can mint another key — are recorded as
 `KI-024` in [`known-issues.md`](../engineering/known-issues.md).
 

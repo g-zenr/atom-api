@@ -48,9 +48,10 @@ token or an API key. The three are mounted in `api_routes()` and published in
 the document (`src/api_keys/handlers.rs`). **A run of `tests/api_keys_api.rs` is
 recorded**: its 11 cases pass in the measured run of 2026-10-27 (536 passed,
 0 failed, with the six gates green), and the three routes are asserted by
-`tests/contract_sweep.rs` and `tests/openapi_contract.rs`. That is evidence
-about the cases; the feature is still `Implemented` and not `Verified`, because
-no independent review of the diff and no quality-gate verdict is recorded yet.
+`tests/contract_sweep.rs` and `tests/openapi_contract.rs`. The quality-gate
+verdict is PASS (`ATOM-REVIEW-20261027-001`) and the final independent read of
+the repaired tree is PASS (`ATOM-REVIEW-20261029-001`), so the feature is
+`Verified`.
 
 **The three machine-learning operations are published.** They answer, and they
 degrade as their contract says: a scored search returns lexical results with
