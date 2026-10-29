@@ -186,9 +186,9 @@ Source: `src/tasks/handlers.rs`, `src/tasks/service.rs`,
 > `tests/job_applications_api.rs` and `tests/job_applications_flow.rs` prove the
 > constraints and the behaviour. `migrations/0006_embeddings.sql` creates
 > `embeddings`; `src/ml/` serves the three published operations, and `tests/ml_api.rs`
-> proves them. `ml` is `Implemented`, not `Verified`: `ML-R02` **is met**, because
+> proves them. `ml` is `Verified` (2026-10-29, `ATOM-REVIEW-20261029-002`): `ML-R02` **is met**, because
 > `embedder::select` returns a `BurnEmbedder` when both artifacts load; the
-> feature waits on a review of the encoder span and the re-gate, not on code.
+> encoder span was read clean and the six gates re-ran at `0`.
 
 **What "every module" means from here.** §1–§7 describe every module that
 **exists**. From this section on, the phrase means "every Phase 2 module",

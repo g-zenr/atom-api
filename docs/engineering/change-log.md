@@ -47,6 +47,58 @@ Entries from before 2026-10-27 are in
 moved verbatim by `ATOM-CHANGE-20261029-001` to keep this file small enough
 to read whole. They remain part of the record and are never rewritten.
 
+### ATOM-CHANGE-20261029-002 - Phase 2 closes: reimbursements, job applications and local ML are `Verified`
+
+**Date:** 2026-10-29 (UTC)
+**Type:** Verification - Phase 2 close-out
+**Author:** the orchestrator; the promotion evidence is two independent
+read-only sessions recorded as
+[`ATOM-REVIEW-20261029-002`](review-log.md).
+**Status:** Complete - the gate was re-run on the promoted tree: **all six at
+`0`** (fmt, clippy, test, nodefault, docs, strict), 536 passed / 0 failed.
+
+#### Why
+
+The roadmap's own completion condition for Phase 2 was unmet on one point only:
+the three features were `Implemented` with no recorded read of the repaired
+final tree and no quality-gate verdict on it (`ATOM-REVIEW-20261026-002` had
+judged the tree before its documentation repairs). Everything else the
+condition names was already true: the hardening sweeps were closed by the `D5`
+chains, the schema document matched the migrations, the seeder covered every
+Phase 2 table, and CI proved it. This change supplies the missing evidence and
+performs the promotion.
+
+#### What changed
+
+| Area | Change |
+| ---- | ------ |
+| Feature cards | `reimbursements/status.md`, `job-applications/status.md` and `ml/status.md` flip to **`Verified`**, each with a promotion-evidence section; the per-requirement tables flip state-by-state; every recorded gap (reimbursements' five unasserted requirement halves, the job-application uncovered halves, the single-run ML benchmark) stays written where it was |
+| Overview | `implementation-status.md` rows become single-source pointers dated 2026-10-29; the run paragraph records that the 536-test split has now been re-derived by the second process |
+| Indexes | `docs/README.md`, `features/README.md`, `api/README.md` rows point at the cards; `testing/strategy.md` verdict paragraphs record the promotion with the gaps kept visible |
+| Roadmap | `docs/roadmap.md` marks Phase 2 **complete (2026-10-29)** with the evidence named |
+| Corrections | Three stale figures the review found (the claims-api count 55 → 56 with history, the reimbursements unit-test count 10 → 12, the `docs/README.md` re-gate claim) repaired in this same change |
+| Review log | `ATOM-REVIEW-20261029-002` records both sessions: the reader's three verdicts and the gate's six zero exit codes plus the target-for-target split re-derivation |
+
+#### What was measured
+
+Two independent sessions on tree `ab5aa00`: the code-reviewer read the three
+spans statement-by-statement (no defect; the full list is in the review entry),
+and the quality-gate executed `scripts/gate.ps1` itself (six gates `0`) and
+re-derived the 536-test split. The final six-gate run for this entry was
+re-executed after the promotion edits.
+
+#### What did not change
+
+No source file, no migration, no contract, no test. The one advisory code
+wording from the review (the match-limit message reusing the too-long template)
+is recorded in the review entry as accepted, not fixed here.
+
+#### Documentation
+
+This entry, the three feature cards, the three index documents,
+`implementation-status.md`, `strategy.md`, `roadmap.md` and the review-log
+entry.
+
 ### ATOM-CHANGE-20261029-001 - The knowledge base moves its history to an archive
 
 **Date:** 2026-10-29 (UTC)

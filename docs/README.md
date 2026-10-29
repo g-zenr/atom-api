@@ -115,9 +115,9 @@ A feature is never `Verified` because its code exists or compiles.
 | [`features/notes/`](features/notes/) | Personal notes, archiving, search, pagination. |
 | [`features/projects/`](features/projects/) | Projects, their lifecycle, and what happens to their tasks. |
 | [`features/tasks/`](features/tasks/) | Tasks, status, priority, ordering, filtering. |
-| [`features/reimbursements/`](features/reimbursements/) | Expense claims, line items, money and the claim lifecycle. `Implemented`: all twelve published operations, the schema and the tests exist; `Verified` waits on the chain reviews. |
-| [`features/job-applications/`](features/job-applications/) | Companies, applications, stages and events. `Implemented`: migration `0005`, the six-module `src/job_applications/` and the fourteen operations exist; `Verified` waits on a re-review and a clean re-gate after the review's fixes. |
-| [`features/ml/`](features/ml/) | Local embeddings, hybrid search and match ranking. `Implemented`: the three operations, the schema, the suite and the Burn encoder exist; the suite is measured green at `4df383e`, and `ML-R02` is met. Nothing is `Verified`: no reviewer has read the encoder span and no re-gate of `ATOM-REVIEW-20261024-011` is recorded. |
+| [`features/reimbursements/`](features/reimbursements/) | Expense claims, line items, money and the claim lifecycle. `Verified` (2026-10-29): [status](features/reimbursements/status.md) is the single source. |
+| [`features/job-applications/`](features/job-applications/) | Companies, applications, stages and events. `Verified` (2026-10-29): [status](features/job-applications/status.md) is the single source. |
+| [`features/ml/`](features/ml/) | Local embeddings, hybrid search and match ranking. `Verified` (2026-10-29): [status](features/ml/status.md) is the single source; the single-run manual benchmark is its recorded limitation. |
 | [`features/api-keys/`](features/api-keys/status.md) | The machine credential a workflow can hold: `atom_` + 32 CSPRNG bytes, stored as a SHA-256 digest, revocable, owner-scoped. `Verified`: migration `0007`, the three operations, 11 integration cases and 13 unit tests pass in the 2026-10-27 run (536 tests, six gates green); the gate verdict is PASS (`ATOM-REVIEW-20261027-001`) and the final read of the repaired tree is PASS (`ATOM-REVIEW-20261029-001`). Its authority is `ADR-0011`, because no `project-truth.md` requirement defines the capability. |
 
 Each feature directory contains the same five documents:

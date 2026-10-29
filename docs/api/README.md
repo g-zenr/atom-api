@@ -58,10 +58,9 @@ degrade as their contract says: a scored search returns lexical results with
 `200` when `ml.enabled` is `false` (the default), a match and a reindex return
 `409`. The suite ran green: 41 cases in `tests/ml_api.rs` pass in the measured
 run of 2026-10-27 (536 passed, 0 failed, with the six gates green). The feature
-is `Implemented` and not `Verified`, because no reviewer has read the encoder span
-and the re-gate of `ATOM-REVIEW-20261024-011` returned FAIL on documentation. The missing half is the
-review, not `ML-R02`: `embedder::select` returns a `BurnEmbedder` when both
-artifacts load. See [`../features/ml/status.md`](../features/ml/status.md)
+is `Verified` (2026-10-29, `ATOM-REVIEW-20261029-002`): the encoder span was
+read clean and the six gates re-ran at `0`. The single-run manual benchmark is
+the recorded limitation — see [`../features/ml/status.md`](../features/ml/status.md)
 §1.3 and [`../features/ml/testing.md`](../features/ml/testing.md).
 
 ## 1. Where the OpenAPI document lives

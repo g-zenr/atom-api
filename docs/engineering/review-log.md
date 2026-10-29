@@ -22,7 +22,18 @@ recorded.
 
 ## The entries so far
 
-Fifteen reviews have been performed:
+Sixteen reviews have been performed:
+
+- `ATOM-REVIEW-20261029-002`, the **Phase 2 close-out** on the final tree at
+  `ab5aa00`. The independent read returned `CODE_REVIEW` **PASS** (no defect in
+  the reimbursements, job-application or ML spans, statement by statement),
+  `NEW_REGRESSIONS` **PASS** (nothing deleted, renamed, ignored or weakened
+  since `4df383e`), and `PRODUCT_CONTRACT` **PASS WITH FINDINGS** (three stale
+  figures, repaired in the promotion change). The `quality-gate` session
+  executed `scripts/gate.ps1` itself — six gates at `0` — and re-derived the
+  536-test split target-for-target. **Reimbursements, job applications and
+  local ML are `Verified` as of this review**, and Phase 2 is complete per its
+  own definition.
 
 - `ATOM-REVIEW-20261029-001`, the **final read of the repaired `K1` tree** at
   `65898e5`. `CODE_REVIEW` **PASS**, `PRODUCT_CONTRACT` **PASS WITH FINDINGS**
@@ -196,6 +207,96 @@ happened.** The first real entry is below.
   answer.
 - [`../testing/verification-policy.md`](../testing/verification-policy.md) —
   the rules this log implements.
+
+---
+
+### ATOM-REVIEW-20261029-002 - The Phase 2 close-out: three features verified
+
+**Date:** 2026-10-29 (UTC)
+**Reviewers:** two independent read-only sessions on the same tree — the
+`code-reviewer` (final-tree reading) and the `quality-gate` (execution)
+**Change reviewed:** the final tree at `ab5aa00` — the three Phase 2 feature
+spans (`src/reimbursements/`, `src/job_applications/`, `src/ml/`), the seeder,
+and every hot document that carries their claims
+**Verdict:** `CODE_REVIEW` **PASS** · `PRODUCT_CONTRACT` **PASS WITH FINDINGS**
+(repaired in the promotion change) · `NEW_REGRESSIONS` **PASS** · gate
+**PASS** — all three Phase 2 features are fit for `Verified`, and Phase 2 is
+complete per its own definition.
+
+#### What the code review verified (no defect found)
+
+- **Reimbursements.** All nineteen statements carry `user_id` in their own
+  predicate; the project link is enforced inside the write statements via
+  `EXISTS`, so a foreign project is `404` with no check-then-act window; item
+  writes are lock → write → recompute in one transaction with the
+  `NUMERIC(19,4)` range guard in the same statement; money is `::text` end to
+  end and `validate_money` refuses rather than rounds; the `double_option`
+  tri-state is the correct serde pair; the lifecycle is four guarded `UPDATE`s
+  with `clock_timestamp()`, the reopen clearing both stamps in one statement;
+  the detail read pairs claim and items under one `REPEATABLE READ, READ ONLY`
+  snapshot.
+- **Job applications.** `ALLOWED_MOVES` is the single definition of the
+  12-edge table and `permitted_sources` is derived from it, so the `409` a
+  client sees and the `status = ANY($n)` predicate cannot disagree; the
+  exhaustive 49-pair unit test pins 12/7/30; create is pinned to `wishlist`;
+  the duplicate company name is detected by the named constraint, not a bare
+  `23505`; the company delete is one atomic `DELETE … AND NOT EXISTS`; the
+  application delete purges its embeddings in one data-modifying CTE.
+- **Local ML.** `select` implements the degradation decision table exactly —
+  never a silent fallback; every `embed` funnels through one `normalise` that
+  refuses zero/non-finite/wrong-length vectors; inference is CPU-only via
+  `spawn_blocking`, bounded by `ml.timeout_seconds`; the score floor filters
+  before limit and total in all three scored paths; `reqwest`/`ureq`/`hyper`
+  are absent from `Cargo.toml` — no network dependency anywhere.
+- **Cross-cutting.** Zero `#[allow]` in `src/`; every `unwrap`/`expect`
+  inside `#[cfg(test)]` (the six non-obvious candidates read individually) with
+  the one SD-5-documented exception in `src/config/settings.rs`; the sole
+  `format!`-built SQL is the seeder's own test over the static `USER_TABLES`
+  array; `AppError` never renders an internal string to a client.
+
+#### What the gate measured itself
+
+| Command | Result |
+| ------- | ------ |
+| `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\gate.ps1` | **exit 0** — `fmt 0, clippy 0, test 0, nodefault 0, docs 0, strict 0` |
+| `cargo test --all-targets --locked -- --list` | **536 tests**, matching the documented split target-for-target (229 lib, 13 `atom-seed`, 11 `api_keys_api`, 29 auth, 56 claims, 3 claims flow, 10 claims schema, 2 contract sweep, 2 docs route, 51 jobs, 2 jobs flow, 11 jobs schema, 4 list query, 41 ml, 12 notes, 11 openapi contract, 25 projects/tasks, 21 seeder, 0 shutdown) |
+
+This re-derivation closes the note in `implementation-status.md` that the
+536-test split had not been re-derived by a second process. The static evidence
+confirmed: `CONTRACT_OPERATIONS = 54` in both test files, `ROUTE_TABLE` 52 + 2,
+migrations `0001`–`0007`, the CI seeder job's `--reset`/idempotency/count/
+`APP_ENV=prod` refusals, no `#[ignore]` in `tests/`, no secrets in tracked
+content.
+
+#### The three contract findings (all repaired in the promotion change)
+
+| # | Severity | Finding | Disposition |
+| - | -------- | ------- | ----------- |
+| 1 | Non-blocking | `docs/README.md` claimed no re-gate of `ATOM-REVIEW-20261024-011` is recorded, contradicting `-20261026-002` | Rewritten in the promotion change |
+| 2 | Non-blocking | `features/reimbursements/testing.md` pinned 55 endpoint cases; the tree holds 56 (the no-fields-PATCH case) | Corrected to 56 with the history named |
+| 3 | Non-blocking | Two documents counted ten unit tests in `src/reimbursements/`; the module holds twelve (ten `service.rs`, two `dto.rs`) | Corrected in both |
+
+#### The ML quality limitation, judged
+
+The single recorded manual run (`ATOM-CHANGE-20261025-003`: 15-of-15 retrieval,
+88–112 ms mean, 804 ms worst case, 183.8 MiB RSS; weights operator-supplied and
+absent, so not re-measurable on this machine) **is compatible with `Verified`**:
+`AGENTS.md` §6 requires "a test or a recorded check that passes", the automated
+suites pass on this tree, the pair-count caveat is already marked unverified in
+the feature card rather than claimed as settled, and the encoder span — the
+stated reason the feature was held at `Implemented` — has now been read clean
+twice. The limitation stands recorded in the card's §1.3 with its upgrade path
+(publishing the artifacts or a checksum for a reproducible `atom-ml-bench` run).
+
+#### Limitations of this review
+
+The reading session's shell was denied (file inspection only); the executing
+evidence is the gate session's own run, recorded above. The unix-only 538 figure
+was not measurable on this Windows host and stands as documentation-consistent.
+The one advisory code wording (`validate_match_limit` reusing the too-long
+message for an out-of-range match limit, `src/ml/service.rs`) was accepted
+as-is: field-named, `422`, catalogue-driven, no contract broken — a candidate
+for a dedicated message in a later change.
 
 ---
 

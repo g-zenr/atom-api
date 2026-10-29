@@ -24,29 +24,21 @@ requirement of [`project-truth.md`](../project-truth.md).
 | Notes | `ATOM-FEAT-NOTE-001` | Verified | [specification](notes/specification.md) · [architecture](notes/architecture.md) · [api](notes/api.md) · [testing](notes/testing.md) · [status](notes/status.md) |
 | Projects | `ATOM-FEAT-PROJ-001` | Verified | [specification](projects/specification.md) · [architecture](projects/architecture.md) · [api](projects/api.md) · [testing](projects/testing.md) · [status](projects/status.md) |
 | Tasks | `ATOM-FEAT-TASK-001` | Verified | [specification](tasks/specification.md) · [architecture](tasks/architecture.md) · [api](tasks/api.md) · [testing](tasks/testing.md) · [status](tasks/status.md) |
-| Reimbursements | `ATOM-FEAT-REIMB-001` | Implemented | [specification](reimbursements/specification.md) · [architecture](reimbursements/architecture.md) · [api](reimbursements/api.md) · [testing](reimbursements/testing.md) · [status](reimbursements/status.md) |
-| Job application tracking | `ATOM-FEAT-JOB-001` | Implemented | [specification](job-applications/specification.md) · [architecture](job-applications/architecture.md) · [api](job-applications/api.md) · [testing](job-applications/testing.md) · [status](job-applications/status.md) |
-| Local machine learning | `ATOM-FEAT-ML-001` | Implemented | [specification](ml/specification.md) · [architecture](ml/architecture.md) · [api](ml/api.md) · [testing](ml/testing.md) · [status](ml/status.md) |
+| Reimbursements | `ATOM-FEAT-REIMB-001` | Verified | [specification](reimbursements/specification.md) · [architecture](reimbursements/architecture.md) · [api](reimbursements/api.md) · [testing](reimbursements/testing.md) · [status](reimbursements/status.md) |
+| Job application tracking | `ATOM-FEAT-JOB-001` | Verified | [specification](job-applications/specification.md) · [architecture](job-applications/architecture.md) · [api](job-applications/api.md) · [testing](job-applications/testing.md) · [status](job-applications/status.md) |
+| Local machine learning | `ATOM-FEAT-ML-001` | Verified | [specification](ml/specification.md) · [architecture](ml/architecture.md) · [api](ml/api.md) · [testing](ml/testing.md) · [status](ml/status.md) |
 | API keys (machine credential) | — (see the note below) | Verified | [status](api-keys/status.md) |
 
 The three Phase 2 features were accepted in
-[`project-truth.md`](../project-truth.md) §18 with acceptance criteria.
-Reimbursements is `Implemented`: `migrations/0004_expense_claims.sql`,
-`src/reimbursements/` and all twelve published endpoints, with
-`tests/claims_schema.rs`, `tests/claims_api.rs`, `tests/claims_flow.rs` and
-`tests/openapi_contract.rs` written against them. Job applications is also
-`Implemented`: `migrations/0005_job_applications.sql`, `src/job_applications/`
-and all fourteen published operations, with `tests/jobs_schema.rs`,
-`tests/job_applications_api.rs` and `tests/job_applications_flow.rs`. Neither is
-`Verified`: no reviewer has read the reimbursement chain, and the
-job-application review (`ATOM-REVIEW-20261024-010`) found no code defect but
-returned FAIL on documentation only; a passing suite
-is not a review. Local machine learning is `Implemented`: the three operations,
-migration `0006`, the seven `ml.*` settings and 41 cases in `tests/ml_api.rs`
-exist, and the suite is measured green at `4df383e` (511 passed, 0 failed);
-`ML-R02` is met, and nothing is `Verified` because no reviewer has read the
-encoder span and the re-gate of `ATOM-REVIEW-20261024-011` returned FAIL on
-documentation.
+[`project-truth.md`](../project-truth.md) §18 with acceptance criteria, and all
+three are `Verified` as of 2026-10-29 by
+[`ATOM-REVIEW-20261029-002`](../engineering/review-log.md): the independent
+read of the final tree returned PASS on code, contract and regressions, and the
+quality-gate session re-executed the six gates at `0` with the 536-test split
+re-derived target-for-target. Each feature card is the single source of its
+evidence; the recorded limitations ride with the cards (reimbursements' five
+unasserted requirement halves, the job-application uncovered halves, and the
+single-run manual ML benchmark).
 
 **API keys are different in kind.** The machine credential has no
 `ATOM-FEAT-` identifier, because no requirement in

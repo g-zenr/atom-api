@@ -10,19 +10,21 @@ not. Four layers are covered:
 
 - the **schema layer**, by `tests/claims_schema.rs` (§1) and two cases in
   `tests/seeder.rs` (§1.1);
-- the **endpoint layer**, by `tests/claims_api.rs` — **55 cases at `93fb2f0`**,
-  of which 34 are the claim operations and **21 are the item and lifecycle
-  operations** (§2) — and the contract cases in `tests/openapi_contract.rs`
+- the **endpoint layer**, by `tests/claims_api.rs` - **56 cases** (55 at
+  `93fb2f0`; the no-fields-PATCH case came later and is §2's last claim
+  entry), of which 35 are the claim operations and **21 are the item and
+  lifecycle operations** (§2) - and the contract cases in `tests/openapi_contract.rs`
   (§2.8);
 - the **flow layer**, by `tests/claims_flow.rs` — **three cases, committed at
   `02c5489`**: the journey from registration to payment, the ownership sweep and
   the seeded read (§2.10);
-- **ten unit tests** inside `src/reimbursements/`, plus three money tests in
+- **twelve unit tests** inside `src/reimbursements/` (ten in `service.rs`, two
+  in `dto.rs`), plus three money tests in
   `src/helpers/validation.rs` (§4).
 
 Every endpoint of the feature is callable and every case named here is on disk,
 so no part of §2 is a plan. The cross-cutting cases are **not** in
-`tests/claims_api.rs`: they live in `tests/claims_flow.rs`, so the 55 above
+`tests/claims_api.rs`: they live in `tests/claims_flow.rs`, so the 56 above
 counts that file only and does not change.
 
 This document describes the suite. The **result** of a run is not recorded here.

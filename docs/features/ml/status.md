@@ -1,29 +1,38 @@
-**Status:** Implemented
+**Status:** Verified
 
 # Local machine learning — status
 
-> **Last updated:** 2026-10-26 (re-gate of `ATOM-REVIEW-20261024-011`; measurements at `4df383e`)
+> **Last updated:** 2026-10-29 (promotion; measurements at `4df383e` and the gate runs of 2026-10-27/29)
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-ML-001`](specification.md)
 > **Read this first:** `ML-R02` **is met**. `embedder::select` returns a
 > `BurnEmbedder` when `ml.enabled` is true, `ml.backend` is `flex`, and both the
-> SafeTensors file and the vocabulary load. The feature is `Implemented` and not
-> `Verified` because no independent reviewer has read the encoder span, and the
-> re-gate of `ATOM-REVIEW-20261024-011` is recorded separately in the engineering
-> record ([`../../engineering/review-log.md`](../../engineering/review-log.md)).
-> Read §1, §2.1 and §5 together: they now say the same thing.
+> SafeTensors file and the vocabulary load. The feature is **`Verified`** as of
+> 2026-10-29: the encoder span was read clean by
+> [`ATOM-REVIEW-20261029-002`](../../engineering/review-log.md) (building on
+> `ATOM-REVIEW-20261026-001`, which found no code defect in the same span), the
+> six gates re-ran at `0`, and the recorded checks pass. The real-model quality
+> evidence is the recorded manual benchmark of §5 — a recorded check that
+> passes, not a CI gate; that limitation stands as recorded in §1.3.
+> Read §1, §2.1 and §5 together: they say the same thing.
 
 ## 1. The status
 
-The feature is **`Implemented`**. It is **not `Verified`**, and `ML-R02` **is
-met**.
+The feature is **`Verified`** (2026-10-29), and `ML-R02` **is met**.
 
-`Implemented` is used exactly as [`AGENTS.md`](../../../AGENTS.md) §6 defines it:
-the code exists and compiles. `Verified` is not claimed on the strength of the
-suite alone: as every Phase 2 status document records, a feature is promoted only
-after a review has read the implementation. The recorded check exists (§1.5); the
-review of the encoder span does not (§1.3). A green suite is not a review, and
-this document does not claim one.
+The promotion evidence, recorded in
+[`ATOM-REVIEW-20261029-002`](../../engineering/review-log.md): an independent
+read of the final tree returned **PASS** on code across `src/ml/` (the
+degradation decision table exact, every embed normalised, inference CPU-only
+behind `spawn_blocking` and bounded by `timeout_seconds`, the score floor
+applied before limit and total, no network dependency anywhere), **PASS** on
+regressions since `4df383e`, and the quality-gate session re-executed the six
+gates at `0` with the 536-test split re-derived target-for-target (41 `ml_api`
+cases, 64 unit cases, seven configuration cases). `Verified` is the
+[`AGENTS.md`](../../../AGENTS.md) §6 word: implemented, and covered by a test
+or a recorded check that passes. The one recorded check that is not a CI gate —
+the real-model benchmark — is §5, and its limitation is stated in §1.3 rather
+than hidden.
 
 The requirements `ML-R01`…`R09` are agreed in
 [`project-truth.md`](../../project-truth.md) §18.3, with acceptance criteria. The
@@ -96,24 +105,26 @@ supplies no artifact gets the same lexical fallback with `degraded_reason`
 **Every one of the default answers has been observed**, on 2026-10-24, against
 `atom_dev` with `ml.enabled = false`; the transcript is in §1.6.
 
-### 1.3 Why this is not `Verified`
+### 1.3 The one limitation that `Verified` carries
 
-`Verified` is not claimed, and the one reason is the review — not the code, not
-the suite and not the model:
+The promotion does not rest on a model-loading CI test, because none exists,
+and this document records that rather than papering over it:
 
-1. **No independent reviewer has read the encoder span.**
-   `src/ml/burn_embedder.rs` and `src/ml/tokenizer.rs` implement the network and
-   the tokenizer, and no `code-reviewer` or `quality-gate` row says they were
-   read.
-2. **No re-gate of `ATOM-REVIEW-20261024-011` had been recorded.** The first
-   executable gate run over `D0`–`D5` returned FAIL on documentation. This
-   document is part of the repair; the re-gate itself is recorded in the
-   engineering record, which this document does not pre-empt.
-
-Everything else that stands between `Implemented` and `Verified` is closed: the
-41 `ml_api` cases, the 64 unit cases in `src/ml/`, the seeder case and the full
-suite pass (§1.5); the encoder and tokenizer exist and are measured (§5); and the
-`ml.*` rows are in [`config/README.md`](../../../config/README.md).
+1. **The encoder span has now been read.** `ATOM-REVIEW-20261026-001` read it
+   end to end and found no code defect; `ATOM-REVIEW-20261029-002` re-read the
+   final tree with the same result. That was the one review gap.
+2. **The re-gate is recorded** (`ATOM-REVIEW-20261026-002`), and the six gates
+   were re-executed at `0` on 2026-10-29 with the 536-test split re-derived.
+3. **What remains a limitation:** the real-model quality evidence is the
+   single recorded manual run of §5 (`ATOM-CHANGE-20261025-003`, 15-of-15
+   retrieval, 88–112 ms mean, 804 ms worst case, 183.8 MiB RSS). The weights
+   are operator-supplied and absent from the repository, so no session on this
+   machine can re-measure them, and no CI case loads a model file. The
+   unsettled pair count is marked unverified in §4/§5. `AGENTS.md` §6 accepts a
+   "recorded check that passes" as `Verified` evidence; this is one — but it is
+   a single run, and publishing the artifacts (or a checksum) with a
+   reproducible `atom-ml-bench` invocation is the upgrade path if the owner
+   wants the numbers to be reproducible rather than recorded.
 
 ### 1.4 What `ML-R02` requires, and what exists
 
@@ -235,19 +246,23 @@ artifacts load.**
    `model_missing`, logs the internal cause once and continues start-up.
 
 The spike's lookup and projection were a lower bound on the plumbing, not an
-embedding; §5 is the measurement of the real network. What is *not* established
-is a review of the encoder span — §1.3 says why that keeps the feature at
-`Implemented`.
+embedding; §5 is the measurement of the real network. The encoder span has been
+read clean twice (`ATOM-REVIEW-20261026-001`, then the final tree in
+`ATOM-REVIEW-20261029-002`); §1.3 records the one limitation that `Verified`
+carries — the single-run manual benchmark.
 
-## 3. What is missing for `Verified`
+## 3. What `Verified` rests on
 
-One thing: **the review.**
+It rests on the review and the gate, both now recorded:
 
-1. **An independent reviewer must read the encoder span** — the forward pass,
-   the attention shape, the pooling, the normalisation and the tokenizer — and
-   the re-gate of `ATOM-REVIEW-20261024-011` must close the documentation
-   findings. This document is part of that repair; the review outcome belongs in
-   [`../../engineering/review-log.md`](../../engineering/review-log.md).
+1. **The encoder span was read by an independent reviewer** — the forward pass,
+   the attention shape, the pooling, the normalisation and the tokenizer —
+   first in [`ATOM-REVIEW-20261026-001`](../../engineering/review-log.md) (no
+   code defect), then on the final tree in
+   [`ATOM-REVIEW-20261029-002`](../../engineering/review-log.md) (PASS on code,
+   contract and regressions). The re-gate of `ATOM-REVIEW-20261024-011` is
+   recorded as `-20261026-002`, and the six gates were re-executed at `0` on
+   2026-10-29.
 
 Nothing in the code or the suite is outstanding. The schema, the seven settings
 in all seven places, the three operations with their published status codes, the
