@@ -1,7 +1,7 @@
 # ATOM change log
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-29
+> **Last updated:** 2026-10-30
 > **Owner:** maintained by the `docs` agent
 
 The chronological record of substantial changes to the ATOM backend, newest
@@ -46,6 +46,62 @@ Entries from before 2026-10-27 are in
 [`archive/change-log-2026-phase-1-2.md`](archive/change-log-2026-phase-1-2.md),
 moved verbatim by `ATOM-CHANGE-20261029-001` to keep this file small enough
 to read whole. They remain part of the record and are never rewritten.
+
+### ATOM-CHANGE-20261030-002 - The WIP seeding race is resolved: the seeded claims read holds the seeder lock
+
+**Date:** 2026-10-30 (UTC)
+**Type:** Test - an isolation fix inside `tests/claims_flow.rs`, performed under
+the owner's explicit next-session instruction ("Resolve the WIP test race …
+without deleting or weakening existing tests").
+**Author:** the orchestrator session of the next-execution task; the fix is
+the one this change set's independent review
+([`ATOM-REVIEW-20261030-001`](review-log.md)) prescribed.
+**Status:** Complete - the affected binary ran **8/8** consecutive green runs
+and the full suite is **563/563**.
+
+#### Why
+
+`ATOM-CHANGE-20261030-001` recorded a test-isolation race: the committed
+opportunistic case (`the_seeded_claims_are_readable_through_the_api`) checked
+that `owner@atom.local` exists and then logged in, while the uncommitted
+minimal-profile case reset the shared database in parallel - a reset that
+commits between the two steps deletes the account under the check, and the
+login's session insert answers the foreign-key violation the API maps to
+`500`. The fix options were recorded then; the owner's next instruction
+authorised applying one.
+
+#### What changed
+
+One lock acquisition and its comment, in `tests/claims_flow.rs`:
+
+- the seeded half of the committed case now calls `seeder_lock()` **before
+  its existence check** and holds the `ATOMSEED` advisory key to the end of
+  the test, so no seeder reset can commit between the check and the login;
+- the `seeder_lock` doc comment names the new party it serialises against.
+
+Nothing else changed: no assertion was weakened, no test deleted or renamed,
+and the uncommitted minimal-profile case is untouched (it already held the
+same key for its whole run, so the two halves now cannot overlap). The
+committed case's assertions are profile-agnostic by design, so whichever
+profile ran last is the one it reads - that behaviour is stated in its own
+comment and is unchanged.
+
+**Correction to `ATOM-CHANGE-20261030-001`:** its "What was measured" records
+the race as standing and the file as unmodified; that was true of that change
+at the time it was written. This entry supersedes it: the owner's
+next-session instruction authorised the fix, the file is modified accordingly,
+and the race is closed.
+
+#### What was measured
+
+- `cargo fmt --all -- --check`: pass (exit 0).
+- `cargo test --locked --test claims_flow`, **eight consecutive runs**: 8 ×
+  exit 0 (4 tests each; the binary failed 2 of 2 full-suite runs before the
+  fix).
+- `cargo test --all-targets --locked --no-fail-fast` against the disposable
+  `TEST_DATABASE_URL`: **563 executed, 563 passed, 0 failed** (245
+  unit-target + 318 integration) - the first recorded full-suite run of this
+  tree with zero failures.
 
 ### ATOM-CHANGE-20261029-002 - Phase 2 closes: reimbursements, job applications and local ML are `Verified`
 

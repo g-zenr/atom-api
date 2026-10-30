@@ -1309,6 +1309,17 @@ async fn the_seeded_claims_are_readable_through_the_api() {
     // -----------------------------------------------------------------
     // The seeded half, only when the seeder has run against this database.
     // -----------------------------------------------------------------
+    // The half holds the cross-process seeder lock from *before* the
+    // existence check to the end of the test. The minimal-profile case below
+    // resets the shared database while it holds the same key, and a reset
+    // that commits between this half's check and its login deletes the
+    // account under it: the login's session insert then answers the
+    // foreign-key violation the API maps to `500`. Serialising the two
+    // halves on the seeder key (`ATOMSEED`) closes that window without
+    // changing what either asserts; the assertions here are
+    // profile-agnostic, so whichever profile ran last is the one read.
+    let _seeder_lock = seeder_lock().await;
+
     if !the_seeder_has_run().await {
         eprintln!(
             "skipping the seeded half of `the_seeded_claims_are_readable_through_the_api`: \
@@ -1412,7 +1423,10 @@ const SEEDER_LOCK_KEY: i64 = 0x4154_4f4d_5345_4544;
 /// The lock lives on a PostgreSQL session of its own, so PostgreSQL releases
 /// it when the connection closes: a crashed test cannot leave it behind. It
 /// serialises this file's seed run against `tests/seeder.rs`'s runs, which
-/// hold the same key.
+/// hold the same key, and against the seeded half of
+/// `the_seeded_claims_are_readable_through_the_api`, which takes it for the
+/// same reason: no seeder run may reset the shared database while that half
+/// is between its existence check and its login.
 async fn seeder_lock() -> PgConnection {
     let mut session = PgConnection::connect(&common::test_database_url())
         .await
