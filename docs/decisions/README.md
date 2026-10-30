@@ -123,6 +123,7 @@ and a unique identifier, and that every relative link in the tree resolves.
 | [ADR-0009](ADR-0009-receipt-references.md) | A receipt is a reference, not an uploaded file | Accepted | 2026-10-24 |
 | [ADR-0010](ADR-0010-semantic-search-scan-bound.md) | Semantic search keeps its corpus-bound scan, accepted up to a named volume | Accepted | 2026-10-25 |
 | [ADR-0011](ADR-0011-api-keys.md) | A machine client authenticates with a per-user, revocable API key | Accepted | 2026-10-27 |
+| [ADR-0012](ADR-0012-automation-orchestration-scope.md) | Automation is orchestrated by an external n8n instance that reaches ATOM only through authenticated endpoints | Proposed (owner decision `O7`) | 2026-10-30 |
 
 ## 5. Related documents
 

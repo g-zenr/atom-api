@@ -109,6 +109,7 @@ A feature is never `Verified` because its code exists or compiles.
 | [`decisions/ADR-0009-receipt-references.md`](decisions/ADR-0009-receipt-references.md) | A receipt is a reference, not an uploaded file, in Phase 2. |
 | [`decisions/ADR-0010-semantic-search-scan-bound.md`](decisions/ADR-0010-semantic-search-scan-bound.md) | Semantic search keeps its corpus-bound sequential scan; the bound and its measured cost are recorded instead of an index service. |
 | [`decisions/ADR-0011-api-keys.md`](decisions/ADR-0011-api-keys.md) | A machine client authenticates with a per-user, revocable API key held at full owner authority, stored as a SHA-256 digest. |
+| [`decisions/ADR-0012-automation-orchestration-scope.md`](decisions/ADR-0012-automation-orchestration-scope.md) | `Proposed`: automation is orchestrated by an external n8n instance that reaches ATOM only through authenticated endpoints; includes the first-use-case (price monitoring) schema sketch. |
 
 ### Features
 

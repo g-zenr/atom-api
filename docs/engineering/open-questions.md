@@ -1,7 +1,7 @@
 # ATOM open questions
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-30
 > **Owner:** maintained by the `docs` agent
 
 Product and architecture decisions that have not been taken yet. Each question
@@ -435,6 +435,106 @@ which would forbid the encoder's own unit tests and leave its arithmetic unteste
 
 ---
 
+### Q-15 - Should password hashing carry a server-side pepper?
+
+**State:** Open · **Blocks:** nothing; the current verified behaviour stands until decided
+
+**Context.** `src/auth/password.rs` hashes with Argon2id (19 MiB, t=2, p=1),
+a per-hash CSPRNG salt, and no pepper: a database disclosure allows offline
+guessing bounded only by the cost parameters and the 12-character policy
+(audit finding P-1, `docs/audit/codebase-audit-2026-10-30.md` §F).
+
+**Options.**
+
+| Option | Impact |
+| ------ | ------ |
+| Keep the current design (salt + cost, no pepper). | No change, no key management. The offline-cracking bound stays the Argon2id cost. Defensible for a single-user personal workspace. |
+| Add a static pepper from the environment (`APP_ARGON2_PEPPER`), mixed into the hash input. | Offline cracking now also requires the pepper; a DB leak alone is not enough. Costs: a third secret with the same env-only handling, a start-up validation rule, an `.env.example` + deployment-doc row (AGENTS.md §4.11), and the question of re-hashing on login for accounts hashed without it (transparent upgrade path needed). |
+| Raise the cost parameters instead. | No new secret, better cracking bound; costs login latency on every request path that verifies (login only) and a documented DoS-bound trade-off. |
+
+**Who decides.** The product owner.
+
+### Q-16 - Should access tokens be revocable before expiry?
+
+**State:** Open · **Blocks:** nothing; the 15-minute access-token window stands until decided
+
+**Context.** Access tokens are stateless HS256 JWTs; logout and reuse
+detection revoke refresh sessions only, so a stolen access token is usable up
+to its TTL (audit P-2). `jti` is already issued (`src/auth/token.rs`) and
+reserved "for future revocation lists".
+
+**Options.**
+
+| Option | Impact |
+| ------ | ------ |
+| Accept the window (current design). | No change; the 15-minute TTL bounds the exposure, and disabled accounts are blocked per-request already. |
+| Add a `jti` revocation list (a table checked per request). | Immediate revocation; costs one indexed read on every authenticated request, a new table, an eviction story for expired entries, and a contract question for the `401` message. |
+| Shorten the access TTL further. | Trivial change; costs more refresh traffic on the clients. |
+
+**Who decides.** The product owner.
+
+### Q-17 - Should registration equalise its response the way login does?
+
+**State:** Open · **Blocks:** nothing
+
+**Context.** Login is timing-equalised and returns one generic message
+(`project-truth.md` §9.5). Registration answers `409` with a distinct message
+for a duplicate email (`src/users/repository.rs`), so an attacker can probe
+whether an address is registered (audit P-3). Registration also has no rate
+limit beyond the shared auth-endpoint limiter.
+
+**Options.**
+
+| Option | Impact |
+| ------ | ------ |
+| Accept the enumeration signal (current behaviour). | Honest UX for the legitimate user; the trade-off is a live oracle on the registration route. |
+| Equalise: always answer as if registration succeeded (email the real user, return the same response and timing). | Closes the oracle; costs an email-verification flow that does not exist today, a background worker for mail, and a UX change (no immediate login). |
+| Middle path: equalise timing and message but keep no-email semantics. | Partial mitigation; an attacker can still infer from follow-up login behavior, and the UX stays odd (a "success" that is not one). |
+
+**Who decides.** The product owner.
+
+### Q-18 - Should the email grammar be tightened?
+
+**State:** Open · **Blocks:** a future password-reset or notification flow
+
+**Context.** `validate_email` normalises case/whitespace, enforces length,
+and requires one `@` with a dotted domain; it accepts forms such as
+`a@b@c.com` (audit P-4). The DB CHECK enforces lower-case and length only.
+Nothing today consumes email beyond login, so the risk is data quality.
+
+**Options.**
+
+| Option | Impact |
+| ------ | ------ |
+| Keep the permissive grammar. | No change; no current consumer is harmed. |
+| Tighten to a stricter shape (single `@`, non-empty labels, no consecutive dots). | Better data; a contract-adjacent change (some previously accepted addresses become `422`), so it needs a deliberate decision and a test update, not a silent change. |
+
+**Who decides.** The product owner.
+
+### Q-19 - Should refresh-token rotation become a single transaction?
+
+**State:** Open · **Blocks:** nothing; the recorded ADR-0003 ordering stands until decided
+
+**Context.** Rotation (insert replacement, then atomically claim the old
+session) is the one multi-statement mutation outside a transaction
+(`src/auth/service.rs`; the audit's G-section). It is **deliberate**:
+[`../decisions/ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md)
+records the ordering as fail-safe — an interruption between the two statements
+leaves the caller with a usable session rather than with none — and
+[`../project-truth.md`](../project-truth.md) §12 repeats it. A lost race is
+compensated by reuse-detection mass revocation.
+
+**Options.**
+
+| Option | Impact |
+| ------ | ------ |
+| Keep the recorded ordering. | No change; the accepted ADR stands; the worst case is one bounded-lifetime unclaimed session row, pruned hourly. |
+| Wrap the pair in one transaction (and amend ADR-0003). | Atomicity by construction; removes the compensated-reasoning burden and the orphan row. Costs an ADR amendment (the §12 text and the data-architecture §7 analysis change with it), a concurrency regression test, and a slightly different interruption story (an interrupted rotation leaves the old session valid and unclaimed — the caller retries). |
+
+**Who decides.** The product owner.
+
+---
+
 ## Summary
 
 | ID | Question | State | Blocks |
@@ -453,3 +553,8 @@ which would forbid the encoder's own unit tests and leave its arithmetic unteste
 | `Q-12` | Reload without a restart, and which settings may change at run time | Open | Nothing today |
 | `Q-13` | Are the Phase 2 working assumptions (`A1`-`A6`) correct? | Open | The product behaviour each assumption describes |
 | `Q-14` | Is `ML-R03`'s "every automated test uses `Deterministic`" literal? | Open | Nothing; the encoder's unit tests depend on the answer |
+| `Q-15` | Should password hashing carry a server-side pepper? | Open | Nothing today |
+| `Q-16` | Should access tokens be revocable before expiry? | Open | Nothing today |
+| `Q-17` | Should registration equalise its response the way login does? | Open | Nothing today |
+| `Q-18` | Should the email grammar be tightened? | Open | A future password-reset or notification flow |
+| `Q-19` | Should refresh-token rotation become a single transaction? | Open | Nothing today; `ADR-0003` stands |
