@@ -89,6 +89,8 @@ A feature is never `Verified` because its code exists or compiles.
 | [`architecture/data-architecture.md`](architecture/data-architecture.md) | The schema, the ownership model, search and indexing. |
 | [`architecture/security-architecture.md`](architecture/security-architecture.md) | Trust boundaries, the authentication boundary, the authorization model. |
 | [`architecture/deployment.md`](architecture/deployment.md) | Configuration, secrets, running it, scaling and the production checklist. |
+| [`architecture/mobile-preparation.md`](architecture/mobile-preparation.md) | Preparation for the React Native + Expo client (not built): the shared contract, auth storage, structure, offline stance and push prerequisites. |
+| [`architecture/ai-roadmap.md`](architecture/ai-roadmap.md) | From the verified local retrieval stack toward prompt history and RAG: the standing constraints and the layered plan. |
 | [`../config/README.md`](../config/README.md) | The configuration reference: the layers, the precedence, every setting, the secrets, the message catalogue and the validation rules. |
 
 ### Decisions
@@ -105,6 +107,8 @@ A feature is never `Verified` because its code exists or compiles.
 | [`decisions/ADR-0007-money-representation.md`](decisions/ADR-0007-money-representation.md) | Money is `NUMERIC(19,4)` in the database and a four-decimal string on the wire. |
 | [`decisions/ADR-0008-local-pure-rust-ml.md`](decisions/ADR-0008-local-pure-rust-ml.md) | Local, pure-Rust inference with Burn and the `flex` backend; `REAL[]` and a bounded hybrid re-rank instead of pgvector. |
 | [`decisions/ADR-0009-receipt-references.md`](decisions/ADR-0009-receipt-references.md) | A receipt is a reference, not an uploaded file, in Phase 2. |
+| [`decisions/ADR-0010-semantic-search-scan-bound.md`](decisions/ADR-0010-semantic-search-scan-bound.md) | Semantic search keeps its corpus-bound sequential scan; the bound and its measured cost are recorded instead of an index service. |
+| [`decisions/ADR-0011-api-keys.md`](decisions/ADR-0011-api-keys.md) | A machine client authenticates with a per-user, revocable API key held at full owner authority, stored as a SHA-256 digest. |
 
 ### Features
 

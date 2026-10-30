@@ -12,21 +12,28 @@ personal knowledge management. This repository is the **Phase 1 backend**.
 
 ## Status
 
-Phase 1 is **in progress**. The backend foundation is implemented and covered
-by automated tests, and a CI pipeline runs the quality gates on every change.
-The container image is not built yet.
-The current, evidence-backed state of every feature is in
+The backend — Phase 1 and Phase 2 — is implemented and `Verified`: the
+promotion evidence is the 2026-10-29 review
+[`ATOM-REVIEW-20261029-002`](docs/engineering/review-log.md), and the
+evidence-backed state of every feature is in
 [`docs/engineering/implementation-status.md`](docs/engineering/implementation-status.md).
+A CI pipeline runs the quality gates on every change. The container image is
+built and probed in CI but is not published to any registry. The web and mobile
+frontends and the automation integration are not started (by design — see
+[`docs/roadmap.md`](docs/roadmap.md); the n8n scope awaits owner decision `O7`).
 
 | Area | Status |
 | ---- | ------ |
 | Authentication, token lifecycle, authorization | Verified |
 | Notes, projects, tasks | Verified |
-| OpenAPI document and API explorer | Implemented |
-| Health endpoints, structured logging | Implemented |
-| CI pipeline | Implemented |
-| Container image | Not started |
-| Everything on the roadmap | Not started, by design |
+| Reimbursements, job applications, local ML search (Phase 2) | Verified |
+| Scoped API keys for machine clients | Verified |
+| OpenAPI document and API explorer | Verified |
+| Health endpoints | Verified |
+| Structured logging | Implemented |
+| CI pipeline (gates, container build, seeder check) | Implemented |
+| Container image | CI-built, not published |
+| Web and mobile frontends, n8n automation, price monitoring | Not started (roadmap) |
 
 ## Stack
 

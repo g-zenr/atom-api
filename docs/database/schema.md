@@ -403,19 +403,21 @@ written with that in mind, and the policy in
 | Controlled state | A native `ENUM` type | The database refuses an out-of-contract value. |
 | Free text | A `tsvector` generated column with a GIN index | Search over the user's own data without a separate search service. |
 
-## 11. Phase 2 (Proposed, except what has been built)
+## 11. Phase 2 (built and `Verified`)
 
-> **Status:** **Proposed**, except for the seven tables four migrations already
-> create. `expense_claims` and `expense_items` are served by the twelve claim
-> operations of chains `R2`-`R4` (§11.1). `companies`, `job_applications` and
-> `application_events` are created by `migrations/0005_job_applications.sql`
-> (§11.3-§11.5) and served by the fourteen operations of chains `J2`-`J4`: five
-> company, five application and four event routes, with the stage machine and
-> the two composite ownership keys proved by `tests/jobs_schema.rs` and
-> `tests/job_applications_api.rs`.
-> [`../project-truth.md`](../project-truth.md) §18. This section records the
-> schema those requirements imply. Nothing in this section is `Verified` by this
-> document; the API half is covered by the tests the chain records, not here.
+> **Status:** **`Verified`** (2026-10-29, `ATOM-REVIEW-20261029-002`). All
+> seven tables exist. `expense_claims` and `expense_items` are served by the
+> twelve claim operations of chains `R2`-`R4` (§11.1). `companies`,
+> `job_applications` and `application_events` are created by
+> `migrations/0005_job_applications.sql` (§11.3-§11.5) and served by the
+> fourteen operations of chains `J2`-`J4`: five company, five application and
+> four event routes, with the stage machine and the two composite ownership
+> keys proved by `tests/jobs_schema.rs` and `tests/job_applications_api.rs`.
+> The requirements are §18 of
+> [`../project-truth.md`](../project-truth.md). This section records the
+> schema those requirements produce; the API half is covered by the tests the
+> chains record, not here, and the promotion evidence is the review, not this
+> document.
 >
 > `migrations/0004_expense_claims.sql` creates `expense_claim_status`,
 > `expense_claims` and `expense_items` with every constraint and index named in

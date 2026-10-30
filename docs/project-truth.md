@@ -1,7 +1,7 @@
 # ATOM — project truth
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-26
+> **Last updated:** 2026-10-30
 > **Owner:** product owner, maintained by the `docs` agent
 > **Authority:** this file defines ATOM's *agreed product requirements*. Source
 > code does not change it. See [`README.md`](README.md) for the full authority
@@ -75,10 +75,12 @@ later phase depends on:
 
 **Phase 2 — the personal-workspace layer.** It is defined in
 [`roadmap.md`](roadmap.md) §2 and its requirements are in §18 of this file.
-Phase 2 is **partly delivered**: the reimbursement and job application
-endpoints exist (§17), and the machine-learning endpoints exist too. Its delivery
-builds on the Phase 1 API, so it started after the Phase 1 close-out, but its
-requirements are agreed independently of it.
+Phase 2 is **delivered and `Verified`** (2026-10-29,
+[`ATOM-REVIEW-20261029-002`](engineering/review-log.md)): the reimbursement,
+job-application and machine-learning requirements of §18 are all `Verified`,
+the schema document matches migrations `0001`–`0007`, and the seeder seeds
+every Phase 2 table. §17 summarises the evidence; the per-feature record is
+[`engineering/implementation-status.md`](engineering/implementation-status.md).
 
 ## 4. Agreed features (Phase 1 scope)
 
@@ -222,6 +224,21 @@ What changed, precisely:
 The Phase 1 wording above is kept rather than deleted, so that a reader can
 see what was excluded and what the amendment changed. A further change to
 this boundary needs its own amendment and, if it is structural, its own ADR.
+
+### 6.2 Amendment of 2026-10-30 — the web frontend is accepted as a separate codebase
+
+**This is an amendment, and it is marked as one.** It amends the first bullet
+of §6 and changes nothing else.
+
+| Bullet before the amendment | Reading from 2026-10-30 |
+| --------------------------- | ----------------------- |
+| "Frontend or mobile user interface." | A **web** frontend is accepted: a separate Next.js codebase that consumes the existing API as its only backend. The API stays the deliverable of the backend repository, the browser never talks to PostgreSQL, no backend secret reaches the client bundle, and no business rule moves into the client. A **mobile** frontend stays excluded; preparation documents may be written, but no mobile application is built yet. |
+
+The exclusion above was a Phase 1 delivery boundary; the owner's 2026-10-30
+instruction lifts it for the web client only. The roadmap's "Web frontend" row
+carries the delivery record, and the codebase lives outside this repository
+(`atom-web` beside `atom/api`). Accepting the mobile application, or any UI
+inside this repository, needs its own amendment.
 
 
 ## 7. User-facing behaviour and requirements
@@ -466,7 +483,7 @@ blocks Phase 1 work that does not depend on the answer.
 | Rust/Axum modular monolith | Implemented | `src/`, `Cargo.toml` |
 | Typed configuration with start-up validation | Implemented | `src/config/` |
 | Central error contract | Implemented | `src/error.rs`, `src/api/extract.rs` |
-| SQLx migrations | Implemented | `migrations/0001..0006` |
+| SQLx migrations | Implemented | `migrations/0001..0007` |
 | User registration, normalization, uniqueness | Verified | `tests/auth_api.rs` |
 | Argon2id hashing and password policy | Verified | `src/auth/password.rs`, `src/users/service.rs` |
 | Access tokens, issuer/audience validation | Verified | `src/auth/token.rs`, `tests/auth_api.rs` |
@@ -486,6 +503,7 @@ blocks Phase 1 work that does not depend on the answer.
 | Reimbursement tracking | Verified | accepted in §18.1; migration `0004_expense_claims.sql`, `src/reimbursements/` and all twelve published operations exist. `tests/claims_schema.rs` asserts the constraints, `tests/claims_api.rs` the twelve operations and `tests/openapi_contract.rs` the published surface. `Verified` 2026-10-29 by `ATOM-REVIEW-20261029-002`: the final-tree review found no code defect and the six gates re-ran at `0`; the feature's recorded gaps ride with its card. |
 | Job application tracking | Verified | accepted in §18.2; migration `0005_job_applications.sql`, `src/job_applications/` and all fourteen published operations exist. `tests/jobs_schema.rs` asserts the constraints and `tests/job_applications_api.rs` the fourteen operations, including the stage machine. `ATOM-REVIEW-20261024-010` found no code defect; the documentation findings and the 2026-10-26 re-gate findings were repaired, and `ATOM-REVIEW-20261029-002` is the recorded read of the final tree — clean on code, contract and regressions, six gates at `0` — so the feature is `Verified`. |
 | Local machine learning | Verified | accepted in §18.3; migration `0006_embeddings.sql`, `src/ml/` and the three published operations exist, and the suite is measured green (536 passed, 0 failed; 41 `ml_api` cases). **`ML-R02` is met**: `embedder::select` returns a `BurnEmbedder` when both artifacts load. `Verified` 2026-10-29 by `ATOM-REVIEW-20261029-002`: the encoder span was read clean twice (`ATOM-REVIEW-20261026-001`, then the final tree) and the six gates re-ran at `0`; the single-run manual benchmark is the recorded limitation — see [`features/ml/status.md`](features/ml/status.md) §1.3. |
+| Scoped API keys for machine clients | Verified | accepted as a decision, not a §18 requirement: its authority is [`decisions/ADR-0011-api-keys.md`](decisions/ADR-0011-api-keys.md), as [`features/api-keys/status.md`](features/api-keys/status.md) records. Migration `0007_api_keys.sql`, `src/api_keys/` and the three published operations exist; 11 integration and 13 unit cases pass in the 2026-10-27 run (536 tests, six gates green); quality-gate **PASS** (`ATOM-REVIEW-20261027-001`), final read of the repaired tree **PASS** (`ATOM-REVIEW-20261029-001`). A key holds the full authority of its owner and can manage itself (`KI-024`). |
 | Everything else in the roadmap | Not started | by design |
 
 **Known discrepancies and limitations** are recorded in
@@ -506,23 +524,27 @@ machine learning over the owner's own notes. The phase itself is defined in
 [`roadmap.md`](roadmap.md) §2.
 
 Every requirement in this section was **`Accepted`** on 2026-10-24 — agreed,
-and not built at the time. The reimbursement requirements (`REIMB-R01`…`R11`)
-are now **`Implemented`**: the code exists for all twelve published operations.
-They are not `Verified`, because no reviewer has read the chain that completed
-them; a passing suite is not a review. The job-application requirements are now
-**`Implemented`**: the code exists for all fourteen published operations, and
-`ATOM-REVIEW-20261024-010` read the chain, found no code defect and returned
-FAIL on documentation only. They are not `Verified`, because the first
-executable gate run (`ATOM-REVIEW-20261024-011`) also returned FAIL on
-documentation, and the re-gate of 2026-10-26 returned FAIL on documentation
-again with its findings repaired under `ATOM-CHANGE-20261026-001`. The
-machine-learning requirements are
-now **`Implemented`**: the code exists for all three published operations. They
-are not `Verified`: no independent reviewer has read the encoder span and the
-re-gate returned FAIL on documentation. `ML-R02` is met — the Burn
-encoder produces embeddings — so the missing half is the review, not the model.
-§17 says the same in its status table. The
-feature specifications are:
+and not built at the time. All three features are now **`Verified`**
+(2026-10-29, [`ATOM-REVIEW-20261029-002`](engineering/review-log.md)).
+
+The path there is part of the record. `ATOM-REVIEW-20261024-010` read the
+job-application chain, found no code defect and returned FAIL on
+documentation; the first executable gate run (`ATOM-REVIEW-20261024-011`) and
+the re-gate of 2026-10-26 returned FAIL on documentation as well, with the
+findings repaired under `ATOM-CHANGE-20261026-001`; the ML encoder span was
+read clean by `ATOM-REVIEW-20261026-001`. The final-tree review
+`ATOM-REVIEW-20261029-002` then returned **PASS** on code, contract and
+regressions for all three features, and the quality-gate session re-executed
+the six gates at `0` with the 536-test split re-derived. The reimbursement
+requirements (`REIMB-R01`…`R11`) cover all twelve published operations, the
+job-application requirements (`JOB-R01`…`R09`) all fourteen, and the
+machine-learning requirements (`ML-R01`…`R09`) all three. The requirement
+halves that remain unasserted are recorded on each feature's card and are not
+hidden. One capability of this phase is **not** a requirement of this section:
+the machine credential (`api_keys`, migration `0007`) was accepted by
+[`ADR-0011`](decisions/ADR-0011-api-keys.md), and its status record is
+[`features/api-keys/status.md`](features/api-keys/status.md). §17 says the
+same in its status table. The feature specifications are:
 
 | Feature | Identifier | Specification |
 | ------- | ---------- | ------------- |

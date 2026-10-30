@@ -2,7 +2,7 @@
 
 # Reimbursements — status
 
-> **Last updated:** 2026-10-29
+> **Last updated:** 2026-10-30
 > **Owner:** maintained by the `docs` agent
 > **Feature:** [`ATOM-FEAT-REIMB-001`](specification.md)
 
@@ -78,7 +78,7 @@ gaps.
 | `REIMB-R08` A receipt is a reference | `Verified` | `receipt_url TEXT` with `expense_items_receipt_url_chk`; the create and patch validators accept an absolute `http`/`https` URL of at most 2048 characters and store it verbatim. The field is a tri-state on `PATCH`: absent keeps it, `null` clears it. Nothing fetches the URL and nothing logs it. | `a_receipt_url_must_be_absolute_http_or_https` (six refused forms — no scheme, `ftp:`, protocol-relative, `javascript:`, relative, single-slash — each `422` naming `receipt_url`; 2049 characters refused and 2048 accepted; `https` and `http` both accepted and stored verbatim; only the accepted items exist afterwards); `an_item_can_be_partially_updated` (`null` clears it); unit `a_receipt_must_be_an_absolute_http_url`. **Unproved:** no test posts a `multipart/form-data` or base64 file body — the "never bytes" half holds because no route parses a file, not because a test refused one (§2). |
 | `REIMB-R09` Optional project link | `Verified` | `project_id` with `ON DELETE SET NULL`; create and `PATCH` verify the project belongs to the caller inside the write statement and answer `404` otherwise; `PATCH {"project_id": null}` clears the link. Unchanged by this wave — the item and lifecycle routes carry no project input. | `a_claim_can_be_created_with_a_project_of_the_caller`; `a_claim_cannot_reference_another_users_project`; `deleting_the_project_clears_the_link_and_keeps_the_claim`; `a_project_id_that_is_not_a_uuid_is_refused`; `the_update_claim_request_publishes_a_nullable_project_id`; `deleting_a_project_clears_the_claim_link_and_keeps_the_claim` (schema). |
 | `REIMB-R10` Owner-scoped reads and writes | `Verified` | Every claim statement and every item statement carries `user_id` in its own `WHERE`; an item predicate carries **`claim_id` and `user_id`**, so an id from one account cannot be combined with a claim id from another, and an item id under the wrong claim of the same owner matches no row. A miss is `404` with the resource's catalogue message — never `403`. | `a_claim_of_another_user_is_invisible`; `the_listing_only_contains_the_callers_claims`; `a_claim_cannot_reference_another_users_project`; `an_item_of_another_users_claim_is_invisible` (create, patch and delete all `404`; the other account's listing stays empty; the owner's item and total unchanged); `an_item_id_under_the_wrong_claim_is_not_found` (both claims owned by the caller, so ownership is not the reason; also an id that exists nowhere); `a_lifecycle_action_on_another_users_claim_is_not_found` (all four actions, `404`, nothing written, the other account's listing empty); `the_claim_routes_require_a_credential` (all twelve operations, no token and a bad token, `401`, and nothing sent landed); `the_second_account_sees_not_found_on_every_reimbursement_operation` (the eleven claim-addressed operations on each of five fixtures, 55 requests, each `404 not_found`; the list operation is asserted by its empty page and `total` 0, because it publishes `200` rather than `404`). |
-| `REIMB-R11` Deletion in any status | `Verified` | `DELETE /api/v1/claims/{claim_id}` is one statement with **no status predicate** — `DELETE FROM expense_claims WHERE id = $1 AND user_id = $2` — so the status cannot be the reason a deletion is refused; the items follow through `expense_items_claim_fk … ON DELETE CASCADE`, in the same statement. The four lifecycle actions now make every status reachable through the API, which they were not in `C-R2`. | `a_claim_can_be_created_read_and_deleted` (a `draft`: `204`, then `404`); `a_claim_of_another_user_is_invisible` (the foreign delete is `404` and the claim survives); `deleting_a_claim_deletes_its_items` and `deleting_an_account_deletes_its_claims_and_items` (schema). **Unproved:** no endpoint test deletes a `submitted`, `approved`, `rejected` or `paid` claim. The code has no guard to fail, but the requirement says "in any status" and only `draft` is asserted at HTTP level. None of the three `tests/claims_flow.rs` cases fills this: the journey ends on a paid claim without deleting it, and the sweep's `DELETE` is a foreign attempt that answers `404`. |
+| `REIMB-R11` Deletion in any status | `Verified` | `DELETE /api/v1/claims/{claim_id}` is one statement with **no status predicate** — `DELETE FROM expense_claims WHERE id = $1 AND user_id = $2` — so the status cannot be the reason a deletion is refused; the items follow through `expense_items_claim_fk … ON DELETE CASCADE`, in the same statement. The four lifecycle actions now make every status reachable through the API, which they were not in `C-R2`. | `a_claim_can_be_deleted_in_any_status` (each of the five statuses: the claim is driven there by the published lifecycle actions, deleted with `204` and no body, then reads `404`, its item table holds no row, its item id is no longer addressable, the caller's listing is empty, and a bystander's same-status claim still carries its own item); `a_claim_can_be_created_read_and_deleted` (a `draft`: `204`, then `404`); `a_claim_of_another_user_is_invisible` (the foreign delete is `404` and the claim survives); `deleting_a_claim_deletes_its_items` and `deleting_an_account_deletes_its_claims_and_items` (schema). The flow layer adds no delete of its own: the journey ends on a paid claim without deleting it, and the sweep's `DELETE` is a foreign attempt that answers `404`. |
 
 ### 1.2 The `currency` rule on `PATCH`: ignored with `200`, not a `422`
 
@@ -123,7 +123,7 @@ unchanged ([testing.md](testing.md) §2.5).
 ## 2. What is still missing
 
 1. **The flow layer — present, with two caveats.**
-   `tests/claims_flow.rs` is committed at `02c5489` and holds the three
+   `tests/claims_flow.rs` holds the three committed
    cross-cutting cases: `the_whole_reimbursement_journey_from_registration_to_payment`,
    `the_second_account_sees_not_found_on_every_reimbursement_operation` and
    `the_seeded_claims_are_readable_through_the_api`
@@ -134,9 +134,9 @@ unchanged ([testing.md](testing.md) §2.5).
      database a seeder run has touched; it also never asserts the seeded *size*,
      because the suite shares one database and whichever profile ran last
      decides it;
-   - `a_claim_can_be_deleted_in_any_status`, the missing half of `REIMB-R11`, is
-     not one of the three: the journey ends on a paid claim and the sweep's
-     `DELETE` is a foreign attempt that answers `404`.
+   - the flow layer itself adds no deletion of a non-`draft` claim — that half
+     of `REIMB-R11` is asserted by the endpoint case
+     `a_claim_can_be_deleted_in_any_status` (§1.1), not by a flow case.
 
    A flow test is a composition check, not a proof of the surface: passing it
    says nothing about the `408`/`500` paths, the `rejected` branch or a deletion
@@ -147,11 +147,11 @@ unchanged ([testing.md](testing.md) §2.5).
    `atom_dev`; `ATOM-CHANGE-20261024-008` records the same six gates green with
    **299** tests once `tests/claims_flow.rs` is in. Both are the orchestrator's
    record, and this document has not re-run the suite.
-3. **The review rows.** `code-reviewer` and `quality-gate` have not read this
-   chain, `C-R2`, `D2.S1`, `D1` or `D2.R5`. The twelve-operation surface and the
-   seven new operations are part of what they have to read. The promotion to
-   `Verified` belongs to the change that closes those rows; the recorded run of
-   item 2 exists, the verdicts do not.
+3. **The review rows — closed.** The promotion to `Verified` was made by
+   [`ATOM-REVIEW-20261029-002`](../../engineering/review-log.md): the
+   independent read of the final tree returned **PASS** on code, contract and
+   regressions, and the quality-gate session re-executed the six gates at `0`
+   with the 536-test split re-derived target-for-target.
 4. **Five small test gaps inside the operations that now exist**, each a rule
    in the code with no endpoint assertion: the 1–500 item-description bound, a
    non-date `incurred_on` (`422` with field `body`), a non-UUID `item_id`
@@ -160,7 +160,13 @@ unchanged ([testing.md](testing.md) §2.5).
    what prevent two writers from both winning
    ([architecture.md](architecture.md) §2.6–§2.7), and no test runs two writers
    at once. [testing.md](testing.md) §3 lists them with the rule each would
-   prove.
+   prove. **Working-tree note (2026-10-30):** five further tests exist
+   **uncommitted** in `tests/claims_api.rs` (four of the five gaps above) and
+   `tests/claims_flow.rs` (a deterministic minimal-profile seeded read that
+   closes the opportunistic caveat); they were executed on 2026-10-30 and all
+   five passed (`ATOM-CHANGE-20261030-001`), but until they are committed and
+   re-run as part of the recorded tree they are not part of this feature's
+   verified record. The concurrency gap remains open.
 
 A requirement is not `Verified` because a test exists next to it — the
 promotion was made by [`ATOM-REVIEW-20261029-002`](../../engineering/review-log.md)

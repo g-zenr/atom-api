@@ -91,6 +91,17 @@ carry `AND user_id = $2` in their predicate, and `revoke_all_for_user` carries
 the owner in its predicate. The lookup exception therefore cannot be used to
 mutate another account's session.
 
+**Amendment (2026-10-30).** The table above names the two exceptions the
+decision originally reasoned about. Two further identity lookups exist today,
+and they follow the same rule — the identity is not a client-supplied resource
+id, and every mutation is owner-scoped — so they are recorded here rather than
+left implicit:
+
+| Exception | Statement | Why |
+| --------- | --------- | --- |
+| `UserRepository::find_by_id` | `SELECT ... FROM users WHERE id = $1` | The `id` is never a path parameter; it is the subject of the presented credential (the token's `sub`, or the session's owner during a refresh). It is the same "the caller must be resolved before anything can be scoped" situation as `find_by_email`, with the identity arriving from the token rather than the body. |
+| `ApiKeyRepository::find_identity_by_hash` | `SELECT ... FROM api_keys k JOIN users u ... WHERE k.key_hash = $1` | The presented key material is the credential; the owner is discovered from the row and then verified (revoked, account active) before anything acts. Recorded in [`ADR-0011`](ADR-0011-api-keys.md). |
+
 ### 3. The `404` over `403` rule
 
 Returning `403` for a resource that belongs to somebody else tells the

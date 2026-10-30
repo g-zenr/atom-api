@@ -2,7 +2,7 @@
 
 > **Status:** Proposed (living document; the items whose status column says
 > `Accepted` are agreed in [`project-truth.md`](project-truth.md) §18)
-> **Last updated:** 2026-10-29
+> **Last updated:** 2026-10-30
 > **Owner:** product owner, maintained by the `docs` agent
 
 The future of ATOM beyond the backend foundation. This document lists the
@@ -26,7 +26,7 @@ The current status of the implementation is in
 | Column | Meaning |
 | ------ | ------- |
 | **Feature** | The name of the capability. |
-| **Status** | `Accepted` when the requirement is recorded in [`project-truth.md`](project-truth.md) — §4 for Phase 1, §18 for Phase 2; `Implemented` when the item exists and compiles; `Proposed` otherwise. The seeder, reimbursement tracking and job application tracking are `Implemented` today; nothing in Phase 2 is `Verified`. |
+| **Status** | `Accepted` when the requirement is recorded in [`project-truth.md`](project-truth.md) — §4 for Phase 1, §18 for Phase 2; `Implemented` when the item exists and compiles; `Verified` when a recorded check has passed over it; `Proposed` otherwise. The seeder is `Implemented` tooling; reimbursement tracking, job application tracking and local machine learning are `Verified` (2026-10-29, [`ATOM-REVIEW-20261029-002`](engineering/review-log.md)). |
 | **Phase** | The delivery phase the item belongs to. The phases are defined in §2. |
 | **Depends on** | The capabilities the item needs. |
 | **Notes** | The constraint the item must not break, and the thing that makes it non-trivial. |
@@ -118,7 +118,7 @@ accepted requirement. They therefore stay "Later — unassigned" rather than
 | Local machine learning | `Verified` | 2 | Notes, job applications | Requirements are `ML-R01`…`R09` in [`project-truth.md`](project-truth.md) §18.3. Local and pure Rust ([`ADR-0008`](decisions/ADR-0008-local-pure-rust-ml.md)); no vector-database service; no outbound AI call. `ML-R02` is met: the Burn encoder produces embeddings (measured, ADR-0008 §12). `Verified` 2026-10-29 (`ATOM-REVIEW-20261029-002`); the single-run manual benchmark is the recorded limitation. |
 | Database seeder (development tooling) | `Implemented` | 2 | The Phase 1 schema and every Phase 2 table | Development-only. Not product behaviour and not in [`project-truth.md`](project-truth.md); specified in [`database/seeding.md`](database/seeding.md). `src/bin/atom-seed.rs` exists with 21 integration tests in `tests/seeder.rs` and 13 tests in the binary; the chain's review rows (`D2.S1` rows 10-11) are outstanding. A feature that adds a table without adding it to the seeder is not complete. |
 | n8n workflow automation | `Proposed` | Later — unassigned | Projects, tasks, notes | An external integration, and **not Phase 2** (owner decision O7). It is a separate Node service that calls the API; the API never depends on it and it never sits inside the data path of a private record. It does not violate the Rust-only rule because it is not part of the API runtime. |
-| Web frontend | `Proposed` | Later — unassigned | The Phase 1 API | A separate codebase and a separate consumer of the API. The API is already CORS-enabled against an explicit origin allowlist for it. The refresh-token and CSRF questions are `Q-02` and `Q-05`. |
+| Web frontend | `Accepted` (2026-10-30, owner instruction; the §6.2 amendment of [`project-truth.md`](project-truth.md) records it) | Later — unassigned | The Phase 1 API | A separate codebase (`atom-web` beside this repository) and a separate consumer of the API. The API is already CORS-enabled against an explicit origin allowlist for it. The refresh-token and CSRF questions are `Q-02` and `Q-05`; the scaffold started on 2026-10-30 and its delivery record lives in that codebase. |
 | Mobile frontend | `Proposed` | Later — unassigned | The Phase 1 API | A separate codebase. The bearer-token model suits a mobile client without the cookie and CSRF obligations a browser brings. |
 | OpenCode prompt and session knowledge management | `Proposed` | Later — unassigned | Notes | Stores prompts and session metadata as notes. It must keep notes independent of projects and tasks, so that attaching a note to a task does not later require a schema migration of the notes table. |
 | Labels, comments, activity history, issue numbers | `Proposed` | Later — unassigned | Projects, tasks | Modelled on GitHub, not implemented. Each one widens the ownership model, and a comment or a history entry is another object that a query must scope by owner. |

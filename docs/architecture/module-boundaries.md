@@ -1,13 +1,13 @@
 # ATOM — module boundaries
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-27
+> **Last updated:** 2026-10-30
 > **Owner:** maintained by the `architect` agent
 
 What each module owns, what it may depend on, and which invariant it is
 responsible for. §1–§7 describe the modules that **exist**, and so does the
 unnumbered `api_keys` section below §2; the last section describes the Phase 2
-modules — the two that are built and the one still planned — and marks each.
+modules — all three are built and `Verified` — and marks each.
 The layering rule that this document enforces is fixed by
 [`../../AGENTS.md`](../../AGENTS.md) §2:
 
@@ -170,15 +170,16 @@ Source: `src/tasks/handlers.rs`, `src/tasks/service.rs`,
 
 ---
 
-## Phase 2 modules (planned, except reimbursements and job-applications)
+## Phase 2 modules
 
-> **Mostly planned.** `reimbursements` is **`Implemented`**: `src/reimbursements/`
+> **Built and `Verified`** (2026-10-29, `ATOM-REVIEW-20261029-002`).
+> `reimbursements`: `src/reimbursements/`
 > holds six modules, and `migrations/0004_expense_claims.sql` creates
 > `expense_claim_status`, `expense_claims` and `expense_items` with their
 > constraints and indexes. All twelve published operations are served, and
 > `tests/claims_schema.rs`, `tests/claims_api.rs` and `tests/claims_flow.rs`
 > prove the constraints and the behaviour. `job-applications` is also
-> **`Implemented`**: `src/job_applications/` holds six modules, and
+> **built and `Verified`**: `src/job_applications/` holds six modules, and
 > `migrations/0005_job_applications.sql` creates `job_application_status`,
 > `application_event_kind`, `companies`, `job_applications` and
 > `application_events` with their constraints and indexes. All fourteen
@@ -221,9 +222,9 @@ users ──┬──► reimbursements ──(optional, SET NULL)──► proj
 
 | Module | Status | Source | Owns in the database | May depend on |
 | ------ | ------ | ------ | -------------------- | ------------- |
-| `reimbursements` | `Implemented` | `src/reimbursements/` (six modules) | `expense_claims`, `expense_items` | `error` |
-| `job-applications` | `Implemented` | `src/job_applications/` (six modules) | `companies`, `job_applications`, `application_events` | `error`, `pagination`, `helpers`, `money`, `config`, `api`, `tasks` (read-only, through `projects`) |
-| `ml` | `Implemented` | `src/ml/` (ten modules) | `embeddings` | `error`, `pagination`, `helpers`, `config`, `notes` (repository), `job_applications` (repository), `burn` |
+| `reimbursements` | `Verified` | `src/reimbursements/` (six modules) | `expense_claims`, `expense_items` | `error` |
+| `job-applications` | `Verified` | `src/job_applications/` (six modules) | `companies`, `job_applications`, `application_events` | `error`, `pagination`, `helpers`, `money`, `config`, `api`, `tasks` (read-only, through `projects`) |
+| `ml` | `Verified` | `src/ml/` (ten modules) | `embeddings` | `error`, `pagination`, `helpers`, `config`, `notes` (repository), `job_applications` (repository), `burn` |
 
 **The arrow into `ml` is one-way.** No module may depend on `ml`: no module
 calls `MlService`, holds an `Arc<dyn Embedder>`, imports the embedder files or
@@ -276,7 +277,7 @@ cannot be deleted.
 | Verification the implementing change must provide | Unit tests for the stage machine (every edge, both refusals) and for the company-name rule; integration tests for the duplicate-name `409`, the company-delete `409`, cross-account `404` on every verb, the event ordering and the next-action clearing. |
 | Limitations already known | `FOR UPDATE` serialises stage changes on one application; the company search is `ILIKE '%term%'`, which cannot use a B-tree index for a leading wildcard; the timeline does not record a stage change. The feature document §10 lists the rest. |
 
-### `ml` (planned)
+### `ml`
 
 Local inference over the owner's own text: an embedding for a note or an
 application, three search modes over notes (`lexical`, `semantic`, `hybrid`), a

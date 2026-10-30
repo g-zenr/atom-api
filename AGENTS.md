@@ -42,6 +42,8 @@ atom/api/
 ├── src/
 │   ├── api/                # routing, middleware, extractors
 │   ├── auth/               # authentication and token lifecycle
+│   ├── api_keys/ reimbursements/ job_applications/ ml/
+│   │                       # the machine credentials and the Phase 2 modules
 │   ├── users/ notes/ projects/ tasks/
 │   ├── config/             # settings, loader, validation, message catalogue
 │   ├── helpers/            # the shared text validators

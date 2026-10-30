@@ -1,7 +1,7 @@
 # ATOM — architecture
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-24
+> **Last updated:** 2026-10-30
 > **Owner:** maintained by the `architect` agent
 
 This directory describes **the ATOM Phase 1 backend as it is built**. It is the
@@ -18,11 +18,13 @@ the accepted decisions in [`../decisions/`](../decisions/README.md).
 | Document | Contents |
 | -------- | -------- |
 | [`system-overview.md`](system-overview.md) | What the system is, the runtime shape, the components, the deployment topology, the stack and the known limitations. |
-| [`module-boundaries.md`](module-boundaries.md) | Every module that exists, including the two built Phase 2 modules, plus the one still planned (`ml`): responsibility, public interface, dependencies, data ownership, invariants, security boundary, tests and limitations. |
+| [`module-boundaries.md`](module-boundaries.md) | Every module that exists, including the three built and `Verified` Phase 2 modules: responsibility, public interface, dependencies, data ownership, invariants, security boundary, tests and limitations. |
 | [`request-lifecycle.md`](request-lifecycle.md) | From socket to SQL and back: middleware order, extractor order, the handler → service → repository path, error mapping and the correlation id. |
 | [`data-architecture.md`](data-architecture.md) | The persistence model, the ownership model, the search design, the index strategy, the migration/model relationship and the transaction boundaries. |
 | [`security-architecture.md`](security-architecture.md) | Trust boundaries, the authentication boundary, the authorization model, secret handling, rate limiting and error disclosure. |
 | [`deployment.md`](deployment.md) | Configuration reference, secrets, local development, the production checklist, observability and scaling characteristics. |
+| [`mobile-preparation.md`](mobile-preparation.md) | Preparation for the React Native + Expo client: the shared contract, authentication and secure storage, suggested structure, offline stance, push prerequisites, and what must be true before mobile work starts. Nothing in it is implemented. |
+| [`ai-roadmap.md`](ai-roadmap.md) | The path from the verified local retrieval stack toward prompt history and RAG: what exists, the standing constraints, the six layers in dependency order, and the evaluation discipline each needs. Nothing beyond §1 is implemented. |
 | [`../../config/README.md`](../../config/README.md) | The configuration reference: the layers, the precedence, every setting, the secrets, the message catalogue and the validation rules. |
 
 The architecture documents cross-link rather than repeat. The public HTTP

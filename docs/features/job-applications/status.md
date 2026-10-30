@@ -43,19 +43,19 @@ recorded as uncovered.
 | `src/api/routes.rs` | **Yes** | Six route declarations (14 method/path pairs), the fourteen `ROUTE_TABLE` entries, the fourteen operations and fourteen job schemas (twelve body types and the two enums) in `ApiDoc`, and the `companies` / `job-applications` tags. |
 | `src/state.rs` | **Yes** | `AppState::job_applications: JobService`, built from the pool, the message catalogue and the pagination settings. |
 | `config/messages.toml`, `src/config/messages.rs` | **Yes** | The client-facing strings of the feature: validation, conflicts, and the resource-not-found messages. |
-| `tests/job_applications_api.rs` | **Yes** | 51 HTTP-level cases. The case-by-case map is [testing.md](testing.md) §2. No run is recorded. |
-| `tests/jobs_schema.rs` | **Yes** | Eleven cases against the real database; [testing.md](testing.md) §1. No run is recorded. |
-| `tests/job_applications_flow.rs` | **Yes** | Two flow cases — `the_whole_job_application_journey_from_lead_to_offer` and `the_second_account_sees_not_found_on_every_job_application_operation`. The map is [testing.md](testing.md) §8. No run is recorded. |
+| `tests/job_applications_api.rs` | **Yes** | 51 HTTP-level cases. The case-by-case map is [testing.md](testing.md) §2. Executed 2026-10-30 in the full-suite run recorded in [`ATOM-CHANGE-20261030-001`](../../engineering/change-log.md): 51 passed. |
+| `tests/jobs_schema.rs` | **Yes** | Eleven cases against the real database; [testing.md](testing.md) §1. Executed 2026-10-30 (`ATOM-CHANGE-20261030-001`): 11 passed. |
+| `tests/job_applications_flow.rs` | **Yes** | Two flow cases — `the_whole_job_application_journey_from_lead_to_offer` and `the_second_account_sees_not_found_on_every_job_application_operation`. The map is [testing.md](testing.md) §8. Executed 2026-10-30 (`ATOM-CHANGE-20261030-001`): 2 passed. |
 | `tests/openapi_contract.rs` | **Yes** | `CONTRACT_OPERATIONS = 54` today (51 before the API-keys change, 48 when the chain landed); the fourteen success statuses; the published parameter sets of both job list operations; `EventResponse` carrying no `updated_at`. |
-| `tests/seeder.rs` | **Yes** | One case for the seeded `dev` counts and invariants. No run is recorded. |
+| `tests/seeder.rs` | **Yes** | One case for the seeded `dev` counts and invariants. Executed 2026-10-30 (`ATOM-CHANGE-20261030-001`): the 21-case seeder suite passed. |
 
 ### 1.2 The requirements, one by one
 
 Every requirement is `Verified` (2026-10-29, `ATOM-REVIEW-20261029-002`): the
 code exists and the tests named in the last column pass in the recorded gate
 run. The uncovered halves named inside the cells remain the feature's recorded
-gaps.
-result is recorded. "Asserted by" names tests that are **on disk**; it does not
+gaps; whether a run of a named case is recorded is stated in §1.1. "Asserted
+by" names tests that are **on disk**; it does not
 claim they passed. Both flow cases also serve `JOB-R01`…`JOB-R07` and `JOB-R09`
 jointly, inside a composition rather than in isolation; they are named once in
 §1.5 rather than repeated in every row.
