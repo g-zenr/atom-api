@@ -1,7 +1,7 @@
 # ATOM review log
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-29
+> **Last updated:** 2026-10-30
 > **Owner:** maintained by the `docs` agent
 
 The record of independent reviews of changes to the ATOM backend: what was
@@ -22,7 +22,30 @@ recorded.
 
 ## The entries so far
 
-Sixteen reviews have been performed:
+Seventeen reviews have been performed:
+
+- `ATOM-REVIEW-20261030-001`, the **stabilization change-set read** on the
+  2026-10-30 working tree (`96c37b2` + the change set; uncommitted). The
+  independent read returned `CODE_REVIEW` **FAIL** (one blocker),
+  `PRODUCT_CONTRACT` **PASS WITH FINDINGS**, `NEW_REGRESSIONS` **PASS**. The
+  blocker: `deny.toml` used `vulnerability = "deny"` under cargo-deny config
+  v2, a removed field that errors the new supply-chain job on its first run —
+  fixed by removing the key (v2 denies vulnerability advisories
+  unconditionally). The findings — the "warn in practice" licence wording
+  (v2 licences are deny-by-default and cannot be softened), the personal
+  absolute path embedded in the new audit document, the stale
+  `tests/ml_api.rs` docstring still describing the pre-`ba910087` 400
+  contract, and the `atom-web` refresh redirect guard admitting a leading
+  `/\` — were all fixed in the same change and re-verified (`atom-docs
+  --strict` OK, `cargo fmt --check` pass, `cargo clippy -D warnings` exit 0,
+  `atom-web` lint + `tsc` exit 0). The review also re-derived the recorded
+  test-count arithmetic exactly (536 → 541 → 563) and verified the SHA pins,
+  the harness conventions of the 22 new cases, the preservation of the five
+  user-owned diffs, and the `atom-web` security paths. The gate was not
+  re-executed by the reviewer (its permission model denies test runs);
+  `cargo test` results cited for this change set are the orchestrator
+  session's runs recorded in
+  [`ATOM-CHANGE-20261030-001`](change-log.md).
 
 - `ATOM-REVIEW-20261029-002`, the **Phase 2 close-out** on the final tree at
   `ab5aa00`. The independent read returned `CODE_REVIEW` **PASS** (no defect in

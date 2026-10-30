@@ -2139,14 +2139,12 @@ fn the_ml_routes_are_in_the_openapi_document() {
 /// **not** answered by the note read: it reaches the search path, which owns
 /// only `POST`.
 ///
-/// **This is one place where the published contract and the router disagree.**
-/// [`docs/features/ml/api.md`](../../docs/features/ml/api.md) §1 states that a
-/// `GET` is matched by the note read and answers `400`; the implementation
-/// answers `405`, because the static path wins the match before the dynamic one
-/// is considered. The observable fact the test exists for — the note read does
-/// not shadow the search operation — holds either way, and `405` proves it more
-/// directly than `400` would. The sentence in `api.md` is the thing that needs
-/// correcting; it is recorded here so the disagreement is not silent.
+/// **The contract and the router agree.** [`docs/features/ml/api.md`](../../docs/features/ml/api.md) §1
+/// states that a `GET /api/v1/notes/search` is answered `405` by the search
+/// route itself - the static path wins the match before the dynamic segment
+/// is considered - and that is what the router does. The note read does not
+/// shadow the operation, and `405` proves it more directly than the `400` a
+/// fall-through to `GET /notes/{note_id}` would have produced.
 #[tokio::test]
 async fn post_notes_search_is_not_shadowed_by_the_note_read() {
     let state = test_state_with_deterministic_ml().await;

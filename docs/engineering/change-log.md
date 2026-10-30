@@ -47,6 +47,109 @@ Entries from before 2026-10-27 are in
 moved verbatim by `ATOM-CHANGE-20261029-001` to keep this file small enough
 to read whole. They remain part of the record and are never rewritten.
 
+### ATOM-CHANGE-20261030-001 - Stabilization: documentation reconciled, supply-chain gate added, coverage gaps closed
+
+**Date:** 2026-10-30 (UTC)
+**Type:** Documentation + Verification + Hardening - the stabilization change:
+reconcile the status documents with the 2026-10-29 promotion, close recorded
+test gaps, add the dependency-security gate, and record fresh executed runs
+on this host.
+**Author:** the orchestrator session of the stabilization task, with two
+builder sessions (the coverage cases; the `atom-web` frontend, which lives
+outside this repository and is recorded in its own README).
+**Status:** Complete - see "What was measured" for the checks that actually
+ran on this host.
+
+#### Why
+
+A read-only audit on 2026-10-29/30 (`docs/audit/codebase-audit-2026-10-30.md`)
+found no code defect in the shipped backend, but found that the two most
+authoritative documents contradicted the 2026-10-29 promotion recorded inside
+them: `project-truth.md` §3 said Phase 2 was "partly delivered" and §18's
+intro still narrated the features as `not Verified`, while §17 and the roadmap
+said `Verified`/`Complete`; `roadmap.md` §1 said "nothing in Phase 2 is
+`Verified`" one paragraph above its own completion statement;
+`module-boundaries.md` used three different status words for `ml` in one file;
+`schema.md` §11 was still headed "Proposed"; the root `README.md` predated
+Phase 2 entirely; and the `docs/README.md` decision index omitted `ADR-0010`
+and `ADR-0011`. The reimbursement card and the testing strategy also carried a
+stale claim: they called the "in any status" delete half of `REIMB-R11`
+unasserted, while the committed endpoint case
+`a_claim_can_be_deleted_in_any_status` (`tests/claims_api.rs`) asserts exactly
+that half. The same audit asked for the dependency-security gate, the coverage
+gaps the testing strategy self-declared, and a bounded owner decision on
+automation scope. This change repairs and supplies all of it, and records a
+real executed run.
+
+#### What changed
+
+| Area | Change |
+| ---- | ------ |
+| `docs/project-truth.md` | §3 states Phase 2 is delivered and `Verified` (2026-10-29); §17 lists migrations `0001..0007` and gains the scoped-API-keys row (authority `ADR-0011`, not a §18 requirement, as the feature card records); §18's intro is rewritten to the resolved state, keeping the review history (`-20261024-010`, `-011`, the 2026-10-26 re-gate, `-20261026-001`, `-20261029-002`) as the path, not as an open debt; a new **§6.2 amendment (2026-10-30)** accepts the web frontend as a separate codebase (owner instruction of the stabilization task) while the mobile client stays excluded |
+| `docs/roadmap.md` | §1 status-column note corrected: the three Phase 2 features are `Verified`; the seeder stays `Implemented` tooling; the Web frontend row becomes `Accepted` (2026-10-30) with the amendment named |
+| `README.md` | The Status section now reflects the backend as implemented and `Verified` through Phase 2, the container as CI-built but unpublished, and the frontends/automation as not started |
+| `docs/architecture/module-boundaries.md` | The Phase 2 section heading, its "Mostly planned" blockquote, the three module-table rows and the `ml` subsection heading all read `Verified` consistently |
+| `docs/database/schema.md` | §11 re-headed "built and `Verified`" with the status blockquote rewritten; the per-migration paragraphs were already accurate and stand |
+| `docs/README.md` | The decision index gains `ADR-0010`, `ADR-0011` and `ADR-0012`; the architecture index gains the two preparation documents |
+| **Supply chain (new)** | `deny.toml` (cargo-deny config v2: every vulnerability advisory denied unconditionally, unknown sources denied, licences deny-by-default with the allow list to be completed by the first CI run), `.github/dependabot.yml` (cargo + github-actions, weekly), and `ci.yml` hardened: all action references pinned to verified commit SHAs (`actions/checkout` v4.4.0 — the same SHA `container.yml` already pinned, `actions/cache` v4, `dtolnay/rust-toolchain` stable branch, `EmbarkStudios/cargo-deny-action` v2) and a new `supply-chain` job runs `cargo deny check` on every push. Both configs were validated by the independent review, not executed locally (`cargo deny` is not installed on this host); the first execution is the CI job |
+| **Decision requests (new)** | `open-questions.md` gains `Q-15`…`Q-19` — the five security decisions the audit raised, each with options, costs and the owner as decider: Argon2 pepper, access-token revocation, registration enumeration, email grammar, refresh-rotation transaction boundaries. No authentication behaviour was changed; the recorded `ADR-0003` ordering stands |
+| **Coverage (new)** | 22 new test cases close recorded gaps: `tests/api_keys_schema.rs` (8 — the `0007` constraints against a scratch database), `tests/embeddings_schema.rs` (7 — the `0006` constraints), `tests/cors.rs` (6 — HTTP-level CORS, including the empty-allowlist and disallowed-preflight cases) and `tests/session_prune.rs` (1 — the prune removes only sessions expired beyond the grace). No source file, route or DTO changed |
+| **Maintainability (code)** | `src/api/routes.rs`: the stale `GET /notes/search` comment (claiming `400`) now states the test-pinned `405`; `src/bin/atom-ml-bench.rs`: the hard-coded personal-machine model path is replaced by a bare relative default — `ATOM_ML_MODEL` remains the documented invocation. `atom-ml-spike.rs` is left untouched: it is the frozen `ADR-0008` §8 record |
+| **Decisions (proposals)** | `ADR-0012-automation-orchestration-scope.md` (`Proposed`, owner decision `O7`): n8n as an external orchestrator reaching ATOM only through authenticated, idempotent endpoints, with the price-monitoring schema sketch as the first use case — no automation code is built by this change |
+| **Preparation documents (new)** | `docs/architecture/mobile-preparation.md` and `docs/architecture/ai-roadmap.md` — preparation only, each stating plainly what does not exist |
+| Feature cards | `reimbursements/status.md`: the `REIMB-R11` row names `a_claim_can_be_deleted_in_any_status` with what it asserts; §2 records that four of the five small gaps have **uncommitted** working-tree cases (executed 2026-10-30, passing) and that the review rows closed; `job-applications/status.md`: the broken sentence in §1.2 repaired and the four "No run is recorded" cells record the 2026-10-30 execution |
+| `docs/testing/strategy.md` | The reimbursement caveat no longer calls `REIMB-R11`'s "in any status" unasserted; dated paragraphs record the 2026-10-30 runs and the WIP isolation race (below) |
+| `docs/engineering/implementation-status.md` | The reimbursements row records the fresh run and the corrected gap state; the user's own 2026-10-29 ML-benchmark edits are preserved verbatim |
+| `AGENTS.md` | The repository-layout tree names the four modules added since it was written (`api_keys`, `reimbursements`, `job_applications`, `ml`) |
+
+#### What was measured
+
+Executed on this Windows host against the disposable `atom_test` database
+(name-guarded by the harness; no other database on the server is touched):
+`cargo fmt --all -- --check` **pass**; `cargo clippy --all-targets
+--all-features -- -D warnings` **exit 0**; `cargo check --no-default-features
+--all-targets` **pass**; `cargo run --bin atom-docs -- --strict` **OK, 0
+warnings**. Test runs: the working tree (`96c37b2` + five uncommitted tests)
+first executed **541** tests (**540 passed, 1 failed**); after the 22 new
+coverage cases landed, the final full run executed **563** (**562 passed, 1
+failed**). The single failure
+(`the_seeded_claims_are_readable_through_the_api`) is a test-isolation race
+introduced by the **uncommitted** minimal-profile seeding case in
+`tests/claims_flow.rs`: that case resets the shared database to the minimal
+profile while the committed opportunistic case is mid-flight, so the
+committed case's existence-check-then-login as `owner@atom.local` loses the
+account between the two steps and the login's session insert answers the
+foreign-key violation the API maps to `500`. The committed case re-run in
+isolation passes (1 passed, 0 failed), and the committed tree alone executes
+**536/536 on Windows**, matching the `K1` split. All five uncommitted tests
+and all 22 new cases pass. The defect and the proposed fix (serialize the two
+seeded cases with the seeder advisory lock, or run the WIP case against its
+own scratch database) are recorded for the file's owner; the file is
+uncommitted user work and was not modified by this change. The new
+`cargo-deny` gate and the Dependabot configuration were not executed locally
+(`cargo deny` is not installed on this host); their first execution is the
+CI `supply-chain` job, and they are recorded here as *configured, not run*.
+
+#### What did not change
+
+No migration, no published contract, no endpoint, no DTO, and no committed
+test was modified or deleted. The source changes are two comment/string
+edits that alter no behaviour (the `routes.rs` comment and the `ml-bench`
+default path); the 22 new cases are new files; and the five uncommitted test
+cases and the three user-modified documentation edits are preserved
+byte-for-byte. The one advisory code wording from the 2026-10-29 review (the
+match-limit message reusing the too-long template) is recorded in the review
+entry as accepted, not fixed here.
+
+#### Documentation
+
+This entry is the documentation change. The reconciliation is verifiable with
+`cargo run --bin atom-docs -- --strict`. The `atom-web` frontend scaffold is
+a separate codebase outside this repository; its setup, auth design and
+delivery checklist are recorded in that codebase's own README, and nothing
+about it is claimed in this repository's status documents.
+
+
 ### ATOM-CHANGE-20261030-002 - The WIP seeding race is resolved: the seeded claims read holds the seeder lock
 
 **Date:** 2026-10-30 (UTC)
