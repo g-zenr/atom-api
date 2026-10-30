@@ -1,0 +1,21 @@
+# Dependency-update monitoring, introduced by the 2026-10-30 stabilization
+# change. Dependabot opens pull requests; it never merges. Every dependency
+# change still goes through the six gates and the review process
+# (AGENTS.md §4.8: a dependency is added only with a recorded reason), so a
+# Dependabot PR is an input to that process, not an exception to it.
+
+version: 2
+updates:
+  # Rust dependencies: Cargo.toml / Cargo.lock.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+
+  # The GitHub Actions the workflows pin by commit SHA. A new action release
+  # shows up as a pull request that proposes the new SHA, so the pin stays
+  # deliberate instead of drifting.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

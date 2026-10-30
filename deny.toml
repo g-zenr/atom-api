@@ -1,0 +1,66 @@
+# cargo-deny configuration — the supply-chain gate.
+#
+# Introduced by the 2026-10-30 stabilization change (see
+# docs/engineering/change-log.md). The goal is the one the audit named: a
+# confirmed advisory in the dependency graph must fail CI instead of sitting
+# unseen in Cargo.lock.
+#
+# The check runs in CI (`.github/workflows/ci.yml`, job `supply-chain`) through
+# the pinned `cargo-deny-action`; locally: `cargo install cargo-deny && cargo
+# deny check`. No hosted or paid service is required beyond the advisory
+# database the tool fetches itself.
+
+[graph]
+# Check the graph as the CI build sees it: with the default features, which
+# include `docs` (utoipa-swagger-ui) and `ml` (burn).
+all-features = true
+
+[advisories]
+version = 2
+# A published RUSTSEC advisory against a crate in the graph fails the check:
+# under config v2, every vulnerability advisory is denied unconditionally —
+# there is no key to tune it. `unmaintained` and `yanked` are deliberately
+# soft warnings: the lockfile is the artifact under audit, and a warn keeps
+# the gate focused on advisories.
+unmaintained = "warn"
+yanked = "warn"
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+# Under config v2 the licence check is deny-by-default and cannot be softened:
+# any graph licence missing from the allow list fails the check. The list
+# below is the conventional set carried by the current graph (rustcrypto,
+# tokio/axum/sqlx, burn, unicode crates); the first CI run completes it, and
+# a missing licence is fixed by adding it deliberately, with a comment, not
+# by loosening the gate.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "OpenSSL",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+]
+
+[bans]
+# Duplicated versions are reported for visibility. The burn and rustcrypto
+# graphs legitimately carry several major versions of the same crate today;
+# denying would make this gate a churn gate rather than a security gate.
+multiple-versions = "warn"
+
+[sources]
+# Only crates.io and no git dependencies: a dependency added without a
+# recorded reason (AGENTS.md §4.8) and from an unknown source must fail.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = [
+    "https://github.com/rust-lang/crates.io-index",
+]
+allow-git = []
