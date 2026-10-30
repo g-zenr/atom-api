@@ -4,7 +4,10 @@
 //! patch and delete. `C-R3`/`C-R4` publish seven more: the three item writes and
 //! the four lifecycle actions. This file holds the 55 acceptance tests those
 //! chains name - plus the regression test for `REIMB-R11`, that a claim is
-//! deletable in every status - grouped the way the design document
+//! deletable in every status, and the four item-route edges the testing
+//! document (`docs/features/reimbursements/testing.md` §3) named open: the
+//! item-description bound, a non-date `incurred_on`, a non-UUID item id and a
+//! file body - grouped the way the design document
 //! (`docs/architecture/reimbursements-crud-design.md` §12) and
 //! [`docs/features/reimbursements/api.md`] §7-§14 group them: CRUD, ownership,
 //! money on the wire, `422` validation, `400`/`413` malformed, listing and
@@ -146,6 +149,27 @@ async fn send_raw(
         .uri(uri)
         .header("authorization", format!("Bearer {token}"))
         .header("content-type", "application/json")
+        .body(Body::from(body))
+        .expect("the raw request must be valid");
+
+    send(app, request).await
+}
+
+/// Sends a raw request with an explicit content type, so a test can present
+/// the headers a non-JSON client would present.
+async fn send_raw_with_type(
+    app: &Router,
+    method: Method,
+    uri: &str,
+    token: &str,
+    content_type: &str,
+    body: String,
+) -> TestResponse {
+    let request = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", content_type)
         .body(Body::from(body))
         .expect("the raw request must be valid");
 
@@ -1789,6 +1813,67 @@ async fn a_claim_id_must_be_a_uuid() {
     assert_error(&body, "bad_request");
 }
 
+/// `REIMB-R10`: a non-UUID `item_id` is refused by the path extractor, on both
+/// verbs that address one item — the same `400 bad_request`
+/// [`a_claim_id_must_be_a_uuid`] proves for the claim path.
+///
+/// The claim and the item are real and owned by the caller, so the refusal can
+/// only be about the path shape. The refused writes changed nothing, and the
+/// same routes accept the real identifier, which is the accepted control.
+#[tokio::test]
+async fn an_item_id_must_be_a_uuid() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "item-bad-id").await;
+
+    let created = create_claim(&app, &user.access_token, "Bad item id").await;
+    let claim_id = id_of(&created);
+
+    let added = post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        item_body("One line", "1.0000", "2026-10-20"),
+    )
+    .await;
+    let item_id = item_id_of(&added.expect_status(StatusCode::CREATED));
+
+    let response = patch_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        "not-a-uuid",
+        json!({ "amount": "2.0000" }),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::BAD_REQUEST);
+    assert_error(&body, "bad_request");
+
+    let response = delete_item(&app, &user.access_token, &claim_id, "not-a-uuid").await;
+    let body = response.expect_status(StatusCode::BAD_REQUEST);
+    assert_error(&body, "bad_request");
+
+    // Nothing the refused path addressed was written.
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(
+        claim["items"].as_array().map(Vec::len),
+        Some(1),
+        "a refused item path must not touch the claim's items: {claim}"
+    );
+    assert_eq!(claim["items"][0]["amount"], "1.0000");
+
+    // The control: the same routes with the real identifier work.
+    let response = patch_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        &item_id,
+        json!({ "amount": "2.0000" }),
+    )
+    .await;
+    response.expect_status(StatusCode::OK);
+}
+
 #[tokio::test]
 async fn a_malformed_body_is_refused() {
     let state = test_state().await;
@@ -2742,6 +2827,199 @@ async fn an_item_amount_must_be_a_four_decimal_string() {
         assert_money(&claim["total_amount"], "total_amount"),
         "0.0000"
     );
+}
+
+/// `REIMB-R01`: the item description is bounded at 1–500 characters, measured
+/// **after** trimming (`api.md` §2.7).
+///
+/// 500 characters padded to 502 on the wire are accepted and stored trimmed;
+/// 501 after trimming are `422` naming `description`. The refused item wrote
+/// nothing: the claim still holds exactly the accepted one and its total did
+/// not move.
+#[tokio::test]
+async fn an_item_description_is_bounded() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "item-description").await;
+
+    let created = create_claim(&app, &user.access_token, "Description bound").await;
+    let claim_id = id_of(&created);
+
+    // At the bound: 500 characters after trimming, 502 on the wire.
+    let at_bound = "x".repeat(500);
+    let response = post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        json!({
+            "description": format!(" {at_bound} "),
+            "amount": "1.0000",
+            "incurred_on": "2026-10-20",
+        }),
+    )
+    .await;
+    let created_item = response.expect_status(StatusCode::CREATED);
+    assert_eq!(
+        created_item["description"], at_bound,
+        "the stored description must be the trimmed value: {created_item}"
+    );
+
+    // One character past the bound, still measured after trimming.
+    let response = post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        json!({
+            "description": format!(" {} ", "x".repeat(501)),
+            "amount": "1.0000",
+            "incurred_on": "2026-10-20",
+        }),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::UNPROCESSABLE_ENTITY);
+    assert_field_error(&body, "validation_failed", "description");
+
+    // The refused item wrote nothing: the claim holds the one accepted item
+    // and its total is exactly what the accepted item made it.
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(
+        claim["items"].as_array().map(Vec::len),
+        Some(1),
+        "a refused description must not create an item: {claim}"
+    );
+    assert_eq!(
+        assert_money(&claim["total_amount"], "total_amount"),
+        "1.0000"
+    );
+}
+
+/// `REIMB-R01`: `incurred_on` is a `YYYY-MM-DD` real date (`api.md` §2.7).
+///
+/// A calendar day that does not exist and a word that is not a date never
+/// become the `NaiveDate` the contract publishes, so neither reaches the
+/// service: the shared body extractor reports the deserialiser's failure as
+/// one violation for the field `body` (`docs/api/error-contract.md` §3), a
+/// `422 validation_failed`. Nothing is written, and a real date on the same
+/// route is accepted, which is the control.
+#[tokio::test]
+async fn an_item_date_must_be_a_date() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "item-date").await;
+
+    let created = create_claim(&app, &user.access_token, "Date shapes").await;
+    let claim_id = id_of(&created);
+
+    for incurred_on in ["2026-02-30", "yesterday"] {
+        let response = post_item(
+            &app,
+            &user.access_token,
+            &claim_id,
+            item_body("Dated item", "1.0000", incurred_on),
+        )
+        .await;
+        let body = response.expect_status(StatusCode::UNPROCESSABLE_ENTITY);
+        assert_field_error(&body, "validation_failed", "body");
+    }
+
+    // Nothing refused was written.
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(
+        claim["items"].as_array().map(Vec::len),
+        Some(0),
+        "a refused date must not create an item: {claim}"
+    );
+    assert_eq!(
+        assert_money(&claim["total_amount"], "total_amount"),
+        "0.0000"
+    );
+
+    // The control: a real date on the same route is accepted, so the refusals
+    // are the date rule and not a broken route.
+    post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        item_body("Dated item", "1.0000", "2026-10-20"),
+    )
+    .await
+    .expect_status(StatusCode::CREATED);
+}
+
+/// `REIMB-R08`: the item-create route takes the published JSON contract and
+/// nothing else — a file body creates no item.
+///
+/// Two shapes a file upload takes are refused, each on the documented side of
+/// the error contract's `400`/`422` split (`docs/api/error-contract.md` §4):
+/// a `multipart/form-data` body is not JSON at all and answers `400
+/// bad_request`; a body that is nothing but a base64 payload **as JSON** is
+/// well formed but does not match the item contract, so it answers `422
+/// validation_failed` naming `body`. Neither writes an item, and the same
+/// route accepts the published JSON shape, which is the control. The extractor
+/// is [`crate::api::extract::Json`], which reads the body as JSON and never
+/// inspects the content type — there is no `415` in the contract, and none in
+/// the code.
+#[tokio::test]
+async fn a_file_body_does_not_create_an_item() {
+    let state = test_state().await;
+    let app = app(state);
+    let user = register_user(&app, "item-file-body").await;
+
+    let created = create_claim(&app, &user.access_token, "File body").await;
+    let claim_id = id_of(&created);
+
+    // A `multipart/form-data` body: not JSON, so a malformed request.
+    let multipart = "--atom-test-boundary\r\n\
+         Content-Disposition: form-data; name=\"file\"; filename=\"receipt.png\"\r\n\
+         Content-Type: image/png\r\n\
+         \r\n\
+         \u{89}PNG-not-really-a-file\r\n\
+         --atom-test-boundary--\r\n";
+    let response = send_raw_with_type(
+        &app,
+        Method::POST,
+        &items_path(&claim_id),
+        &user.access_token,
+        "multipart/form-data; boundary=atom-test-boundary",
+        multipart.to_string(),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::BAD_REQUEST);
+    assert_error(&body, "bad_request");
+
+    // A base64-only body presented as JSON: well formed, wrong contract.
+    let response = send_raw(
+        &app,
+        Method::POST,
+        &items_path(&claim_id),
+        &user.access_token,
+        "\"aGVsbG8sIHJlY2VpcHQ=\"",
+    )
+    .await;
+    let body = response.expect_status(StatusCode::UNPROCESSABLE_ENTITY);
+    assert_field_error(&body, "validation_failed", "body");
+
+    // Neither refusal created an item.
+    let claim = detail_of(&app, &user.access_token, &claim_id).await;
+    assert_eq!(
+        claim["items"].as_array().map(Vec::len),
+        Some(0),
+        "a file body must not create an item: {claim}"
+    );
+    assert_eq!(
+        assert_money(&claim["total_amount"], "total_amount"),
+        "0.0000"
+    );
+
+    // The control: the published JSON shape on the same route is accepted.
+    post_item(
+        &app,
+        &user.access_token,
+        &claim_id,
+        item_body("One line", "1.0000", "2026-10-20"),
+    )
+    .await
+    .expect_status(StatusCode::CREATED);
 }
 
 #[tokio::test]

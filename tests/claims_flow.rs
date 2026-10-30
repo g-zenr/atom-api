@@ -42,6 +42,8 @@ use common::{
 };
 use serde_json::{Value, json};
 use sqlx::postgres::PgPoolOptions;
+use sqlx::{Connection, PgConnection};
+use std::process::Command;
 use uuid::Uuid;
 
 /// The collection path of the feature.
@@ -1392,4 +1394,138 @@ async fn the_seeded_claims_are_readable_through_the_api() {
             "a seeded claim's stored total must equal the sum of its items"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// The guaranteed seeded read
+// ---------------------------------------------------------------------------
+
+/// The advisory-lock key every copy of the suite that drives the seeder uses.
+///
+/// The bytes spell `ATOMSEED` - the same key [`tests/seeder.rs`] holds for its
+/// own runs - so two processes that drive the seeder cannot overlap even when
+/// their test binaries do.
+const SEEDER_LOCK_KEY: i64 = 0x4154_4f4d_5345_4544;
+
+/// Holds the cross-process seeder lock for the caller's whole test.
+///
+/// The lock lives on a PostgreSQL session of its own, so PostgreSQL releases
+/// it when the connection closes: a crashed test cannot leave it behind. It
+/// serialises this file's seed run against `tests/seeder.rs`'s runs, which
+/// hold the same key.
+async fn seeder_lock() -> PgConnection {
+    let mut session = PgConnection::connect(&common::test_database_url())
+        .await
+        .expect("the test database must be reachable for the seeder lock");
+
+    sqlx::query("SELECT pg_advisory_lock($1)")
+        .bind(SEEDER_LOCK_KEY)
+        .execute(&mut session)
+        .await
+        .expect("the seeder advisory lock must be acquirable");
+
+    session
+}
+
+/// The guarantee the opportunistic seeded read cannot make: this case runs
+/// `atom-seed` itself, so the rows it asserts exist because this test put them
+/// there (`testing.md` §3 item 1).
+///
+/// The invocation is the one `tests/seeder.rs` drives: the real binary, the
+/// shared disposable database in `DATABASE_URL` and `APP_ENV=dev`. The
+/// `--allow-non-empty` flag is what lets the run reach the data at all - the
+/// suite's database holds every other test's accounts, and the seeder's `G3`
+/// guard refuses a non-empty database without it. `--reset --profile minimal`
+/// then makes the seeded set **exact** (`docs/database/seeding.md` §2 and
+/// §7.4): one claim in total, and row `i` belongs to seeded user `i % 2`, so
+/// the owner account holds that one claim. The profile's status cycle starts
+/// at index 0, which is a `draft`, and the first claim of a profile carries no
+/// items - so the published total is the empty sum, `"0.0000"`.
+#[tokio::test]
+async fn the_seeded_minimal_profile_is_readable_through_the_api() {
+    let _lock = seeder_lock().await;
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_atom-seed"));
+    command
+        .args(["--profile", "minimal", "--reset", "--allow-non-empty"])
+        .env("DATABASE_URL", common::test_database_url())
+        .env("APP_ENV", "dev");
+
+    let output = command
+        .output()
+        .expect("the atom-seed binary must be runnable");
+    assert!(
+        output.status.success(),
+        "the minimal seed run must exit 0: {:?}\n--- stdout ---\n{}\n--- stderr ---\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let state = test_state().await;
+    let app = app(state);
+
+    // The published development credential authenticates the account the run
+    // just wrote.
+    let response = send(
+        &app,
+        request(
+            Method::POST,
+            "/api/v1/auth/login",
+            None,
+            Some(json!({ "email": SEEDED_EMAIL, "password": SEEDED_PASSWORD })),
+        ),
+    )
+    .await;
+    let logged_in = response.expect_status(StatusCode::OK);
+    assert_eq!(logged_in["user"]["email"], SEEDED_EMAIL);
+
+    let seeded_token = logged_in["tokens"]["access_token"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the login must return an access token: {logged_in}"));
+
+    // The listing is exactly the minimal profile's set for this account.
+    let page = list_claims(&app, seeded_token, "?limit=5&offset=0").await;
+    let page = page.expect_status(StatusCode::OK);
+
+    assert_eq!(fields_of(&page), PAGE_FIELDS);
+    assert_pagination(&page, 1, 5, 0);
+    assert_eq!(
+        page["pagination"]["has_more"], false,
+        "one claim leaves nothing after the page: {page}"
+    );
+
+    let items = page["items"].as_array().expect("an items array");
+    assert_eq!(
+        items.len(),
+        1,
+        "the minimal profile seeds exactly one claim, and it belongs to this account: {page}"
+    );
+    assert_eq!(fields_of(&items[0]), CLAIM_FIELDS);
+    assert_eq!(
+        items[0]["status"], "draft",
+        "the profile's status cycle starts at index 0, which is a draft: {page}"
+    );
+    assert_eq!(
+        assert_money(&items[0]["total_amount"], "total_amount"),
+        "0.0000",
+        "the first claim of a profile is a draft with no items: {page}"
+    );
+
+    // The detail agrees with the listing, on a fresh read: no items, and the
+    // stored total is the empty sum.
+    let claim_id = id_of(&items[0]);
+    let detail = read_claim(&app, seeded_token, &claim_id).await;
+
+    assert_eq!(fields_of(&detail), CLAIM_DETAIL_FIELDS);
+    assert_eq!(detail["status"], "draft");
+    assert_eq!(
+        detail["items"].as_array().map(Vec::len),
+        Some(0),
+        "the minimal profile's claim carries no items: {detail}"
+    );
+    assert_eq!(
+        assert_money(&detail["total_amount"], "total_amount"),
+        "0.0000"
+    );
 }

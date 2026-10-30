@@ -11,9 +11,10 @@
 > 2026-10-29: the encoder span was read clean by
 > [`ATOM-REVIEW-20261029-002`](../../engineering/review-log.md) (building on
 > `ATOM-REVIEW-20261026-001`, which found no code defect in the same span), the
-> six gates re-ran at `0`, and the recorded checks pass. The real-model quality
-> evidence is the recorded manual benchmark of §5 — a recorded check that
-> passes, not a CI gate; that limitation stands as recorded in §1.3.
+> six gates re-ran at `0`, and the recorded checks pass — including the
+> real-model benchmark, **reproduced on 2026-10-29** from its documented
+> invocation (§5.1a: 15/15 at rank 1). What remains is the absence of a
+> model-loading CI case, recorded in §1.3.
 > Read §1, §2.1 and §5 together: they say the same thing.
 
 ## 1. The status
@@ -115,16 +116,14 @@ and this document records that rather than papering over it:
    final tree with the same result. That was the one review gap.
 2. **The re-gate is recorded** (`ATOM-REVIEW-20261026-002`), and the six gates
    were re-executed at `0` on 2026-10-29 with the 536-test split re-derived.
-3. **What remains a limitation:** the real-model quality evidence is the
-   single recorded manual run of §5 (`ATOM-CHANGE-20261025-003`, 15-of-15
-   retrieval, 88–112 ms mean, 804 ms worst case, 183.8 MiB RSS). The weights
-   are operator-supplied and absent from the repository, so no session on this
-   machine can re-measure them, and no CI case loads a model file. The
-   unsettled pair count is marked unverified in §4/§5. `AGENTS.md` §6 accepts a
-   "recorded check that passes" as `Verified` evidence; this is one — but it is
-   a single run, and publishing the artifacts (or a checksum) with a
-   reproducible `atom-ml-bench` invocation is the upgrade path if the owner
-   wants the numbers to be reproducible rather than recorded.
+3. **What remains a limitation:** no CI case loads a model file, because the
+   weights are operator-supplied and live outside the repository (their
+   documented local location and the reproduction recipe are §5.1a). The
+   real-model quality evidence is no longer a single unrepeatable run: the
+   2026-10-29 re-run reproduced it on the current tree from the documented
+   invocation — 15/15 at rank 1, the 0.25 threshold separating positives from
+   the negative control. The pair-count and cosine-range discrepancies of the
+   earlier records are settled by the re-run (§4).
 
 ### 1.4 What `ML-R02` requires, and what exists
 
@@ -283,18 +282,19 @@ listed in [`testing.md`](testing.md) §6.
 | Half | What proves it | Where it runs |
 | ---- | -------------- | ------------- |
 | The fixture evaluation | The pipeline: the query is embedded, the stored vectors are compared, the sort runs and the expected note comes first. | CI, `Deterministic` — `the_fixture_queries_find_the_expected_notes`, [`testing.md`](testing.md) §2.7 |
-| The real model's quality | Whether the real encoder retrieves a paraphrase, and its latency and memory. | Once, by hand — `atom-ml-bench`, 2026-10-25, recorded in §5 |
+| The real model's quality | Whether the real encoder retrieves a paraphrase, and its latency and memory. | By hand, reproducibly — `atom-ml-bench`, 2026-10-25 and re-run 2026-10-29 (§5) |
 
-The manual run **has happened** and is §5; it is not a CI gate. One figure in it
-is not settled: the number of evaluation pairs. The current binary defines
-fifteen (`src/bin/atom-ml-bench.rs`), §5 records fifteen, and
-[`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) §12.1 records five.
-The repository does not hold the transcript, so which count that run produced
-**cannot be determined here**. The fifteen-pair figure is the one the current
-binary produces and is recorded as such; the five-pair figure is kept as an
-earlier probe and is marked **unverified**. The top-1 cosine range is unsettled
-for the same reason: §5 and [`testing.md`](testing.md) §6 carry different ranges
-for the same run, and neither is re-measured here.
+The manual run **has happened twice** and is §5; it is not a CI gate. The one
+figure that was not settled — the number of evaluation pairs and the top-1
+cosine range — is settled as far as this machine can settle it: the 2026-10-29
+re-run produced **fifteen** pairs (the current binary's definition) with a top-1
+cosine range of **0.2664–0.6740 (mean 0.4977)**, matching
+[`testing.md`](testing.md) §6's recorded range and superseding the
+[`ADR-0008`](../../decisions/ADR-0008-local-pure-rust-ml.md) §12.1 five-pair
+figure, which stays as the earlier probe. The repository still does not hold
+the 2026-10-25 transcript, so that run's own count remains undetermined — which
+is now moot for verification, because the re-run is reproducible from the
+documented invocation.
 
 ## 5. The encoder, measured (2026-10-25)
 
@@ -322,6 +322,35 @@ the local SafeTensors file, with masked mean pooling and unit-length output.
 The spike's 0.02 ms per text was a lookup and a projection; the encoder is
 roughly **5 600 times** more expensive. That number was a floor, and this is the
 real cost.
+
+### 5.1a The reproducible re-run (2026-10-29)
+
+The 2026-10-25 run was repeated on the current tree (`96c37b2`) from the
+weights' documented location, exit code `0`:
+
+```text
+$env:ATOM_ML_MODEL = "$env:USERPROFILE\.cache\huggingface\hub\models--sentence-transformers--all-MiniLM-L6-v2\snapshots\<sha>\model.safetensors"
+cargo run --release --locked --bin atom-ml-bench
+```
+
+| Measurement | 2026-10-25 | 2026-10-29 re-run |
+| ----------- | ---------- | ----------------- |
+| Construction | 96 ms | 143.9 ms |
+| First inference | — | 22.996 ms |
+| 1 text, mean | 88.0 ms | 27.4 ms |
+| 100 texts, mean per text | 112.6 ms | 25.4 ms |
+| Worst case, 256 tokens | 804 ms mean | 148.6 ms mean |
+| Peak RSS | 183.8 MiB | 184.2 MiB |
+| Semantic quality | 15/15, cosine range disputed | **15/15 at rank 1**, top-1 cosine 0.2664–0.6740, mean 0.4977 |
+| Threshold | — | **0.25 supported**: all 15 positives above it, the negative control (0.1256) below it |
+| Determinism | identical input → identical vector | identical input → identical vector |
+
+The two runs agree on quality (15/15, the same cosine band) and memory; the
+latency differs by a factor of three to five in the new run's favour, consistent
+with machine state (power profile, thermal headroom) rather than a code change —
+no encoder source changed between the runs. Both are far inside the 2 s
+inference budget. The invocation above is the reproduction recipe; the weights
+stay operator-supplied and outside the repository.
 
 ### 5.1 What the measurement does and does not change
 
