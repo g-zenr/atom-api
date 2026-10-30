@@ -47,8 +47,12 @@ use atom_api::ml::service::cosine;
 /// The dimension `ml.dimension` defaults to.
 const DIMENSION: usize = 384;
 
-/// The model file the development machine has, if `ATOM_ML_MODEL` is unset.
-const DEFAULT_MODEL: &str = r"C:\Users\Renz\.cache\huggingface\hub\models--sentence-transformers--all-MiniLM-L6-v2\snapshots\c9745ed1d9f207416be6d2e6f8de32d1f16199bf\model.safetensors";
+/// The model path when `ATOM_ML_MODEL` is unset. There is deliberately no
+/// machine-specific default: this benchmark refuses to run without the real
+/// weights, so the fallback is a bare relative name and the error tells the
+/// operator to set the variable (the documented invocation in
+/// `docs/features/ml/status.md` §5.1a sets it explicitly).
+const DEFAULT_MODEL: &str = "model.safetensors";
 
 /// One evaluation pair: the query a person types, and the note it must find.
 ///

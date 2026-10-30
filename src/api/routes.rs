@@ -251,8 +251,11 @@ pub const ROUTE_TABLE: &[(&str, &str)] = &[
     ("POST", "/notes"),
     // `POST /notes/search` is ownership of the `ml` module even though it lives
     // under `/notes`: it is a search over the same rows, and its shape is the
-    // scored one. `GET /notes/search` is answered by `GET /notes/{note_id}`
-    // and is a `400`, because `search` is not a UUID.
+    // scored one. `GET /notes/search` is answered by the search path with a
+    // `405`, not by `GET /notes/{note_id}` and not a `400`: axum gives the
+    // static path precedence over the dynamic segment, and the search path
+    // declares only `POST`. Pinned by
+    // `post_notes_search_is_not_shadowed_by_the_note_read` (`tests/ml_api.rs`).
     ("POST", "/notes/search"),
     ("GET", "/notes/{note_id}"),
     ("PATCH", "/notes/{note_id}"),
