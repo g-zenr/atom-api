@@ -14,6 +14,7 @@ use crate::config::Config;
 use crate::error::AppError;
 use crate::job_applications::handlers as job_handlers;
 use crate::ml::handlers as ml_handlers;
+use crate::monitoring::handlers as monitoring_handlers;
 use crate::notes::handlers as note_handlers;
 use crate::projects::handlers as project_handlers;
 use crate::reimbursements::handlers as claim_handlers;
@@ -82,6 +83,28 @@ use crate::tasks::handlers as task_handlers;
         job_handlers::create_event,
         job_handlers::update_event,
         job_handlers::delete_event,
+        monitoring_handlers::list_products,
+        monitoring_handlers::create_product,
+        monitoring_handlers::get_product,
+        monitoring_handlers::update_product,
+        monitoring_handlers::delete_product,
+        monitoring_handlers::list_listings,
+        monitoring_handlers::create_listing,
+        monitoring_handlers::update_listing,
+        monitoring_handlers::delete_listing,
+        monitoring_handlers::create_observation,
+        monitoring_handlers::list_observations,
+        monitoring_handlers::latest_observation,
+        monitoring_handlers::list_rules,
+        monitoring_handlers::create_rule,
+        monitoring_handlers::update_rule,
+        monitoring_handlers::delete_rule,
+        monitoring_handlers::start_run,
+        monitoring_handlers::finish_run,
+        monitoring_handlers::list_runs,
+        monitoring_handlers::list_alerts,
+        monitoring_handlers::get_alert,
+        monitoring_handlers::update_alert,
         ml_handlers::match_application,
         ml_handlers::reindex,
     ),
@@ -137,6 +160,33 @@ use crate::tasks::handlers as task_handlers;
             crate::job_applications::dto::UpdateEventRequest,
             crate::job_applications::models::ApplicationStatus,
             crate::job_applications::models::ApplicationEventKind,
+            crate::monitoring::dto::TrackedProductResponse,
+            crate::monitoring::dto::TrackedProductPage,
+            crate::monitoring::dto::CreateProductRequest,
+            crate::monitoring::dto::UpdateProductRequest,
+            crate::monitoring::dto::ListingResponse,
+            crate::monitoring::dto::ListingPage,
+            crate::monitoring::dto::CreateListingRequest,
+            crate::monitoring::dto::UpdateListingRequest,
+            crate::monitoring::dto::ObservationResponse,
+            crate::monitoring::dto::ObservationPage,
+            crate::monitoring::dto::CreateObservationRequest,
+            crate::monitoring::dto::RuleResponse,
+            crate::monitoring::dto::RulePage,
+            crate::monitoring::dto::CreateRuleRequest,
+            crate::monitoring::dto::UpdateRuleRequest,
+            crate::monitoring::dto::RunResponse,
+            crate::monitoring::dto::RunPage,
+            crate::monitoring::dto::FinishRunRequest,
+            crate::monitoring::dto::AlertResponse,
+            crate::monitoring::dto::AlertPage,
+            crate::monitoring::dto::UpdateAlertRequest,
+            crate::monitoring::models::ProductStatus,
+            crate::monitoring::models::ListingAvailability,
+            crate::monitoring::models::ListingValidationState,
+            crate::monitoring::models::RunOutcome,
+            crate::monitoring::models::NotifyVia,
+            crate::monitoring::models::NotificationStatus,
             crate::ml::dto::SearchMode,
             crate::ml::dto::MatchMode,
             crate::ml::dto::DegradedReason,
@@ -168,6 +218,10 @@ use crate::tasks::handlers as task_handlers;
         (name = "claims", description = "Expense claims and their line items"),
         (name = "companies", description = "Employers a job application points at"),
         (name = "job-applications", description = "Job applications and their event timeline"),
+        (
+            name = "monitoring",
+            description = "Price monitoring: tracked products, listings, observations, rules, automation runs and alerts"
+        ),
         (
             name = "ml",
             description = "Semantic search, note matching and the embedding reindex"
@@ -310,6 +364,36 @@ pub const ROUTE_TABLE: &[(&str, &str)] = &[
         "DELETE",
         "/job-applications/{application_id}/events/{event_id}",
     ),
+    // --- price monitoring ---
+    ("GET", "/products"),
+    ("POST", "/products"),
+    ("GET", "/products/{product_id}"),
+    ("PATCH", "/products/{product_id}"),
+    ("DELETE", "/products/{product_id}"),
+    ("GET", "/products/{product_id}/listings"),
+    ("POST", "/products/{product_id}/listings"),
+    ("PATCH", "/products/{product_id}/listings/{listing_id}"),
+    ("DELETE", "/products/{product_id}/listings/{listing_id}"),
+    // The observation is addressed by its listing alone: a listing is the
+    // scope a price history lives in, and the workflow that collects holds
+    // the listing, not a product route.
+    ("POST", "/listings/{listing_id}/observations"),
+    ("GET", "/listings/{listing_id}/observations"),
+    ("GET", "/listings/{listing_id}/observations/latest"),
+    ("GET", "/products/{product_id}/rules"),
+    ("POST", "/products/{product_id}/rules"),
+    ("PATCH", "/products/{product_id}/rules/{rule_id}"),
+    ("DELETE", "/products/{product_id}/rules/{rule_id}"),
+    // The run lifecycle: the workflow starts a run before it collects and
+    // finishes it with its outcome, its counts and its error summary.
+    ("POST", "/automation/runs"),
+    ("PATCH", "/automation/runs/{run_id}"),
+    ("GET", "/automation/runs"),
+    // Alerts are read at the top level: a rule and an observation may be
+    // gone, and the alert outlives the rules that address it.
+    ("GET", "/alerts"),
+    ("GET", "/alerts/{alert_id}"),
+    ("PATCH", "/alerts/{alert_id}"),
     // --- machine learning ---
     ("POST", "/job-applications/{application_id}/match"),
     ("POST", "/ml/reindex"),
@@ -439,6 +523,55 @@ pub fn api_routes() -> Router<AppState> {
         .route(
             "/job-applications/{application_id}/events/{event_id}",
             patch(job_handlers::update_event).delete(job_handlers::delete_event),
+        )
+        // --- price monitoring ---
+        .route(
+            "/products",
+            get(monitoring_handlers::list_products).post(monitoring_handlers::create_product),
+        )
+        .route(
+            "/products/{product_id}",
+            get(monitoring_handlers::get_product)
+                .patch(monitoring_handlers::update_product)
+                .delete(monitoring_handlers::delete_product),
+        )
+        .route(
+            "/products/{product_id}/listings",
+            get(monitoring_handlers::list_listings).post(monitoring_handlers::create_listing),
+        )
+        .route(
+            "/products/{product_id}/listings/{listing_id}",
+            patch(monitoring_handlers::update_listing).delete(monitoring_handlers::delete_listing),
+        )
+        .route(
+            "/listings/{listing_id}/observations",
+            post(monitoring_handlers::create_observation)
+                .get(monitoring_handlers::list_observations),
+        )
+        .route(
+            "/listings/{listing_id}/observations/latest",
+            get(monitoring_handlers::latest_observation),
+        )
+        .route(
+            "/products/{product_id}/rules",
+            get(monitoring_handlers::list_rules).post(monitoring_handlers::create_rule),
+        )
+        .route(
+            "/products/{product_id}/rules/{rule_id}",
+            patch(monitoring_handlers::update_rule).delete(monitoring_handlers::delete_rule),
+        )
+        .route(
+            "/automation/runs",
+            post(monitoring_handlers::start_run).get(monitoring_handlers::list_runs),
+        )
+        .route(
+            "/automation/runs/{run_id}",
+            patch(monitoring_handlers::finish_run),
+        )
+        .route("/alerts", get(monitoring_handlers::list_alerts))
+        .route(
+            "/alerts/{alert_id}",
+            get(monitoring_handlers::get_alert).patch(monitoring_handlers::update_alert),
         )
         // --- machine learning ---
         .route(

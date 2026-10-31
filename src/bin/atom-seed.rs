@@ -128,7 +128,31 @@ struct UserTable {
 /// writes a row into, listed because `--reset` must still be able to delete a
 /// key an operator created through the API, and because `V6` refuses a user
 /// table that is absent from this list.
-const USER_TABLES: [UserTable; 12] = [
+const USER_TABLES: [UserTable; 18] = [
+    UserTable {
+        name: "price_alerts",
+        delete: "DELETE FROM price_alerts WHERE user_id = ANY($1)",
+    },
+    UserTable {
+        name: "price_observations",
+        delete: "DELETE FROM price_observations WHERE user_id = ANY($1)",
+    },
+    UserTable {
+        name: "monitoring_rules",
+        delete: "DELETE FROM monitoring_rules WHERE user_id = ANY($1)",
+    },
+    UserTable {
+        name: "product_listings",
+        delete: "DELETE FROM product_listings WHERE user_id = ANY($1)",
+    },
+    UserTable {
+        name: "automation_runs",
+        delete: "DELETE FROM automation_runs WHERE user_id = ANY($1)",
+    },
+    UserTable {
+        name: "tracked_products",
+        delete: "DELETE FROM tracked_products WHERE user_id = ANY($1)",
+    },
     UserTable {
         name: "application_events",
         delete: "DELETE FROM application_events WHERE user_id = ANY($1)",
@@ -623,6 +647,9 @@ struct SeedOutcome {
     companies: EntityOutcome,
     applications: EntityOutcome,
     events: EntityOutcome,
+    products: EntityOutcome,
+    listings: EntityOutcome,
+    observations: EntityOutcome,
     embeddings: EntityOutcome,
 }
 
@@ -637,6 +664,9 @@ impl SeedOutcome {
             + self.companies.inserted
             + self.applications.inserted
             + self.events.inserted
+            + self.products.inserted
+            + self.listings.inserted
+            + self.observations.inserted
             + self.embeddings.inserted
     }
 
@@ -650,6 +680,9 @@ impl SeedOutcome {
             + self.companies.skipped
             + self.applications.skipped
             + self.events.skipped
+            + self.products.skipped
+            + self.listings.skipped
+            + self.observations.skipped
             + self.embeddings.skipped
     }
 }
@@ -773,6 +806,13 @@ async fn run(args: SeedArgs) -> Result<(), Failure> {
     outcome.companies = seed_companies(&mut transaction, args.profile).await?;
     outcome.applications = seed_applications(&mut transaction, args.profile).await?;
     outcome.events = seed_events(&mut transaction, args.profile).await?;
+
+    // The monitoring dataset: one product, its one listing and three
+    // observations for the owner account. It comes after the users, because
+    // everything under it references one.
+    outcome.products = seed_products(&mut transaction, args.profile).await?;
+    outcome.listings = seed_listings(&mut transaction, args.profile).await?;
+    outcome.observations = seed_observations(&mut transaction, args.profile).await?;
 
     // Embeddings come last, and only when they are asked for: every source
     // they name must already exist, and a run without `--with-embeddings` must
@@ -1703,6 +1743,174 @@ async fn seed_events(
     Ok(outcome)
 }
 
+/// Seeds the monitoring dataset: one tracked product, its one listing and
+/// three descending observations, for the owner account.
+///
+/// The shape is the same for every profile, because it exists to make the
+/// feature visible in a development database, not to fill it. The normalised
+/// name and the configuration hash mirror what
+/// `src/monitoring/service.rs::derive_identity` derives — the seeder does not
+/// link the library crate, so the two-line rule is written here as well, and a
+/// change to one copy is a change to the other.
+///
+/// The money values are fixed decimal strings; no money is parsed or compared
+/// in Rust (`ADR-0007`). The observations descend in price so the shape of a
+/// price drop is visible in any client that lists the history.
+///
+/// `--reset` deletes the monitoring rows through [`USER_TABLES`], so a second
+/// run re-inserts them, and a run without `--reset` skips what exists.
+async fn seed_products(
+    connection: &mut PgConnection,
+    profile: Profile,
+) -> Result<EntityOutcome, Failure> {
+    let mut outcome = EntityOutcome::default();
+    let id = seeded_id("tracked_products", 0);
+    let user_id = seeded_id("users", 0);
+    let created_at = base_timestamp() + Duration::days(40);
+    let updated_at = created_at + Duration::hours(1);
+
+    let _ = profile;
+
+    let inserted = sqlx::query(
+        "INSERT INTO tracked_products \
+             (id, user_id, brand, model, specs, normalized_name, config_hash, status, \
+              created_at, updated_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8, $9) \
+         ON CONFLICT (id) DO NOTHING",
+    )
+    .bind(id)
+    .bind(user_id)
+    .bind("Lenovo")
+    .bind("ThinkPad X1 Carbon")
+    .bind("32GB RAM, 1TB SSD, Ultra 7 155H")
+    .bind("lenovo thinkpad x1 carbon")
+    .bind(config_hash("32GB RAM, 1TB SSD, Ultra 7 155H"))
+    .bind(created_at)
+    .bind(updated_at)
+    .execute(&mut *connection)
+    .await
+    .map_err(|error| insert_failure("tracked_products", &error))?
+    .rows_affected();
+
+    outcome.record(inserted);
+
+    Ok(outcome)
+}
+
+/// Seeds the one listing of the seeded product.
+async fn seed_listings(
+    connection: &mut PgConnection,
+    profile: Profile,
+) -> Result<EntityOutcome, Failure> {
+    let mut outcome = EntityOutcome::default();
+    let id = seeded_id("product_listings", 0);
+    let user_id = seeded_id("users", 0);
+    let product_id = seeded_id("tracked_products", 0);
+    let created_at = base_timestamp() + Duration::days(40) + Duration::hours(1);
+    let updated_at = created_at + Duration::hours(1);
+
+    let _ = profile;
+
+    let inserted = sqlx::query(
+        "INSERT INTO product_listings \
+             (id, user_id, product_id, retailer, url, external_id, currency, \
+              availability, validation_state, created_at, updated_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, 'EUR', 'available', 'valid', $7, $8) \
+         ON CONFLICT (id) DO NOTHING",
+    )
+    .bind(id)
+    .bind(user_id)
+    .bind(product_id)
+    .bind("Notebooksbilliger")
+    .bind("https://www.notebooksbilliger.de/seeded/lenovo-thinkpad-x1-carbon")
+    .bind("2000510704135")
+    .bind(created_at)
+    .bind(updated_at)
+    .execute(&mut *connection)
+    .await
+    .map_err(|error| insert_failure("product_listings", &error))?
+    .rows_affected();
+
+    outcome.record(inserted);
+
+    Ok(outcome)
+}
+
+/// Seeds three descending observations of the one listing.
+///
+/// The newest observation also stamps the listing's `last_observed_at`, which
+/// is what the observation write of the API maintains in the same
+/// transaction; the seeder writes the stamp directly, because it inserts
+/// rows, not requests.
+async fn seed_observations(
+    connection: &mut PgConnection,
+    profile: Profile,
+) -> Result<EntityOutcome, Failure> {
+    let mut outcome = EntityOutcome::default();
+    let listing_id = seeded_id("product_listings", 0);
+    let user_id = seeded_id("users", 0);
+
+    const PRICES: [&str; 3] = ["1299.0000", "1199.0000", "1099.0000"];
+
+    for (index, price) in PRICES.iter().enumerate() {
+        let id = seeded_id("price_observations", index);
+        let observed_at = base_timestamp() + Duration::days(41) + Duration::hours(6 * index as i64);
+        let fingerprint = format!("seed-observation-{index}");
+
+        let inserted = sqlx::query(
+            "INSERT INTO price_observations \
+                 (id, user_id, listing_id, amount, currency, observed_at, fingerprint, \
+                  availability, created_at) \
+             VALUES ($1, $2, $3, $4::text::numeric, 'EUR', $5, $6, 'available', $5) \
+             ON CONFLICT (id) DO NOTHING",
+        )
+        .bind(id)
+        .bind(user_id)
+        .bind(listing_id)
+        .bind(price)
+        .bind(observed_at)
+        .bind(fingerprint)
+        .execute(&mut *connection)
+        .await
+        .map_err(|error| insert_failure("price_observations", &error))?
+        .rows_affected();
+
+        outcome.record(inserted);
+
+        if index == PRICES.len() - 1 {
+            sqlx::query(
+                "UPDATE product_listings \
+                 SET last_observed_at = $3, updated_at = $3 \
+                 WHERE id = $1 AND user_id = $2",
+            )
+            .bind(listing_id)
+            .bind(user_id)
+            .bind(observed_at)
+            .execute(&mut *connection)
+            .await
+            .map_err(|error| {
+                Failure::failed(format!(
+                    "could not stamp the seeded listing's last_observed_at: {}",
+                    describe_database_error(&error)
+                ))
+            })?;
+        }
+    }
+
+    let _ = profile;
+
+    Ok(outcome)
+}
+
+/// The lower-case SHA-256 hex digest of a configuration string.
+///
+/// The mirror of `derive_identity`'s hash half; see [`seed_products`].
+fn config_hash(specs: &str) -> String {
+    let digest = Sha256::digest(specs.as_bytes());
+
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 /// Writes one deterministic embedding per seeded note and per application.
 ///
 /// `S4` of [`docs/database/seeding.md`](../../docs/database/seeding.md): with
@@ -2350,6 +2558,9 @@ fn print_report(profile: Profile, outcome: &SeedOutcome) {
     print_entity("companies", outcome.companies);
     print_entity("applications", outcome.applications);
     print_entity("events", outcome.events);
+    print_entity("products", outcome.products);
+    print_entity("listings", outcome.listings);
+    print_entity("observations", outcome.observations);
     print_entity("embeddings", outcome.embeddings);
     println!(
         "atom-seed: verification passed (6 checks); {} rows inserted, {} skipped",
@@ -2897,7 +3108,13 @@ mod tests {
         // `verify_table_list` reads the same list, so this test is what keeps
         // the list itself honest: a new table must arrive with its own
         // statement, in a position whose children precede it.
-        const EXPECTED: [&str; 12] = [
+        const EXPECTED: [&str; 18] = [
+            "price_alerts",
+            "price_observations",
+            "monitoring_rules",
+            "product_listings",
+            "automation_runs",
+            "tracked_products",
             "application_events",
             "embeddings",
             "expense_items",

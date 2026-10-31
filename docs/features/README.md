@@ -27,6 +27,7 @@ requirement of [`project-truth.md`](../project-truth.md).
 | Reimbursements | `ATOM-FEAT-REIMB-001` | Verified | [specification](reimbursements/specification.md) · [architecture](reimbursements/architecture.md) · [api](reimbursements/api.md) · [testing](reimbursements/testing.md) · [status](reimbursements/status.md) |
 | Job application tracking | `ATOM-FEAT-JOB-001` | Verified | [specification](job-applications/specification.md) · [architecture](job-applications/architecture.md) · [api](job-applications/api.md) · [testing](job-applications/testing.md) · [status](job-applications/status.md) |
 | Local machine learning | `ATOM-FEAT-ML-001` | Verified | [specification](ml/specification.md) · [architecture](ml/architecture.md) · [api](ml/api.md) · [testing](ml/testing.md) · [status](ml/status.md) |
+| Price monitoring | `ATOM-FEAT-MON-001` | Verified (2026-10-31) | [specification](price-monitoring/specification.md) · [architecture](price-monitoring/architecture.md) · [api](price-monitoring/api.md) · [testing](price-monitoring/testing.md) · [status](price-monitoring/status.md) |
 | API keys (machine credential) | — (see the note below) | Verified | [status](api-keys/status.md) |
 
 The three Phase 2 features were accepted in

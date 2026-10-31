@@ -11,6 +11,8 @@
 //! * `tasks`   — tasks belonging to a project.
 //! * `reimbursements` — expense claims and their line items.
 //! * `job_applications` — companies, applications and their timeline.
+//! * `monitoring` — tracked products, listings, price observations, rules,
+//!   automation runs and alerts.
 //! * `ml`      — local embeddings, the three search modes and the degradation rule.
 //! * `config`  — configuration loading, validation and the message catalogue.
 //! * `helpers` — cohesive operations that support a behaviour.
@@ -32,6 +34,7 @@ pub mod health;
 pub mod helpers;
 pub mod job_applications;
 pub mod ml;
+pub mod monitoring;
 pub mod notes;
 pub mod pagination;
 pub mod projects;

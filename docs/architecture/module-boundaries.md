@@ -1,7 +1,7 @@
 # ATOM — module boundaries
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-30
+> **Last updated:** 2026-10-31
 > **Owner:** maintained by the `architect` agent
 
 What each module owns, what it may depend on, and which invariant it is
@@ -225,6 +225,7 @@ users ──┬──► reimbursements ──(optional, SET NULL)──► proj
 | `reimbursements` | `Verified` | `src/reimbursements/` (six modules) | `expense_claims`, `expense_items` | `error` |
 | `job-applications` | `Verified` | `src/job_applications/` (six modules) | `companies`, `job_applications`, `application_events` | `error`, `pagination`, `helpers`, `money`, `config`, `api`, `tasks` (read-only, through `projects`) |
 | `ml` | `Verified` | `src/ml/` (ten modules) | `embeddings` | `error`, `pagination`, `helpers`, `config`, `notes` (repository), `job_applications` (repository), `burn` |
+| `monitoring` | `Verified` (2026-10-31) | `src/monitoring/` (six modules) | `tracked_products`, `product_listings`, `price_observations`, `monitoring_rules`, `automation_runs`, `price_alerts` | `error`, `pagination`, `helpers`, `config`, `api`, `sha2` (the identity digest, already a dependency) |
 
 **The arrow into `ml` is one-way.** No module may depend on `ml`: no module
 calls `MlService`, holds an `Arc<dyn Embedder>`, imports the embedder files or
@@ -276,6 +277,31 @@ cannot be deleted.
 | Security boundary | The caller's companies, applications and events only; a foreign id in a body is `404`, not `403`; an event id is meaningful only inside its application. The stage is personal data and is owner-scoped like every other field. |
 | Verification the implementing change must provide | Unit tests for the stage machine (every edge, both refusals) and for the company-name rule; integration tests for the duplicate-name `409`, the company-delete `409`, cross-account `404` on every verb, the event ordering and the next-action clearing. |
 | Limitations already known | `FOR UPDATE` serialises stage changes on one application; the company search is `ILIKE '%term%'`, which cannot use a B-tree index for a leading wildcard; the timeline does not record a stage change. The feature document §10 lists the rest. |
+
+### `monitoring`
+
+Price monitoring, the first automation use case
+([`ADR-0012`](../decisions/ADR-0012-automation-orchestration-scope.md)):
+tracked products, their retailer listings, the collected prices, the one
+target-price rule per product, the automation runs the external workflow
+records, and the alerts the rule evaluation raises. The orchestration —
+scheduling, outbound collection, notifications — is **external** by decision:
+an n8n workflow reaches ATOM only through these authenticated endpoints, and
+ATOM owns the data and the rules. The module is therefore an ordinary Phase 2
+feature module, with no HTTP client and no scheduler.
+
+| Aspect | Description |
+| ------ | ----------- |
+| Public interface | `MonitoringService` with `create_product`, `list_products`, `get_product`, `update_product`, `delete_product`, `create_listing`, `list_listings`, `update_listing`, `delete_listing`, `record_observation`, `list_observations`, `latest_observation`, `create_rule`, `list_rules`, `update_rule`, `delete_rule`, `start_run`, `finish_run`, `list_runs`, `list_alerts`, `get_alert`, `update_alert`; `MonitoringRepository`; the identity rule `derive_identity`/`ensure_identity` (normalised name + SHA-256 configuration digest); the validators `validate_brand`, `validate_model`, `validate_specs`, `validate_retailer`, `validate_listing_url`, `validate_currency_code`, `validate_fingerprint`, `validate_percent_drop`; the DTOs of the twenty-two published operations. A handler reaches it as `state.monitoring`. |
+| Internal layering | The five layers, in the five files: `handlers.rs`, `service.rs`, `repository.rs`, `models.rs` (`TrackedProduct`, `ProductListing`, `PriceObservation`, `MonitoringRule`, `AutomationRun`, `PriceAlert`, plus the six `CHECK`ed-`TEXT` enums), `dto.rs`. No handler touches SQL. |
+| May depend on | `error`, `pagination`, `helpers` (the money, search and text validators), `config` (the message catalogue and the pagination bounds), `api::extract`, `api::middleware`, and `sha2` for the configuration digest — a dependency the crate already carries for the API keys and the seeder, so no new one was added. |
+| Must not depend on | Every other feature module. The currency validator is a four-line local copy of the reimbursements rule rather than an import of that module's service, for the same boundary reason. |
+| Data ownership | `tracked_products`, `product_listings`, `price_observations`, `monitoring_rules`, `automation_runs`, `price_alerts` (`migrations/0008_price_monitoring.sql`, `docs/database/schema.md` §12). Every child carries the composite foreign key to its parent's `(id, user_id)`, so a cross-owner child is unrepresentable. |
+| Invariants | Every statement carries `user_id`. The observation write is the one multi-statement transaction: lock the listing, absorb a repeated fingerprint through `ON CONFLICT … DO NOTHING` against `UNIQUE (user_id, listing_id, fingerprint)`, evaluate the product's **enabled** rule in SQL (target reached, or the configured percentage dropped against the previous observation of the same listing — currencies compared explicitly, never converted), insert the alert with `ON CONFLICT (rule_id, observation_id) DO NOTHING`, stamp `last_observed_at`. Money is a `String` with four decimals and never parsed in Rust (`ADR-0007`). The product identity is derived, never client-supplied. |
+| Error handling | `422` with a named field for a broken validation rule; `404` for every absent or foreign row — a foreign product, listing, rule, run or alert is indistinguishable from a missing one; `409` for a duplicate tracking identity, a duplicate URL, a second rule for one product and a second finish of one run; `201`/`200` for the idempotent observation (the status is the whole difference). |
+| Security boundary | The caller's monitoring data only. A workflow holds an ordinary API key (`ADR-0011`) and can see and write only what its owner sees and writes; revoking the key ends the access. |
+| Testing approach | `tests/monitoring_api.rs` (31 cases) covers CRUD, ownership, validation, the idempotent observation, the rule trigger and its single alert, the run lifecycle, pagination and the credential; `tests/monitoring_schema.rs` (14 cases) proves the migration from empty, the idempotency index, the duplicate-alert index, the vocabularies, the money storage, the composite foreign keys and the cascades, in SQL against a scratch database. `tests/contract_sweep.rs` sweeps every new id-taking operation. |
+| Limitations already known | The feature is `Implemented`, **not** `Verified`: the review is pending. The notification channel is the inbox only, and no delivery is performed — `notification_status` is a state the channel would report. A rule's target and an observation's currency must match for a trigger; money is never converted. A run's error summary can only be written by the finish that sets it. The run history records the ATOM-side outcome only; n8n's own execution history lives outside ATOM, as `ADR-0012` states. |
 
 ### `ml`
 

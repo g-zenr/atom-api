@@ -372,7 +372,7 @@ async fn the_api_keys_table_applies_from_an_empty_database() {
     );
     assert_eq!(
         probe.versions,
-        vec![1, 2, 3, 4, 5, 6, 7],
+        vec![1, 2, 3, 4, 5, 6, 7, 8],
         "an empty database must end up carrying every migration in the chain, \
          including 0007"
     );

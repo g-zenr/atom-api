@@ -1,7 +1,9 @@
 # ADR-0012: Automation is orchestrated by an external n8n instance that reaches ATOM only through authenticated endpoints
 
-> **Status:** `Proposed` — awaiting the owner decision (`O7` in
-> [`../roadmap.md`](../roadmap.md); the scope question this ADR exists to resolve)
+> **Status:** `Accepted` — 2026-10-31, owner decision `O7` recorded (proposed
+> 2026-10-30 and accepted as written; this line is the acceptance record — the
+> body below, including its proposal wording, is kept unrewritten as the
+> history of what was agreed)
 > **Date:** 2026-10-30
 > **Owner:** product owner
 
@@ -9,7 +11,11 @@ An architecture decision record. It records **one** decision, the options that
 were considered, and the consequences that follow. It is never rewritten: a
 decision that is replaced gets a new ADR, and this one is marked `Superseded`.
 
-**This ADR is a proposal, not an agreement.** [`../project-truth.md`](../project-truth.md)
+**This ADR is a proposal, not an agreement.** *[Reader's note, added
+2026-10-31: this sentence and the proposal voice below are the record of
+what was proposed — they are superseded by the `Accepted` status header
+above; the wording is preserved unrewritten as the history of what was
+agreed.]* [`../project-truth.md`](../project-truth.md)
 §6 currently *excludes* "n8n deployment or any n8n integration", and owner
 decision `O7` keeps n8n outside Phase 2. Nothing in this document authorises an
 implementation; it exists so that the owner can accept, amend or reject a
@@ -158,7 +164,16 @@ assisted matching is a separate, validated decision.
 - **Rate limiting:** collection endpoints should be covered by the rate-limit
   decision for authenticated routes (the audit's P-8); if per-user limits are
   adopted for `/api-keys` and `/ml/reindex`, the same mechanism covers the new
-  endpoints.
+  endpoints. **Monitoring-write rate limiting is a recorded production
+  security decision** (independent review 2026-10-31, finding I-4): the
+  endpoints carry no per-user write limit of their own — the same posture as
+  every existing feature — and the acceptance of a machine credential that
+  writes on a schedule makes the standing edge rate-limiting control the
+  production boundary for this traffic. The limiter's own open questions
+  (fail-open vs fail-closed, the trusted-proxy declaration that decides what
+  an "edge" is) are `Q-09` and `Q-07` in
+  [`../engineering/open-questions.md`](../engineering/open-questions.md);
+  they must be answered before a production deployment of the workflow.
 - **Abuse containment:** a compromised workflow key sees and writes only what
   its owner sees and writes; revoking it ends the access. `automation_runs`
   gives the owner an audit trail of what the workflow did and when.

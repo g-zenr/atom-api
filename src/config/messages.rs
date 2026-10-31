@@ -159,6 +159,14 @@ pub struct ValidationMessages {
     pub items_required: String,
     /// A claim with a zero total cannot be submitted.
     pub total_positive: String,
+    /// A listing URL is not an absolute `http` or `https` URL.
+    pub listing_url_invalid: String,
+    /// A percent drop is outside the accepted 1..99 range.
+    pub percent_drop_range: String,
+    /// A run is finished with a terminal outcome.
+    pub run_outcome_not_terminal: String,
+    /// A reported count is negative.
+    pub count_negative: String,
 }
 
 /// The messages for a resource that does not exist.
@@ -188,6 +196,23 @@ pub struct ResourceMessages {
     /// A revoked key is still found, because revocation is a stamp and not a
     /// delete: only an unknown id or another account's is a `404`.
     pub api_key_not_found: String,
+    /// 404, when the tracked product does not exist, or is not owned by the
+    /// caller.
+    pub product_not_found: String,
+    /// 404, when the listing does not exist, is not owned by the caller, or is
+    /// addressed under a product it does not belong to.
+    pub listing_not_found: String,
+    /// 404, when the observation does not exist, is not owned by the caller,
+    /// or is addressed under a listing it does not belong to.
+    pub observation_not_found: String,
+    /// 404, when the monitoring rule does not exist, is not owned by the
+    /// caller, or is addressed under a product it does not belong to.
+    pub rule_not_found: String,
+    /// 404, when the automation run does not exist, or is not owned by the
+    /// caller.
+    pub run_not_found: String,
+    /// 404, when the alert does not exist, or is not owned by the caller.
+    pub alert_not_found: String,
 }
 
 /// The messages for a request the current state refuses.
@@ -210,6 +235,17 @@ pub struct ConflictMessages {
     pub stage_transition_not_allowed: String,
     /// 409, when a match or a reindex is asked for without a usable model.
     pub ml_unavailable: String,
+    /// 409, when a product with the same normalised name and configuration is
+    /// already tracked by the same owner.
+    pub product_already_tracked: String,
+    /// 409, when a listing with the same URL is already tracked by the same
+    /// owner.
+    pub listing_already_tracked: String,
+    /// 409, when a product already has a monitoring rule.
+    pub rule_already_exists: String,
+    /// 409, when an automation run that has already finished is finished
+    /// again.
+    pub run_already_finished: String,
 }
 
 impl Messages {

@@ -349,12 +349,16 @@ The API is plain HTTP/1.1 with JSON bodies, so any HTTP client can use it.
   lookups, listing order, filters and search.
 - Multi-step writes use an explicit transaction, unless an accepted ADR
   records that the ordering fails safe. The refresh-token rotation is the one
-  such case: the replacement session is inserted before the presented one is
-  claimed, so an interruption leaves the caller with a usable session rather
-  than with none. That ordering is recorded in
-  [`decisions/ADR-0003-auth-token-design.md`](decisions/ADR-0003-auth-token-design.md)
-  and analysed in
-  [`architecture/data-architecture.md`](architecture/data-architecture.md) §7.
+  multi-statement write in Phase 1, and since the owner decision of
+  2026-10-31 (`Q-19`, amending
+  [`decisions/ADR-0003-auth-token-design.md`](decisions/ADR-0003-auth-token-design.md))
+  it uses the transaction: the replacement session is inserted and the
+  presented one is claimed inside a single transaction, so an interrupted or
+  losing rotation is rolled back — the presented session stays unclaimed and
+  valid for a retry, and no replacement row survives. The boundary is
+  analysed in
+  [`architecture/data-architecture.md`](architecture/data-architecture.md)
+  §7.
 - Migrations are reproducible: applying them to an empty database produces the
   same schema as applying them in sequence.
 
@@ -503,6 +507,7 @@ blocks Phase 1 work that does not depend on the answer.
 | Reimbursement tracking | Verified | accepted in §18.1; migration `0004_expense_claims.sql`, `src/reimbursements/` and all twelve published operations exist. `tests/claims_schema.rs` asserts the constraints, `tests/claims_api.rs` the twelve operations and `tests/openapi_contract.rs` the published surface. `Verified` 2026-10-29 by `ATOM-REVIEW-20261029-002`: the final-tree review found no code defect and the six gates re-ran at `0`; the feature's recorded gaps ride with its card. |
 | Job application tracking | Verified | accepted in §18.2; migration `0005_job_applications.sql`, `src/job_applications/` and all fourteen published operations exist. `tests/jobs_schema.rs` asserts the constraints and `tests/job_applications_api.rs` the fourteen operations, including the stage machine. `ATOM-REVIEW-20261024-010` found no code defect; the documentation findings and the 2026-10-26 re-gate findings were repaired, and `ATOM-REVIEW-20261029-002` is the recorded read of the final tree — clean on code, contract and regressions, six gates at `0` — so the feature is `Verified`. |
 | Local machine learning | Verified | accepted in §18.3; migration `0006_embeddings.sql`, `src/ml/` and the three published operations exist, and the suite is measured green (536 passed, 0 failed; 41 `ml_api` cases). **`ML-R02` is met**: `embedder::select` returns a `BurnEmbedder` when both artifacts load. `Verified` 2026-10-29 by `ATOM-REVIEW-20261029-002`: the encoder span was read clean twice (`ATOM-REVIEW-20261026-001`, then the final tree) and the six gates re-ran at `0`; the single-run manual benchmark is the recorded limitation — see [`features/ml/status.md`](features/ml/status.md) §1.3. |
+| Laptop price monitoring | Implemented | accepted by owner decision `O7` ([`decisions/ADR-0012-automation-orchestration-scope.md`](decisions/ADR-0012-automation-orchestration-scope.md), 2026-10-31); migration `0008_price_monitoring.sql`, `src/monitoring/` and 22 published operations (54 → 76) exist; rule evaluation is in SQL inside the observation transaction; observations are idempotent by fingerprint and duplicate alerts are unrepresentable. **Not `Verified`**: the span has no independent review yet — see [`features/price-monitoring/status.md`](features/price-monitoring/status.md). `ATOM-CHANGE-20261031-001` records the change |
 | Scoped API keys for machine clients | Verified | accepted as a decision, not a §18 requirement: its authority is [`decisions/ADR-0011-api-keys.md`](decisions/ADR-0011-api-keys.md), as [`features/api-keys/status.md`](features/api-keys/status.md) records. Migration `0007_api_keys.sql`, `src/api_keys/` and the three published operations exist; 11 integration and 13 unit cases pass in the 2026-10-27 run (536 tests, six gates green); quality-gate **PASS** (`ATOM-REVIEW-20261027-001`), final read of the repaired tree **PASS** (`ATOM-REVIEW-20261029-001`). A key holds the full authority of its owner and can manage itself (`KI-024`). |
 | Everything else in the roadmap | Not started | by design |
 

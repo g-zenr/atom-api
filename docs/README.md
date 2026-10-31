@@ -1,7 +1,7 @@
 # ATOM documentation
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-26
+> **Last updated:** 2026-10-31
 > **Owner:** maintained by the `docs` agent
 
 This directory is ATOM's knowledge base. It is written so that a contributor
@@ -93,6 +93,15 @@ A feature is never `Verified` because its code exists or compiles.
 | [`architecture/ai-roadmap.md`](architecture/ai-roadmap.md) | From the verified local retrieval stack toward prompt history and RAG: the standing constraints and the layered plan. |
 | [`../config/README.md`](../config/README.md) | The configuration reference: the layers, the precedence, every setting, the secrets, the message catalogue and the validation rules. |
 
+### Automation
+
+| Document | Contents |
+| -------- | -------- |
+| [`automation/README.md`](automation/README.md) | The automation index: n8n as an external orchestrator that reaches ATOM only through authenticated endpoints, per the accepted [`decisions/ADR-0012-automation-orchestration-scope.md`](decisions/ADR-0012-automation-orchestration-scope.md). |
+| [`automation/integration-contract.md`](automation/integration-contract.md) | The complete n8n↔ATOM contract: authentication with a dedicated revocable API key, the endpoint surface, idempotency, retryable and non-retryable failures, duplicate-event handling, the run outcome model, recovery procedures and the hard boundaries. |
+| [`automation/local-setup.md`](automation/local-setup.md) | Running n8n locally for development: the runtime options, the ATOM URL and where the API key lives. **Deployment of n8n needs owner approval.** |
+| [`automation/workflows/`](automation/workflows/) | The workflow designs: the laptop price monitoring skeleton (placeholders only, no asserted endpoint) and the data-source verification checklist (all rows unverified). |
+
 ### Decisions
 
 | Document | Contents |
@@ -109,7 +118,7 @@ A feature is never `Verified` because its code exists or compiles.
 | [`decisions/ADR-0009-receipt-references.md`](decisions/ADR-0009-receipt-references.md) | A receipt is a reference, not an uploaded file, in Phase 2. |
 | [`decisions/ADR-0010-semantic-search-scan-bound.md`](decisions/ADR-0010-semantic-search-scan-bound.md) | Semantic search keeps its corpus-bound sequential scan; the bound and its measured cost are recorded instead of an index service. |
 | [`decisions/ADR-0011-api-keys.md`](decisions/ADR-0011-api-keys.md) | A machine client authenticates with a per-user, revocable API key held at full owner authority, stored as a SHA-256 digest. |
-| [`decisions/ADR-0012-automation-orchestration-scope.md`](decisions/ADR-0012-automation-orchestration-scope.md) | `Proposed`: automation is orchestrated by an external n8n instance that reaches ATOM only through authenticated endpoints; includes the first-use-case (price monitoring) schema sketch. |
+| [`decisions/ADR-0012-automation-orchestration-scope.md`](decisions/ADR-0012-automation-orchestration-scope.md) | Automation is orchestrated by an external n8n instance that reaches ATOM only through authenticated endpoints. `Accepted` (2026-10-31, owner decision `O7`; proposed 2026-10-30); includes the first-use-case (price monitoring) schema sketch. |
 
 ### Features
 

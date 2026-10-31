@@ -1,7 +1,7 @@
 # Database schema
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-27
+> **Last updated:** 2026-10-31
 > **Owner:** maintained by the `database` agent
 
 The complete Phase 1 schema of the ATOM database, table by table, as it is
@@ -13,8 +13,12 @@ operations of chains `J2`-`J4`; `embeddings` is created by
 `migrations/0006_embeddings.sql` and is served by the three machine-learning
 operations built in chains `M3`-`M6`; and `api_keys` is created by
 `migrations/0007_api_keys.sql` and is served by the three key-management
-operations of chain `K1`. No table in §11 is proposed any more, and
-`migrations/` ends at `0007`.
+operations of chain `K1`. Section 12 is the price-monitoring schema, created by
+`migrations/0008_price_monitoring.sql` and served by the twenty-two monitoring
+operations of `src/monitoring/` — the tables of
+[`ADR-0012`](../decisions/ADR-0012-automation-orchestration-scope.md) §Decision,
+built after the owner accepted it. The feature is `Implemented`, pending its
+review.
 
 The conventions the schema follows are in
 [`../project-truth.md`](../project-truth.md) §12. The rules for changing it
@@ -35,6 +39,12 @@ users ──1:N──► refresh_sessions
   │
   ├──1:N──► api_keys
   │
+  ├──1:N──► tracked_products ──1:N──► product_listings ──1:N──► price_observations
+  │              │                                            │
+  │              └──1:1──► monitoring_rules ──1:N──► price_alerts
+  │                                                   (also 1:N from price_observations)
+  ├──1:N──► automation_runs ──(0..1)──► price_observations
+  │
   └──1:N──► projects ──1:N──► tasks
 ```
 
@@ -52,6 +62,12 @@ users ──1:N──► refresh_sessions
 | `application_events` | `migrations/0005_job_applications.sql` | One row per dated entry in an application's timeline (§11.5). Served by the four event operations of `J4`. |
 | `embeddings` | `migrations/0006_embeddings.sql` | One row per source, model and owner (§11.6). Read and written by `src/ml/repository.rs` and purged by the delete statement of each source. |
 | `api_keys` | `migrations/0007_api_keys.sql` | One row per issued API key (§11.7). The secret is never stored — only its SHA-256 digest — and the row is read on every request that presents a key. |
+| `tracked_products` | `migrations/0008_price_monitoring.sql` | One row per product configuration the owner tracks (§12). The aggregate root of the price-monitoring feature. |
+| `product_listings` | `migrations/0008_price_monitoring.sql` | One row per retailer listing of a tracked product (§12). Its URL is its identity per owner. |
+| `price_observations` | `migrations/0008_price_monitoring.sql` | One row per collected price (§12). Idempotent on the workflow-supplied fingerprint. |
+| `monitoring_rules` | `migrations/0008_price_monitoring.sql` | The product's target-price rule; at most one per product (§12). |
+| `automation_runs` | `migrations/0008_price_monitoring.sql` | One row per execution of the external collection workflow (§12). The ATOM-side audit trail. |
+| `price_alerts` | `migrations/0008_price_monitoring.sql` | One row per raised alert; one (rule, observation) pair can raise exactly one (§12). |
 
 Two enum types are created by `migrations/0003_projects_and_tasks.sql`:
 `task_status` and `task_priority`. `migrations/0004_expense_claims.sql` adds a
@@ -60,10 +76,13 @@ third, `expense_claim_status`, and `migrations/0005_job_applications.sql` adds
 `migrations/0006_embeddings.sql` adds no type:
 `embeddings.source_type` is a `CHECK`ed `TEXT`, for the reason §11.8 gives.
 `migrations/0007_api_keys.sql` adds no type either: every controlled value in
-`api_keys` is a regular-expression `CHECK` (§11.7).
+`api_keys` is a regular-expression `CHECK` (§11.7). `migrations/0008`
+likewise adds no type: its six controlled vocabularies are `CHECK`ed `TEXT`
+columns (§12).
 
 No table of §11 is still proposed. The last one, `api_keys` (§11.7), is created
-by `migrations/0007_api_keys.sql`, and `migrations/` ends at `0007`.
+by `migrations/0007_api_keys.sql`. Section 12's six tables are created by
+`migrations/0008_price_monitoring.sql`, and `migrations/` ends at `0008`.
 
 ### 1.1 A stale comment in an applied migration
 
@@ -1302,6 +1321,7 @@ if every table-level constraint still passes.
    | `0005_job_applications.sql` | `job_application_status`, `application_event_kind`, `companies`, `job_applications`, `application_events` and their indexes | `JOB-R01`…`R09` |
    | `0006_embeddings.sql` | `embeddings` and its indexes, with `source_type` a `CHECK`ed `TEXT` | `ML-R01`…`R09` |
    | `0007_api_keys.sql` | `api_keys`, its three `CHECK`s, its unique digest constraint and its owner index | `K1` I1…I6 |
+   | `0008_price_monitoring.sql` | the six price-monitoring tables of §12, with their `CHECK`ed vocabularies, composite foreign keys and idempotency indexes | [`ADR-0012`](../decisions/ADR-0012-automation-orchestration-scope.md) §Decision |
 
    Each migration lands with its Rust models, its repository statements, its
    DTOs and its seeder extension in the same change
@@ -1309,7 +1329,71 @@ if every table-level constraint still passes.
    PostgreSQL extension: `REAL[]` is a built-in type, and `ML-R04` and
    `ADR-0008` record why the `vector` extension is not required.
 
-## 12. Related documents
+## 12. Price monitoring (built, pending review)
+
+The six tables of the first automation use case, created by
+`migrations/0008_price_monitoring.sql` and served by the twenty-two monitoring
+operations of `src/monitoring/`. The orchestration that writes them is
+external — an n8n workflow that reaches ATOM only through the authenticated
+endpoints — so every rule below is an ordinary ownership rule, and
+[`ADR-0012`](../decisions/ADR-0012-automation-orchestration-scope.md) §Decision
+is the authority for the shape.
+
+```text
+users ──1:N──► tracked_products ──1:N──► product_listings ──1:N──► price_observations
+                     │                        │              │              │
+                     │                        │              │              └─1:N──► price_alerts
+                     │                        │              │
+                     └──1:1──► monitoring_rules ──1:N──► price_alerts
+users ──1:N──► automation_runs ──(0..1 per observation)──► price_observations
+```
+
+| Table | Purpose | Key constraints |
+| ----- | ------- | --------------- |
+| `tracked_products` | One row per product configuration the owner tracks. | `user_id` FK CASCADE; `UNIQUE (user_id, normalized_name, config_hash)`; `status` `CHECK ('active','paused')`; `config_hash ~ '^[0-9a-f]{64}$'`. |
+| `product_listings` | One row per retailer listing of a tracked product. | `user_id` FK CASCADE; composite FK `(product_id, user_id) → tracked_products (id, user_id)` CASCADE; `UNIQUE (user_id, url)`; `url` CHECK (1..2048, `^https?://`); `currency CHAR(3)` CHECK; `availability` and `validation_state` CHECKs. |
+| `price_observations` | One row per collected price. | `user_id` FK CASCADE; composite FK `(listing_id, user_id) → product_listings (id, user_id)` CASCADE; composite FK `(run_id, user_id) → automation_runs (id, user_id)` NO ACTION; `amount NUMERIC(19,4)` CHECK ≥ 0; `currency CHAR(3)` CHECK; `UNIQUE (user_id, listing_id, fingerprint)` — the idempotency target; index `(user_id, listing_id, observed_at DESC)`. |
+| `monitoring_rules` | The product's target-price rule. | `user_id` FK CASCADE; composite FK `(product_id, user_id)` CASCADE; `UNIQUE (user_id, product_id)` — one rule per product; `target_amount NUMERIC(19,4)` CHECK ≥ 0; `target_currency CHAR(3)` CHECK; `percent_drop` CHECK 1..99 or NULL. |
+| `automation_runs` | One row per execution of the external workflow. | `user_id` FK CASCADE; `outcome` CHECK (`running`, `ok`, `partial`, `failed`); `error_summary` CHECK ≤ 1000 or NULL; lifecycle CHECK (`running` ⇔ `finished_at IS NULL`); the three counts are `INTEGER NOT NULL DEFAULT 0`; index `(user_id, started_at DESC)`. |
+| `price_alerts` | One row per raised alert. | `user_id` FK CASCADE; composite FKs `(rule_id, user_id) → monitoring_rules` and `(observation_id, user_id) → price_observations`, both CASCADE; `UNIQUE (rule_id, observation_id)` — duplicate alerts are unrepresentable; `notification_status` CHECK (`pending`, `delivered`); `read_at` CHECK not before `triggered_at`; index `(user_id, triggered_at DESC)`. |
+
+Every child table also carries the composite foreign key `(child_id, user_id)`
+to its parent's `(id, user_id)` pair, exactly as §11.1–§11.5 do, so a
+cross-owner child is unrepresentable. Each referenced `(id, user_id)` pair has
+its own unique index, for the reason §11.3 records.
+
+#### What the database enforces
+
+- **Idempotency is the database's.**
+  `price_observations_user_id_listing_fingerprint_unique_idx` absorbs a retried
+  workflow write: the insert is `ON CONFLICT … DO NOTHING`, and the service
+  answers the retry with the existing row (`ADR-0012` §Decision 5). A duplicate
+  is absorbed, never recorded twice.
+- **Duplicate alerts are unrepresentable.**
+  `price_alerts_rule_observation_unique` makes one (rule, observation) pair one
+  alert; the evaluation inserts with `ON CONFLICT … DO NOTHING` inside the same
+  transaction as the observation.
+- **The rule fires in SQL.** The target comparison and the percentage are
+  computed in the observation transaction, in SQL, on exact `NUMERIC` values —
+  never in Rust (`ADR-0007`). A rule whose target currency differs from the
+  observation's does not fire: money is never converted.
+
+#### What the database does not enforce
+
+- **The collection itself is external.** Nothing here schedules a fetch, and
+  no column promises that a `valid` listing was collected recently;
+  `last_observed_at` is the newest stamp a write left, not a freshness
+  guarantee.
+- **`run_id` is optional and the run cannot be deleted while an observation
+  names it** (`NO ACTION`, for the reason §11.4 documents). The API publishes
+  no delete for a run: a run is audit data.
+- **The vocabularies are `CHECK`ed `TEXT`, not enum types** — six of them
+  (`status`, `availability`, `validation_state`, `outcome`, `notify_via`,
+  `notification_status`). The reason is the one §11.8 gives for
+  `embeddings.source_type`: a closed set a `CHECK` expresses completely, with
+  no transitions the database could not see.
+
+## 13. Related documents
 
 - [`README.md`](README.md) — the engine, the workflow and the local setup.
 - [`migration-policy.md`](migration-policy.md) — how to change this schema.

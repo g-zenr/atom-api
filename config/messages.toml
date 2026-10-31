@@ -185,6 +185,21 @@ stage_must_start_at_wishlist = "must be `wishlist` when an application is create
 items_required = "must contain at least one item"
 total_positive = "must be greater than zero"
 
+# A listing URL is a reference, not an upload, and the scheme is part of the
+# contract: only `http` and `https` are accepted.
+listing_url_invalid = "must be an absolute http or https URL of at most 2048 characters"
+
+# A percent drop outside 1..99 is a data-entry bug: 0 would fire on every
+# observation and 100 can never be reached.
+percent_drop_range = "must be between 1 and 99"
+
+# A run is finished with a terminal outcome; `running` is what the run already
+# is, and finishing it into itself is not a state change.
+run_outcome_not_terminal = "must be one of ok, partial, failed"
+
+# A negative count would report work that was not done.
+count_negative = "must not be negative"
+
 [messages.resources]
 # 404, when the user does not exist.
 user_not_found = "The requested user does not exist."
@@ -221,6 +236,27 @@ event_not_found = "The requested application event does not exist."
 # so revoking an already-revoked key is a `204` and only an id that is unknown
 # or another account's is a `404`.
 api_key_not_found = "The requested API key does not exist."
+
+# 404, when the tracked product does not exist, or is not owned by the caller.
+product_not_found = "The requested tracked product does not exist."
+
+# 404, when the listing does not exist, is not owned by the caller, or is
+# addressed under a product it does not belong to.
+listing_not_found = "The requested product listing does not exist."
+
+# 404, when the observation does not exist, is not owned by the caller, or is
+# addressed under a listing it does not belong to.
+observation_not_found = "The requested price observation does not exist."
+
+# 404, when the monitoring rule does not exist, is not owned by the caller, or
+# is addressed under a product it does not belong to.
+rule_not_found = "The requested monitoring rule does not exist."
+
+# 404, when the automation run does not exist, or is not owned by the caller.
+run_not_found = "The requested automation run does not exist."
+
+# 404, when the alert does not exist, or is not owned by the caller.
+alert_not_found = "The requested price alert does not exist."
 
 [messages.conflicts]
 # 409, when an item is written on a claim that is no longer a draft.
@@ -263,3 +299,28 @@ stage_transition_not_allowed = "The application's current stage does not allow t
 # report work it did not do. The message names neither the setting nor the
 # cause; the cause is logged once at start-up (ADR-0008 §8.3, §12.6).
 ml_unavailable = "Machine learning is unavailable, so this operation cannot be performed."
+
+# 409, when the same owner already tracks a product with the same normalised
+# name and the same configuration.
+#
+# The comparison is made by the database's unique index, so the message states
+# the rule and not the comparison.
+product_already_tracked = "A product with this name and configuration is already being tracked."
+
+# 409, when the same owner already tracks a listing with the same URL.
+#
+# The URL is the listing's identity per owner; a second row for it would fork
+# the price history.
+listing_already_tracked = "A listing with this URL already exists."
+
+# 409, when a product already has a monitoring rule.
+#
+# One rule per product: a second rule would make "the rule that fired"
+# ambiguous.
+rule_already_exists = "This product already has a monitoring rule."
+
+# 409, when an automation run that has already finished is finished again.
+#
+# A run finishes once; a second finish would overwrite the outcome the first
+# one recorded.
+run_already_finished = "The automation run has already finished."

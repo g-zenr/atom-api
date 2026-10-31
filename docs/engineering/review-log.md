@@ -1,7 +1,7 @@
 # ATOM review log
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-30
+> **Last updated:** 2026-10-31
 > **Owner:** maintained by the `docs` agent
 
 The record of independent reviews of changes to the ATOM backend: what was
@@ -22,7 +22,26 @@ recorded.
 
 ## The entries so far
 
-Seventeen reviews have been performed:
+Eighteen reviews have been performed:
+
+- `ATOM-REVIEW-20261031-001`, the **independent price-monitoring review** of
+  the 2026-10-31 change set (migration `0008`, `src/monitoring/`, the 22 new
+  operations, the automation docs). The independent read-only session
+  `ses_e6fd06d3cffePNWCQwujiHsbkk` re-derived the domain from source and
+  returned **VERIFIED WITH CONDITIONS**: `CODE_REVIEW` **PASS WITH FINDINGS**
+  (no code defect — the findings are test and documentation gaps, all
+  file:line-verified), `PRODUCT_CONTRACT` **PASS WITH FINDINGS** (the
+  skeleton's three phantom routes `M-1`; the pause and backfill semantics
+  `L-1`/`L-2`), `NEW_REGRESSIONS` **PASS** (627 tests / 0 failed on the
+  reviewer's own run; the surface grew 54 → 76 purely additively). No
+  Critical or High code finding. The conditions (`M-1` skeleton paths +
+  fan-out, `M-2` concurrent-ingestion proof, `M-3` absorption-verification
+  rule) and the minor findings (`L-1`…`L-3`, `I-1`…`I-5`) were remediated on
+  2026-10-31 under the owner's authorization and every gate re-run — the
+  full deliverable is
+  [`../audit/monitoring-review-2026-10-31.md`](../audit/monitoring-review-2026-10-31.md),
+  the remediation evidence is in the entry below, and the feature is
+  promoted to `Verified` by this record.
 
 - `ATOM-REVIEW-20261030-001`, the **stabilization change-set read** on the
   2026-10-30 working tree (`96c37b2` + the change set; uncommitted). The
@@ -230,6 +249,90 @@ happened.** The first real entry is below.
   answer.
 - [`../testing/verification-policy.md`](../testing/verification-policy.md) —
   the rules this log implements.
+
+---
+
+### ATOM-REVIEW-20261031-001 - The independent price-monitoring review: verified with conditions, remediated the same day
+
+**Date:** 2026-10-31 (UTC)
+**Reviewer:** an independent read-only `code-reviewer` session
+(`ses_e6fd06d3cffePNWCQwujiHsbkk`), strict read-only — no repository content
+created, modified or deleted; migrations applied only by the test harness to
+the disposable `atom_test`
+**Change reviewed:** the 2026-10-31 uncommitted change set's monitoring span
+— `migrations/0008_price_monitoring.sql` (all 423 lines), `src/monitoring/`
+(6 files, ~3,100 lines), the 22 new operations in routes/contract/sweep, the
+feature and automation docs, the seeder extension — belonging to
+`ATOM-CHANGE-20261031-001`
+**Verdict:** **VERIFIED WITH CONDITIONS** · `CODE_REVIEW` **PASS WITH
+FINDINGS** · `PRODUCT_CONTRACT` **PASS WITH FINDINGS** · `NEW_REGRESSIONS`
+**PASS** — no Critical or High finding; the three conditions are
+documentation and test gaps, not code defects
+
+#### What the review verified (independently re-derived from source, not from the reports)
+
+- **Schema.** All six tables exactly as the ADR-0012 sketch; the
+  "duplicate alerts unrepresentable" and "retried run absorbed" invariants
+  are database properties (`UNIQUE (user_id, listing_id, fingerprint)`,
+  `UNIQUE (rule_id, observation_id)`); every child carries the composite FK
+  `(parent_id, user_id)`, so a cross-owner child is unrepresentable; the
+  lifecycle `CHECK` ties `running` to `finished_at IS NULL`.
+- **The observation transaction.** One transaction — lock listing
+  `FOR UPDATE` (also the ownership check), verify the run owner-scoped,
+  insert `ON CONFLICT DO NOTHING`, evaluate the rule in exact `NUMERIC` SQL,
+  touch `last_observed_at` with `GREATEST`, commit; run finish guarded in
+  the statement (`WHERE outcome = 'running'`).
+- **Ownership, statement by statement.** All 22 operations bind `user_id`
+  from the credential; `404`-not-`403` holds everywhere; the IDOR sweep
+  drives all five new path ids with a second token.
+- **Surface agreement.** 22 operations agree across the route table, the
+  router, the utoipa document and `api.md`; the surface is pinned at 76
+  (54 → 76 purely additive).
+- **Gate run by the reviewer itself:** 627 tests / 0 failed, fmt 0, clippy
+  0, `atom-docs --strict` OK.
+
+#### Findings and their disposition (all remediated 2026-10-31, owner-authorized)
+
+| # | Severity | Finding | Disposition |
+| - | -------- | ------- | ----------- |
+| M-1 | High (blocks integration) | The workflow skeleton called three routes that do not exist (`GET /monitoring/listings?status=active`, `POST /monitoring/observations`, `PATCH /monitoring/runs/{id}`); the real surface needs a paginate-products → per-product-listings fan-out | `docs/automation/workflows/laptop-price-monitoring.md` rewritten to the real paths — `POST /api/v1/automation/runs` → paginated `GET /api/v1/products?status=active` → `GET /api/v1/products/{id}/listings` → `POST /api/v1/listings/{id}/observations` → `PATCH /api/v1/automation/runs/{run_id}` — with the fan-out loops and an added absorption-verification node; the fetch node stays `disabled: true`, placeholders still marked; the skeleton re-validated structurally: 15 nodes, 15 connections, 0 errors (the rewrite also corrected the old skeleton's reversed `splitInBatches` output wiring) |
+| M-2 | Medium (before `Verified`) | The `FOR UPDATE` serialisation and `ON CONFLICT` absorption were argued in comments but proven by no test | Two concurrent-ingestion cases in `tests/monitoring_api.rs`: distinct fingerprints concurrently → both `201`, two rows, two alerts; the same fingerprint concurrently → exactly one `201` + one `200`, one row, one alert. Both race two real requests with `tokio::join!` (the `tests/auth_api.rs` refresh-race mechanism; no sleeps) and verify the final state in SQL; the asserted end state holds for any interleaving. Run 3× consecutively, all green |
+| M-3 | Medium (blocks integration) | The contract told the client a `200` absorption is success without verifying what was stored — a constant fingerprint would store one observation forever while every run reports success | The absorption-verification rule added to `docs/automation/integration-contract.md` §4: a `200` is success only when the returned `amount`/`observed_at`/`listing_id`/`fingerprint` match the tuple that was sent; a mismatch is a fingerprint-construction failure → finish the run failed/partial with an actionable `error_summary`. Mirrored in the skeleton's *Verify absorption* node |
+| L-1 | Low | `MON-R03` said "pausing stops collection" while the API still accepts observations for paused products' listings | One sentence each in `api.md` §2 and `MON-R03`: pausing stops **external collection** (the `status=active` enumeration); the API does not reject manually submitted observations |
+| L-2 | Low | "Previous observation" was undefined for a backfilled older observation | Defined in `api.md` §4: the greatest `observed_at` among the listing's other rows (then `created_at`, `id`); a backfilled older price computes its drop against the newest prior row |
+| L-3 | Low | Target-boundary equality (`target == price`, SQL `>=`) fired but was untested | New case: `"500.0000"` against a `"500.0000"` target fires exactly one alert — a `>` regression would now fail the suite |
+| I-1 | Informational | No alert hysteresis; the inbox consequence undocumented | Documented as intended behaviour in the architecture ("Re-arming and expected volume": one alert per new triggering observation, no hysteresis, a daily cadence → one alert per listing per day) and in `MON-R10`; a quieter model would be a schema/contract change |
+| I-2 | Informational | URL validation accepts whitespace/control characters inside the URL | **Checked, deliberately not changed.** `validate_listing_url` is byte-for-byte the same posture as the reimbursements `validate_receipt_url` (scheme + non-empty authority + length; both accept interior whitespace); hardening one and not the other would break consistency, and changing a shared posture is its own decision |
+| I-3 | Informational | ADR-0012's proposal-time sentence sat under an `Accepted` header with no pointer | A bracketed reader's note added at the old sentence — "superseded by the `Accepted` status header above; the wording is preserved unrewritten as the history of what was agreed" — without rewriting any history |
+| I-4 | Informational | No per-user rate limiting on the monitoring writes | Recorded as a **production security decision** in `ADR-0012` §Security (rate limiting): no per-user write limit, the same posture as every feature; the edge control and the limiter's open questions (`Q-07`, `Q-09` in `open-questions.md`) are named as the pre-production path |
+| I-5 | Informational | The change set bundled the auth hardening and the monitoring domain under one change-log entry | Addressed at staging: the owner-authorized split lands two commits — the auth/users security decisions, then the monitoring domain and its contract |
+
+#### Re-review evidence (the remediation session's own runs, 2026-10-31)
+
+| Command | Result |
+| ------- | ------ |
+| `cargo fmt --all -- --check` | exit `0` |
+| `cargo clippy --all-targets --all-features -- -D warnings` | exit `0` |
+| `TEST_DATABASE_URL='postgres://atom:atom@127.0.0.1:5432/atom_test' cargo test --all-targets --locked --no-fail-fast` | **630 passed, 0 failed** across 29 binaries (627 + the 3 remediation tests: L-3 + the two M-2 cases) |
+| the two M-2 concurrency cases, run 3× | 3 consecutive green runs (2 passed each run) |
+| `cargo run --bin atom-docs -- --strict` | OK, 0 warnings |
+| n8n structural validation of the rewritten skeleton | 15 nodes, 15 connections, 0 errors, 1 warning (the intentional connection into the disabled fetch node) |
+
+On the strength of this record — conditions closed, gates re-run — the
+feature card is promoted to **`Verified`** in the same change that appends
+this entry.
+
+#### Limitations
+
+- No end-to-end n8n run exists; the corrected skeleton is validated
+  structurally, not executed against ATOM.
+- The in-process race cannot force both requests between BEGIN and COMMIT at
+  the same wall-clock instant; the tests compensate by asserting only the
+  interleaving-independent end state (documented in the test module).
+- The seeder's monitoring rows remain proven at unit level only, as the
+  seeder suite itself states.
+- I-2's shared URL posture was verified by reading both validators; no
+  hardening was applied, by the consistency rule.
 
 ---
 

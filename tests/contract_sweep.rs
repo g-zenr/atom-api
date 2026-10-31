@@ -40,13 +40,14 @@ use atom_api::api::routes::{API_PREFIX, ROUTE_TABLE, UNVERSIONED_ROUTE_TABLE, op
 
 /// The number of operations the locked contract publishes.
 ///
-/// It mirrors the private constant of `tests/openapi_contract.rs`: 52 operations
-/// under [`API_PREFIX`] - the nine cross-feature groups of `C-D0` to `D5` plus
-/// the three API-key operations `C-K1` adds (create, list and revoke) - plus the
+/// It mirrors the private constant of `tests/openapi_contract.rs`: 74 operations
+/// under [`API_PREFIX`] - the cross-feature groups of `C-D0` to `D5`, the three
+/// API-key operations `C-K1` adds (create, list and revoke) and the
+/// twenty-two price-monitoring operations `ADR-0012` adds - plus the
 /// two unversioned probes. The duplication is deliberate and the two constants
 /// change together: that test pins the surface so it cannot shrink, this one
 /// pins the sweep so it cannot drive less of it.
-const CONTRACT_OPERATIONS: usize = 54;
+const CONTRACT_OPERATIONS: usize = 76;
 
 /// The three operations that are public by contract.
 ///
@@ -299,6 +300,11 @@ struct Fixtures {
     application: Uuid,
     event: Uuid,
     api_key: Uuid,
+    product: Uuid,
+    listing: Uuid,
+    rule: Uuid,
+    run: Uuid,
+    alert: Uuid,
 }
 
 impl Fixtures {
@@ -318,6 +324,11 @@ impl Fixtures {
             "application_id" => self.application,
             "event_id" => self.event,
             "key_id" => self.api_key,
+            "product_id" => self.product,
+            "listing_id" => self.listing,
+            "rule_id" => self.rule,
+            "run_id" => self.run,
+            "alert_id" => self.alert,
             other => panic!(
                 "the ownership sweep has no fixture for the path placeholder `{{{other}}}`: create \
                  one in `no_operation_reaches_another_accounts_row` and add the field to \
@@ -397,6 +408,42 @@ const OPERATION_BODIES: &[(&str, &str, &str)] = &[
         r#"{"summary":"swept by the second account"}"#,
     ),
     ("POST", "/job-applications/{application_id}/match", "{}"),
+    (
+        "PATCH",
+        "/products/{product_id}",
+        r#"{"brand":"swept by the second account"}"#,
+    ),
+    (
+        "POST",
+        "/products/{product_id}/listings",
+        r#"{"retailer":"swept by the second account","url":"https://swept.example.test/p/2","currency":"EUR"}"#,
+    ),
+    (
+        "PATCH",
+        "/products/{product_id}/listings/{listing_id}",
+        r#"{"availability":"unavailable"}"#,
+    ),
+    (
+        "POST",
+        "/listings/{listing_id}/observations",
+        r#"{"amount":"1.0000","currency":"EUR","observed_at":"2026-10-30T09:00:00Z","fingerprint":"sweep-probe-observation"}"#,
+    ),
+    (
+        "POST",
+        "/products/{product_id}/rules",
+        r#"{"target_amount":"500.0000","target_currency":"EUR"}"#,
+    ),
+    (
+        "PATCH",
+        "/products/{product_id}/rules/{rule_id}",
+        r#"{"enabled":false}"#,
+    ),
+    (
+        "PATCH",
+        "/automation/runs/{run_id}",
+        r#"{"outcome":"failed"}"#,
+    ),
+    ("PATCH", "/alerts/{alert_id}", r#"{"read":true}"#),
 ];
 
 /// The body the probe for one operation sends, if any.
@@ -599,6 +646,101 @@ async fn no_operation_reaches_another_accounts_row() {
         .unwrap_or_else(|| panic!("the create response must carry the secret: {api_key_body}"))
         .to_string();
 
+    // The monitoring chain: a product, one of its listings, the product's one
+    // rule, a run, and the two observations that trip the rule. The alert the
+    // second observation raised is the fixture its placeholder addresses; the
+    // sweep then proves account B can neither read it nor mark it.
+    let product = id_of(
+        &created(
+            &app,
+            owner_token,
+            "/api/v1/products",
+            json!({
+                "brand": "Swept",
+                "model": "Model X",
+                "specs": "swept configuration",
+            }),
+        )
+        .await,
+    );
+
+    let listing = id_of(
+        &created(
+            &app,
+            owner_token,
+            &format!("/api/v1/products/{product}/listings"),
+            json!({
+                "retailer": "Swept Retailer",
+                "url": "https://swept.example.test/p/1",
+                "currency": "EUR",
+            }),
+        )
+        .await,
+    );
+
+    let rule = id_of(
+        &created(
+            &app,
+            owner_token,
+            &format!("/api/v1/products/{product}/rules"),
+            json!({
+                "target_amount": "500.0000",
+                "target_currency": "EUR",
+            }),
+        )
+        .await,
+    );
+
+    let run = id_of(&created(&app, owner_token, "/api/v1/automation/runs", json!({})).await);
+
+    // The first observation is above the target and raises nothing; the second
+    // reaches it and is the one the alert names.
+    for (amount, fingerprint) in [
+        ("999.0000", "sweep-observation-1"),
+        ("499.0000", "sweep-observation-2"),
+    ] {
+        let recorded = common::send(
+            &app,
+            common::request(
+                Method::POST,
+                &format!("/api/v1/listings/{listing}/observations"),
+                Some(owner_token),
+                Some(json!({
+                    "amount": amount,
+                    "currency": "EUR",
+                    "observed_at": "2026-10-30T09:00:00Z",
+                    "fingerprint": fingerprint,
+                })),
+            ),
+        )
+        .await
+        .expect_status(StatusCode::CREATED);
+
+        let _ = recorded;
+    }
+
+    let alerts_page = common::send(
+        &app,
+        common::request(Method::GET, "/api/v1/alerts", Some(owner_token), None),
+    )
+    .await
+    .expect_status(StatusCode::OK);
+
+    let alert = alerts_page["items"]
+        .as_array()
+        .and_then(|items| items.first())
+        .and_then(|alert| alert["id"].as_str())
+        .map(|id| {
+            Uuid::parse_str(id)
+                .unwrap_or_else(|error| panic!("the alert id `{id}` is not a UUID: {error}"))
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "the second observation must have tripped the rule and raised one alert: \
+                 {alerts_page}"
+            )
+        });
+
     let fixtures = Fixtures {
         note,
         project,
@@ -609,6 +751,11 @@ async fn no_operation_reaches_another_accounts_row() {
         application,
         event,
         api_key,
+        product,
+        listing,
+        rule,
+        run,
+        alert,
     };
 
     // ------------------------------------------------------- state before
@@ -630,6 +777,16 @@ async fn no_operation_reaches_another_accounts_row() {
             "event timeline",
             format!("/api/v1/job-applications/{application}/events"),
         ),
+        ("tracked product", format!("/api/v1/products/{product}")),
+        (
+            "product listings",
+            format!("/api/v1/products/{product}/listings"),
+        ),
+        (
+            "price history",
+            format!("/api/v1/listings/{listing}/observations"),
+        ),
+        ("alerts", "/api/v1/alerts".to_string()),
     ];
 
     let mut before: Vec<(&str, String, Value)> = Vec::new();
@@ -745,6 +902,9 @@ async fn no_operation_reaches_another_accounts_row() {
         ("claims", "/api/v1/claims".to_string()),
         ("companies", "/api/v1/companies".to_string()),
         ("job applications", "/api/v1/job-applications".to_string()),
+        ("tracked products", "/api/v1/products".to_string()),
+        ("automation runs", "/api/v1/automation/runs".to_string()),
+        ("alerts", "/api/v1/alerts".to_string()),
     ];
 
     for (name, path) in collections {
@@ -768,6 +928,9 @@ async fn no_operation_reaches_another_accounts_row() {
         "/api/v1/claims",
         "/api/v1/companies",
         "/api/v1/job-applications",
+        "/api/v1/products",
+        "/api/v1/automation/runs",
+        "/api/v1/alerts",
     ] {
         let body = common::send(
             &app,

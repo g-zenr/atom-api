@@ -21,6 +21,8 @@ use crate::job_applications::repository::JobRepository;
 use crate::job_applications::service::JobService;
 use crate::ml::MlService;
 use crate::ml::repository::MlRepository;
+use crate::monitoring::repository::MonitoringRepository;
+use crate::monitoring::service::MonitoringService;
 use crate::notes::repository::NoteRepository;
 use crate::notes::service::NoteService;
 use crate::projects::repository::ProjectRepository;
@@ -57,6 +59,8 @@ pub struct AppState {
     pub reimbursements: ClaimService,
     /// The company, job-application and event use cases.
     pub job_applications: JobService,
+    /// The price-monitoring use cases.
+    pub monitoring: MonitoringService,
     /// The machine-learning use cases and the embedder selected at start-up.
     pub ml: MlService,
 }
@@ -149,6 +153,11 @@ impl AppState {
         );
         let job_applications =
             JobService::new(job_repository, messages.clone(), config.api.pagination);
+        let monitoring = MonitoringService::new(
+            MonitoringRepository::new(db.clone()),
+            messages,
+            config.api.pagination,
+        );
 
         Ok(Self {
             config: Arc::new(config),
@@ -161,6 +170,7 @@ impl AppState {
             tasks,
             reimbursements,
             job_applications,
+            monitoring,
             ml,
         })
     }

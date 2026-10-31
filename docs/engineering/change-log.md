@@ -1,7 +1,7 @@
 # ATOM change log
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-30
+> **Last updated:** 2026-10-31
 > **Owner:** maintained by the `docs` agent
 
 The chronological record of substantial changes to the ATOM backend, newest
@@ -149,6 +149,93 @@ a separate codebase outside this repository; its setup, auth design and
 delivery checklist are recorded in that codebase's own README, and nothing
 about it is claimed in this repository's status documents.
 
+
+### ATOM-CHANGE-20261031-001 - Owner decisions implemented: tightened email, transactional rotation, and the price-monitoring domain
+
+**Date:** 2026-10-31 (UTC)
+**Type:** Feature + Security - the owner's approved decisions (`Q-15`…`Q-19`,
+`O7`) implemented as uncommitted, reviewable work.
+**Author:** four builder sessions under the orchestrator of the master
+development task; uncommitted by owner instruction pending separate
+authorization.
+**Status:** Complete and **committed** (2026-10-31, owner-authorized, as two
+commits — see the remediation note at the end of this entry). The monitoring
+feature is `Verified`: reviewed by `ATOM-REVIEW-20261031-001` and remediated
+the same day.
+
+#### Why
+
+The owner accepted `Q-15` (no pepper), `Q-16` (15-minute access window, no
+revocation list), `Q-17` (registration response unchanged), `Q-18` (tighten
+email validation), `Q-19` (transactional refresh rotation) and `O7` (accept
+`ADR-0012`, make laptop price monitoring the first automation feature).
+
+#### What changed
+
+| Area | Change |
+| ---- | ------ |
+| `Q-15`/`Q-16`/`Q-17` (documented) | No code change, by decision; `open-questions.md` records each as **Answered** with the accepted risk and its revisit trigger (password reset/email for `Q-17`) |
+| `Q-18` (code) | `validate_email` tightened: one `@`, non-empty parts, no consecutive/leading/trailing dots, well-formed hyphen-free domain labels, local ≤64 / domain ≤253; normalization and the 3..=254 DB contract unchanged. 11 unit + 4 HTTP cases (accept and reject shapes) |
+| `Q-19` (code) | Refresh rotation is one transaction (`AuthRepository::rotate`): replacement insert + guarded claim; a lost race rolls the whole transaction back, so no orphan replacement session can exist; reuse detection, mass revocation, absolute-lifetime inheritance and owner scoping unchanged. 3 new regression cases; `ADR-0003` amended, `data-architecture.md` §7, `request-lifecycle.md` §5.2 and `project-truth.md` §12 updated |
+| `O7` / `ADR-0012` | Status → **Accepted** (2026-10-31, owner decision) |
+| Price monitoring (new domain) | `migrations/0008_price_monitoring.sql` (six tables, every child composite-FK'd `(parent_id, user_id)`, idempotency `UNIQUE (user_id, listing_id, fingerprint)`, duplicate alerts unrepresentable `UNIQUE (rule_id, observation_id)`); `src/monitoring/` (models/dto/repository/service/handlers, money as `::text` strings per `ADR-0007`, every statement user-scoped, rule evaluation in SQL inside the observation transaction); **22 new operations** (54 → 76, contract test updated); seeder extended (1 product / 1 listing / 3 observations) |
+| Automation docs (new) | `docs/automation/` — integration contract, local setup, the 9-node importable workflow skeleton (no retailer endpoint asserted), and a data-source checklist with every source `unverified` |
+| Feature docs (new) | `docs/features/price-monitoring/` — the five standard documents; status **`Implemented`**, pending review |
+
+#### What was measured
+
+`cargo fmt --all -- --check` exit 0; `cargo clippy --all-targets
+--all-features -- -D warnings` exit 0; `cargo run --bin atom-docs --strict`
+OK 0 warnings; per-module test runs recorded by each builder
+(`monitoring_api` 31, `monitoring_schema` 14, `openapi_contract` 11,
+`contract_sweep` 2, `seeder` 21, `auth_api` 34, `claims_flow` 4; users unit
+11). A full-suite run is recorded in the session's final report. Nothing was
+committed and nothing was pushed: the owner's instruction keeps security and
+automation work uncommitted pending separate authorization.
+
+#### Documentation
+
+This entry, the feature docs, the automation docs, the ADR amendments and the
+open-questions answers. The change-log's own `Last updated` line moves with
+this entry.
+
+#### Remediation and commit (2026-10-31, owner-authorized)
+
+An independent review of the monitoring span
+([`ATOM-REVIEW-20261031-001`](review-log.md), session
+`ses_e6fd06d3cffePNWCQwujiHsbkk`) returned **VERIFIED WITH CONDITIONS** —
+`CODE_REVIEW` PASS WITH FINDINGS, `PRODUCT_CONTRACT` PASS WITH FINDINGS,
+`NEW_REGRESSIONS` PASS, no Critical or High code finding, 627 tests / 0
+failed on the reviewer's own run. The conditions and findings were remediated
+the same day:
+
+- **M-1** — the workflow skeleton rewritten to the real API paths with the
+  product→listings fan-out (`POST /api/v1/automation/runs`, paginated
+  `GET /api/v1/products?status=active`,
+  `GET /api/v1/products/{id}/listings`,
+  `POST /api/v1/listings/{id}/observations`,
+  `PATCH /api/v1/automation/runs/{run_id}`);
+  re-validated: 15 nodes, 15 connections, 0 errors.
+- **M-2** — two concurrent-ingestion tests (`tokio::join!`, SQL-verified
+  final state; 3× green): distinct fingerprints → both `201`, two rows, two
+  alerts; same fingerprint → one `201` + one `200`, one row, one alert.
+- **M-3** — the absorption-verification rule in
+  `docs/automation/integration-contract.md` §4, mirrored by the skeleton's
+  *Verify absorption* node.
+- **L-1/L-2/L-3** — pause semantics, the previous-observation definition and
+  the target-equality test.
+- **I-1…I-5** — re-arming and expected volume documented; ADR-0012 reader
+  pointer and the monitoring-write rate-limiting production decision
+  recorded; the URL-validator posture checked against
+  `validate_receipt_url` and deliberately left identical (I-2); the
+  two-commit split (this one).
+
+Post-remediation gates: fmt 0, clippy 0, **630 tests / 0 failed** across 29
+binaries, `atom-docs --strict` OK. The monitoring feature is promoted to
+**`Verified`** by the review record. The change set landed as two
+owner-approved commits: `feat(auth,users): implement the approved security
+decisions` and `feat(monitoring): add price monitoring and automation
+contract`. Nothing was pushed.
 
 ### ATOM-CHANGE-20261030-002 - The WIP seeding race is resolved: the seeded claims read holds the seeder lock
 

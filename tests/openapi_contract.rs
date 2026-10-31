@@ -28,18 +28,20 @@ use atom_api::api::routes::{API_PREFIX, ROUTE_TABLE, UNVERSIONED_ROUTE_TABLE, op
 
 /// The number of operations the locked contract publishes.
 ///
-/// Fifty-two versioned operations - five authentication, three API-key (create,
+/// Seventy-four versioned operations - five authentication, three API-key (create,
 /// list, revoke), six under `/notes` (five note routes plus the scored search),
 /// five projects, five tasks, twelve claims (five claim routes, three item
 /// writes and four lifecycle actions), fourteen job-application operations (five
-/// company routes, five application routes and four event routes) and two
-/// machine-learning operations (the match and the reindex; the scored search is
-/// counted with the notes routes) - plus the two unversioned probes. The
-/// two-way comparison below cannot see an operation that was dropped from the
-/// table, the router and the document together, so the size of the agreed
-/// surface is pinned as well: the contract is that all 54 operations of
-/// `/api/v1/openapi.json` still exist.
-const CONTRACT_OPERATIONS: usize = 54;
+/// company routes, five application routes and four event routes), twenty-two
+/// price-monitoring operations (five product routes, four listing routes, three
+/// observation routes, four rule routes, three automation-run routes and three
+/// alert routes) and two machine-learning operations (the match and the reindex;
+/// the scored search is counted with the notes routes) - plus the two
+/// unversioned probes. The two-way comparison below cannot see an operation that
+/// was dropped from the table, the router and the document together, so the size
+/// of the agreed surface is pinned as well: the contract is that all 76 operations
+/// of `/api/v1/openapi.json` still exist.
+const CONTRACT_OPERATIONS: usize = 76;
 
 /// Every operation declared on a path item, as `(METHOD, operation)`.
 ///
@@ -485,7 +487,7 @@ fn each_list_endpoint_publishes_its_filter_and_pagination_parameters_once() {
     let document = openapi_document(&common::test_config());
 
     // path, expected query parameters, expected path parameters.
-    let endpoints: [(&str, &[&str], &[&str]); 6] = [
+    let endpoints: [(&str, &[&str], &[&str]); 9] = [
         (
             "/api/v1/notes",
             &["archived", "limit", "offset", "search"],
@@ -529,6 +531,19 @@ fn each_list_endpoint_publishes_its_filter_and_pagination_parameters_once() {
             ],
             &[],
         ),
+        // `docs/features/price-monitoring/api.md` §2.2: the shared pagination
+        // pair, the status and a case-insensitive `search` over the brand, the
+        // model and the normalised name.
+        (
+            "/api/v1/products",
+            &["limit", "offset", "search", "status"],
+            &[],
+        ),
+        // The same §2.2: the shared pagination pair and the unread filter.
+        ("/api/v1/alerts", &["limit", "offset", "unread"], &[]),
+        // The automation-run history has no filter: the shared pagination pair
+        // alone.
+        ("/api/v1/automation/runs", &["limit", "offset"], &[]),
     ];
 
     for (path, expected_query, expected_path) in endpoints {

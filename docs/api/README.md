@@ -1,7 +1,7 @@
 # ATOM API
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-27
+> **Last updated:** 2026-10-31
 > **Owner:** maintained by the `docs` agent
 
 This directory holds the HTTP contract of the ATOM API. It describes the
@@ -25,14 +25,18 @@ The per-feature endpoint references are:
 | Reimbursements | [`../features/reimbursements/api.md`](../features/reimbursements/api.md) | all 12 it specifies |
 | Job applications | [`../features/job-applications/api.md`](../features/job-applications/api.md) | 14 |
 | Machine learning | [`../features/ml/api.md`](../features/ml/api.md) | 3 specified, all 3 published |
+| Price monitoring | [`../features/price-monitoring/api.md`](../features/price-monitoring/api.md) | all 22 it specifies |
 
-**The document describes 54 operations**: 52 under `/api/v1` and the two health
+**The document describes 76 operations**: 74 under `/api/v1` and the two health
 probes outside it. The reimbursement feature contributes twelve of them - five
 claim operations, three item operations and four lifecycle actions - the
 job-application feature fourteen - five company, five application and four event
-operations - the machine-learning feature three, and the API-key feature the
-three that create, list and revoke a machine credential. A reader who counts the
-inventory below must agree with those numbers; the contract test
+operations - the machine-learning feature three, the API-key feature the
+three that create, list and revoke a machine credential, and the
+price-monitoring feature twenty-two - five product, four listing, three
+observation, four rule, three automation-run and three alert operations. A
+reader who counts the inventory below must agree with those numbers; the
+contract test
 `the_route_table_and_the_document_describe_the_same_operations` fails if they
 disagree in either direction.
 
@@ -203,10 +207,32 @@ credential — a user access token or an API key — is required.
 | `POST` | `/api/v1/api-keys` | bearer | `201` | API keys |
 | `GET` | `/api/v1/api-keys` | bearer | `200` | API keys |
 | `DELETE` | `/api/v1/api-keys/{key_id}` | bearer | `204` | API keys |
+| `GET` | `/api/v1/products` | bearer | `200` | price monitoring |
+| `POST` | `/api/v1/products` | bearer | `201` | price monitoring |
+| `GET` | `/api/v1/products/{product_id}` | bearer | `200` | price monitoring |
+| `PATCH` | `/api/v1/products/{product_id}` | bearer | `200` | price monitoring |
+| `DELETE` | `/api/v1/products/{product_id}` | bearer | `204` | price monitoring |
+| `GET` | `/api/v1/products/{product_id}/listings` | bearer | `200` | price monitoring |
+| `POST` | `/api/v1/products/{product_id}/listings` | bearer | `201` | price monitoring |
+| `PATCH` | `/api/v1/products/{product_id}/listings/{listing_id}` | bearer | `200` | price monitoring |
+| `DELETE` | `/api/v1/products/{product_id}/listings/{listing_id}` | bearer | `204` | price monitoring |
+| `POST` | `/api/v1/listings/{listing_id}/observations` | bearer | `201` / `200` | price monitoring |
+| `GET` | `/api/v1/listings/{listing_id}/observations` | bearer | `200` | price monitoring |
+| `GET` | `/api/v1/listings/{listing_id}/observations/latest` | bearer | `200` / `404` | price monitoring |
+| `GET` | `/api/v1/products/{product_id}/rules` | bearer | `200` | price monitoring |
+| `POST` | `/api/v1/products/{product_id}/rules` | bearer | `201` | price monitoring |
+| `PATCH` | `/api/v1/products/{product_id}/rules/{rule_id}` | bearer | `200` | price monitoring |
+| `DELETE` | `/api/v1/products/{product_id}/rules/{rule_id}` | bearer | `204` | price monitoring |
+| `POST` | `/api/v1/automation/runs` | bearer | `201` | price monitoring |
+| `PATCH` | `/api/v1/automation/runs/{run_id}` | bearer | `200` | price monitoring |
+| `GET` | `/api/v1/automation/runs` | bearer | `200` | price monitoring |
+| `GET` | `/api/v1/alerts` | bearer | `200` | price monitoring |
+| `GET` | `/api/v1/alerts/{alert_id}` | bearer | `200` | price monitoring |
+| `PATCH` | `/api/v1/alerts/{alert_id}` | bearer | `200` | price monitoring |
 | `GET` | `/api/v1/openapi.json` | — | `200` | the document itself |
 | `GET` | `/api/v1/docs/` | — | `200` | the explorer |
 
-The first 54 rows are the operations the document describes and the two route
+The first 76 rows are the operations the document describes and the two route
 tables declare, and `tests/openapi_contract.rs` holds them together in both
 directions. The last two rows are the explorer and the document itself: they are
 served, but they are mounted by `swagger_ui` and are **not** operations in the
@@ -239,6 +265,16 @@ the storage rule and the failure modes are in
 `GET /api/v1/notes/search` is **not** the search operation: the dynamic
 `{note_id}` segment matches it first and answers `400`, because `search` is not a
 UUID. The search operation is the `POST` on that path.
+
+The twenty-two price-monitoring operations are published too, and they carry one
+behaviour no other feature has: `POST /api/v1/listings/{listing_id}/observations`
+is **idempotent on the body's fingerprint** — a new observation answers `201`, a
+retried one is absorbed and answers `200` with the existing row, so a retried
+workflow cannot double-write. The rule evaluation runs in the same transaction
+as the insert, so a reached target raises exactly one alert; a duplicate alert
+is unrepresentable in the database. The feature is `Verified` (independently
+reviewed 2026-10-31, `ATOM-REVIEW-20261031-001`) — see
+[`../features/price-monitoring/status.md`](../features/price-monitoring/status.md).
 
 ## 4. The request pipeline
 
