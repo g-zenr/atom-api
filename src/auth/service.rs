@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::auth::dto::{AuthResponse, LoginRequest, TokenPair};
 use crate::auth::password::PasswordHasher;
-use crate::auth::repository::RefreshSessionRepository;
+use crate::auth::repository::{NewRefreshSession, RefreshSessionRepository};
 use crate::auth::token::{
     IssuedRefreshToken, TokenService, generate_refresh_token, hash_refresh_token,
 };
@@ -167,9 +167,11 @@ impl AuthService {
 
     /// Exchanges a refresh token for a new token pair.
     ///
-    /// The presented token is revoked and replaced. Presenting an already
-    /// revoked token is treated as reuse: every session of that user is
-    /// revoked and the request fails.
+    /// The presented token is revoked and replaced inside one transaction, so
+    /// the rotation is all-or-nothing: a rotation that does not complete
+    /// leaves no replacement row behind. Presenting an already revoked token
+    /// is treated as reuse: every session of that user is revoked and the
+    /// request fails.
     pub async fn refresh(&self, refresh_token: &str, meta: &ClientMeta) -> AppResult<AuthResponse> {
         let token_hash = hash_refresh_token(refresh_token);
 
@@ -216,7 +218,6 @@ impl AuthService {
         }
 
         let issued = generate_refresh_token();
-        let new_session_id = Uuid::new_v4();
 
         // The replacement inherits the deadline of the session it replaces.
         //
@@ -227,29 +228,29 @@ impl AuthService {
         // chain.
         let expires_at = session.expires_at;
 
-        // The replacement row is written first, because the rotation link is a
-        // foreign key to it.
-        self.new_session(
-            new_session_id,
-            user.id,
-            &issued.token_hash,
-            expires_at,
-            meta,
-        )
-        .await?;
-
-        // Claim the old session atomically.
+        // The rotation is one transaction (Q-19; ADR-0003 as amended): the
+        // replacement insert and the claim of the presented session either
+        // both land or neither does.
         //
-        // The UPDATE only matches a row that is still active, so two concurrent
-        // requests carrying the same token cannot both succeed: the loser sees
-        // zero affected rows and is treated as a reuse. Without this, a stolen
-        // token could be raced against the legitimate client and keep a usable
-        // session without ever triggering the mass revocation.
-        if !self
+        // The claim still only matches a session that is still active, so two
+        // concurrent requests carrying the same token cannot both succeed —
+        // and the loser's transaction is rolled back, so no replacement row
+        // survives the lost race.
+        let replacement = NewRefreshSession {
+            id: Uuid::new_v4(),
+            user_id: session.user_id,
+            token_hash: &issued.token_hash,
+            expires_at,
+            user_agent: meta.user_agent.as_deref(),
+            ip_address: meta.ip_address.as_deref(),
+        };
+
+        let won = self
             .sessions
-            .claim(session.id, session.user_id, new_session_id)
-            .await?
-        {
+            .rotate(session.id, session.user_id, replacement)
+            .await?;
+
+        if !won {
             self.sessions.revoke_all_for_user(session.user_id).await?;
             return Err(AppError::Unauthorized(
                 self.messages.auth.refresh_token_reused.clone(),
@@ -318,12 +319,13 @@ impl AuthService {
         self.token_pair(&issued, user_id, email)
     }
 
-    /// Writes a refresh-session row.
+    /// Writes the first refresh-session row of a token pair.
     ///
-    /// Both the first session of a token pair and the replacement of a
-    /// rotation go through this helper, so the two cannot drift apart. The
-    /// deadline is a parameter: a rotation passes the deadline of the session
-    /// it replaces, which is what keeps the absolute lifetime absolute.
+    /// The replacement of a rotation does not go through here: it is written
+    /// by the repository's transactional `rotate`, which claims the presented
+    /// session in the same transaction. The deadline is a parameter, and a
+    /// rotation passes the deadline of the session it replaces, which is what
+    /// keeps the absolute lifetime absolute.
     async fn new_session(
         &self,
         session_id: Uuid,
@@ -333,14 +335,14 @@ impl AuthService {
         meta: &ClientMeta,
     ) -> AppResult<()> {
         self.sessions
-            .insert(
-                session_id,
+            .insert(NewRefreshSession {
+                id: session_id,
                 user_id,
                 token_hash,
                 expires_at,
-                meta.user_agent.as_deref(),
-                meta.ip_address.as_deref(),
-            )
+                user_agent: meta.user_agent.as_deref(),
+                ip_address: meta.ip_address.as_deref(),
+            })
             .await?;
 
         Ok(())

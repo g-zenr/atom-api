@@ -262,12 +262,13 @@ and it is why a resource the caller does not own is answered with `404`.
 
 ### 5.2 Transaction boundaries
 
-There is **no explicit transaction** in the Phase 1 request path. Every
-repository method is a single statement, so every write is atomic on its own.
-The one place where two writes belong together is the refresh-token rotation
-in `auth::service::refresh`, which inserts the replacement session and then
-claims the old one; those two statements are **not** in a transaction. The
-consequence is documented in
+There is **one explicit transaction** in the Phase 1 request path: the
+refresh-token rotation in `auth::service::refresh`. The repository's
+`rotate` inserts the replacement session and claims the old one inside a
+single transaction, so a rotation that does not complete — a lost race, a
+failed statement, a process death — is rolled back and leaves no replacement
+row behind. Every other repository method is a single statement, so every
+other write is atomic on its own. The boundary is analysed in
 [`data-architecture.md`](data-architecture.md) §7.
 
 ## 6. Bodies, timeouts and memory

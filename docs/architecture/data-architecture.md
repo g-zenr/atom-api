@@ -296,35 +296,37 @@ database rather than in the Rust code:
 
 ## 7. Transaction boundaries
 
-**There is no explicit transaction in the Phase 1 request path.** Each
-repository method runs one statement, and each statement is atomic on its own.
+**There is one explicit transaction in the Phase 1 request path**: the
+refresh-token rotation in `auth::service::refresh`. Every other repository
+method runs one statement, and each statement is atomic on its own.
 
-The one place where two writes belong together is the refresh-token rotation
-in `auth::service::refresh`:
+The rotation is the one place where two writes belong together, and
+`RefreshSessionRepository::rotate` performs both inside a single transaction:
 
-1. `RefreshSessionRepository::insert` inserts the replacement session. It
-   comes first, because `replaced_by_session_id` is a foreign key to it.
-2. `RefreshSessionRepository::claim` revokes the presented session and
-   records `replaced_by_session_id`. The statement only matches a session
-   that is still active, so two concurrent requests carrying the same token
-   cannot both succeed: the loser sees zero affected rows and is treated as
-   a reuse.
+1. The replacement session is inserted first, because
+   `replaced_by_session_id` is a foreign key to it.
+2. The claim revokes the presented session and records
+   `replaced_by_session_id`. The statement only matches a session that is
+   still active, so two concurrent requests carrying the same token cannot
+   both succeed: the loser sees zero affected rows.
 
-These two statements are **not** wrapped in a transaction. The consequence is
-bounded: if the process dies between them, the old session is still valid
-and the new one exists, so the next refresh with the old token succeeds and
-the rotation is retried. The opposite order — claiming first — would leave a
-caller with no usable session at all. The current order fails safe.
-
-A transaction is therefore a known, deliberate absence rather than an
-oversight. The migration policy in
-[`../database/migration-policy.md`](../database/migration-policy.md) already
-requires an explicit transaction for any future multi-step write that cannot
-fail safe. The requirement it implements is in
-[`../project-truth.md`](../project-truth.md) §12, which allows an exception
-when an accepted ADR records that the ordering fails safe, and
+When the claim loses that race, or when any statement fails, the transaction
+is rolled back: **no replacement row survives a rotation that did not
+complete**. An interruption mid-rotation leaves the presented session
+unclaimed and valid, so the caller retries and the rotation is attempted
+again; the opposite order — claiming first — would leave a caller with no
+usable session at all. The transaction keeps that fail-safe behaviour while
+removing the orphan replacement row that the earlier non-transactional
+ordering could leave behind; the superseded analysis is recorded in the
+2026-10-31 amendment of
 [`../decisions/ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md)
-is that ADR.
+(owner decision `Q-19`).
+
+The migration policy in
+[`../database/migration-policy.md`](../database/migration-policy.md) requires
+an explicit transaction for any future multi-step write that cannot fail
+safe. The requirement it implements is in
+[`../project-truth.md`](../project-truth.md) §12.
 
 ### 7.1 The deadline is preserved by the rotation
 
@@ -481,11 +483,12 @@ implementing change had to satisfy before `0004` was written:
    `::text` cast on every money read. What it must not do is decode through
    `f64`.
 
-### The first explicit transactions in a request path
+### The explicit transactions in a request path
 
-§7 above records that **Phase 1 has no explicit transaction in the request
-path**, and that statement stays true for Phase 1. Phase 2 introduces the first
-ones, because four operations have an invariant that spans two statements:
+§7 above records that **Phase 1 has one explicit transaction in the request
+path** — the refresh-token rotation (owner decision `Q-19`) — and that
+statement stays true for the rest of Phase 1. Phase 2 adds four more, because
+four operations have an invariant that spans two statements:
 
 | Operation | Statements that must commit together |
 | --------- | ------------------------------------ |

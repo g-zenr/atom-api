@@ -100,7 +100,7 @@ Creates an account and returns the first token pair.
 
 | Field | Type | Required | Rules |
 | ----- | ---- | -------- | ----- |
-| `email` | string | yes | Trimmed and lower-cased. Must contain an `@`, a non-empty local part, and a domain that contains a `.` and does not start with one. At most 254 characters, the `MAX_EMAIL_LENGTH` constant. |
+| `email` | string | yes | Trimmed and lower-cased. Must carry exactly one `@`, with a non-empty local part and a non-empty domain. The local part is at most 64 characters (`MAX_EMAIL_LOCAL_LENGTH`) and has no leading, trailing or consecutive dots. The domain is at most 253 characters (`MAX_EMAIL_DOMAIN_LENGTH`), contains a dot, and has no empty label and no label that starts or ends with a hyphen. At most 254 characters in total, the `MAX_EMAIL_LENGTH` constant. `+` tags, subdomains and punycode labels are accepted. |
 | `password` | string | yes | The configured password policy: from `auth.password.min_length` to `auth.password.max_length` characters, 12 to 256 by default. The minimum may be raised but not lowered below twelve characters. At least one uppercase letter, one lowercase letter and one digit. |
 | `display_name` | string | yes | Trimmed. 1 to 120 characters. |
 

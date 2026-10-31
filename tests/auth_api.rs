@@ -8,6 +8,7 @@ use common::{
 };
 use serde_json::json;
 use tower::ServiceExt;
+use uuid::Uuid;
 
 #[tokio::test]
 async fn registration_returns_a_token_pair_and_a_safe_user() {
@@ -126,6 +127,76 @@ async fn a_weak_password_is_rejected_with_field_details() {
     let body = response.expect_status(StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["error"]["code"], "validation_failed");
     assert!(body["error"]["details"].is_array());
+}
+
+#[tokio::test]
+async fn a_malformed_email_is_rejected_with_a_field_violation() {
+    let state = test_state().await;
+    let app = app(state);
+
+    // The shapes Q-18 tightened: a second `@`, consecutive dots and a domain
+    // label that starts with a hyphen. Each must come back as `422` with a
+    // violation that names `email`.
+    for email in ["a@b@c.com", "a..b@example.com", "a@-example.com"] {
+        let response = send(
+            &app,
+            request(
+                Method::POST,
+                "/api/v1/auth/register",
+                None,
+                Some(json!({
+                    "email": email,
+                    "password": "Strong-Password-42",
+                    "display_name": "Ada",
+                })),
+            ),
+        )
+        .await;
+
+        let body = response.expect_status(StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["error"]["code"], "validation_failed", "{email}");
+        assert!(
+            body["error"]["details"]
+                .as_array()
+                .expect("a validation error carries details")
+                .iter()
+                .any(|detail| detail["field"] == "email"),
+            "the violation must name the email field for {email}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn legitimate_email_shapes_still_register() {
+    let state = test_state().await;
+    let app = app(state);
+
+    // A `+` tag and a dot in the local part, a subdomain and a one-character
+    // TLD are legitimate addresses the tightened grammar keeps accepting.
+    let id = Uuid::new_v4().simple();
+    for email in [
+        format!("tagged.{id}+q3@example.com"),
+        format!("ada.{id}@mail.example.com"),
+        format!("short.{id}@example.x"),
+    ] {
+        let response = send(
+            &app,
+            request(
+                Method::POST,
+                "/api/v1/auth/register",
+                None,
+                Some(json!({
+                    "email": email,
+                    "password": "Strong-Password-42",
+                    "display_name": "Ada",
+                })),
+            ),
+        )
+        .await;
+
+        let body = response.expect_status(StatusCode::CREATED);
+        assert_eq!(body["user"]["email"], email, "{email}");
+    }
 }
 
 #[tokio::test]
@@ -731,6 +802,189 @@ async fn a_concurrent_refresh_of_the_same_token_succeeds_only_once() {
 
     assert_eq!(successes, 1, "exactly one rotation may win: {statuses:?}");
     assert_eq!(refusals, 1, "the loser must be refused: {statuses:?}");
+}
+
+#[tokio::test]
+async fn a_lost_rotation_race_leaves_no_orphan_replacement_session() {
+    let state = test_state().await;
+    let app = app(state.clone());
+    let user = register_user(&app, "refresh-race-orphan").await;
+
+    // Two requests carrying the same refresh token, at the same time: the
+    // pattern of `a_concurrent_refresh_of_the_same_token_succeeds_only_once`,
+    // with the session-row invariant the transaction guarantees added.
+    let refresh_one = send(
+        &app,
+        request(
+            Method::POST,
+            "/api/v1/auth/refresh",
+            None,
+            Some(json!({ "refresh_token": user.refresh_token })),
+        ),
+    );
+    let refresh_two = send(
+        &app,
+        request(
+            Method::POST,
+            "/api/v1/auth/refresh",
+            None,
+            Some(json!({ "refresh_token": user.refresh_token })),
+        ),
+    );
+
+    let (first, second) = tokio::join!(refresh_one, refresh_two);
+
+    let statuses = [first.status, second.status];
+    let successes = statuses
+        .iter()
+        .filter(|status| **status == StatusCode::OK)
+        .count();
+
+    assert_eq!(successes, 1, "exactly one rotation may win: {statuses:?}");
+
+    // The rotation is one transaction: the loser's replacement insert is
+    // rolled back together with its lost claim, so the account holds exactly
+    // two rows — the original session and the winner's replacement. Without
+    // the transaction the loser would leave an orphan replacement behind.
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM refresh_sessions WHERE user_id = $1")
+        .bind(user.id)
+        .fetch_one(&state.db)
+        .await
+        .expect("the sessions must be readable");
+
+    assert_eq!(
+        total, 2,
+        "a lost rotation race must not leave an orphan replacement session"
+    );
+
+    // The loser goes down the reuse-detection path, which revokes every
+    // session of the account — including the winner's replacement.
+    let active: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM refresh_sessions WHERE user_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(user.id)
+    .fetch_one(&state.db)
+    .await
+    .expect("the sessions must be readable");
+
+    assert_eq!(active, 0, "the reuse detection must revoke every session");
+}
+
+#[tokio::test]
+async fn a_rejected_rotation_writes_no_new_session_row() {
+    let state = test_state().await;
+    let app = app(state.clone());
+    let user = register_user(&app, "rejected-rotation").await;
+
+    // A first, successful rotation: the presented session is revoked and one
+    // replacement exists.
+    send(
+        &app,
+        request(
+            Method::POST,
+            "/api/v1/auth/refresh",
+            None,
+            Some(json!({ "refresh_token": user.refresh_token })),
+        ),
+    )
+    .await
+    .expect_status(StatusCode::OK);
+
+    let before: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM refresh_sessions WHERE user_id = $1")
+            .bind(user.id)
+            .fetch_one(&state.db)
+            .await
+            .expect("the sessions must be readable");
+    assert_eq!(before, 2, "a rotation adds exactly one session");
+
+    // Replaying the revoked token is reuse: the rotation must be rejected,
+    // every session revoked, and — the rollback guarantee — no new session
+    // row may appear.
+    let response = send(
+        &app,
+        request(
+            Method::POST,
+            "/api/v1/auth/refresh",
+            None,
+            Some(json!({ "refresh_token": user.refresh_token })),
+        ),
+    )
+    .await;
+    let body = response.expect_status(StatusCode::UNAUTHORIZED);
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("already been used"),
+        "the message must say the token was reused: {}",
+        body["error"]["message"]
+    );
+
+    let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM refresh_sessions WHERE user_id = $1")
+        .bind(user.id)
+        .fetch_one(&state.db)
+        .await
+        .expect("the sessions must be readable");
+
+    assert_eq!(
+        after, before,
+        "a rejected rotation must write no new session row"
+    );
+
+    let active: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM refresh_sessions WHERE user_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(user.id)
+    .fetch_one(&state.db)
+    .await
+    .expect("the sessions must be readable");
+
+    assert_eq!(
+        active, 0,
+        "the reuse detection must revoke every session of the account"
+    );
+}
+
+#[tokio::test]
+async fn an_expired_refresh_token_rotation_writes_no_new_session_row() {
+    let state = test_state().await;
+    let app = app(state.clone());
+    let user = register_user(&app, "expired-rotation-row").await;
+
+    // The session expired an hour ago.
+    sqlx::query(
+        "UPDATE refresh_sessions SET expires_at = NOW() - INTERVAL '1 hour' WHERE token_hash = $1",
+    )
+    .bind(common::hash_of(&user.refresh_token))
+    .execute(&state.db)
+    .await
+    .expect("the session must be expired");
+
+    let response = send(
+        &app,
+        request(
+            Method::POST,
+            "/api/v1/auth/refresh",
+            None,
+            Some(json!({ "refresh_token": user.refresh_token })),
+        ),
+    )
+    .await;
+    response.expect_status(StatusCode::UNAUTHORIZED);
+
+    // The rejected rotation must not have written anything: the expired
+    // session remains the only row the account has.
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM refresh_sessions WHERE user_id = $1")
+        .bind(user.id)
+        .fetch_one(&state.db)
+        .await
+        .expect("the sessions must be readable");
+
+    assert_eq!(
+        total, 1,
+        "an expired-token rotation must write no new session row"
+    );
 }
 
 #[tokio::test]

@@ -1,7 +1,7 @@
 # ATOM open questions
 
 > **Status:** Accepted (living document)
-> **Last updated:** 2026-10-30
+> **Last updated:** 2026-10-31
 > **Owner:** maintained by the `docs` agent
 
 Product and architecture decisions that have not been taken yet. Each question
@@ -495,12 +495,34 @@ limit beyond the shared auth-endpoint limiter.
 
 ### Q-18 - Should the email grammar be tightened?
 
-**State:** Open · **Blocks:** a future password-reset or notification flow
+**State:** Answered · **Blocks:** nothing any more
 
-**Context.** `validate_email` normalises case/whitespace, enforces length,
-and requires one `@` with a dotted domain; it accepts forms such as
+**Answer (2026-10-31, owner decision).** The grammar is tightened. A
+registered address must carry exactly one `@`, with a non-empty local part
+(at most 64 characters, no leading, trailing or consecutive dots) and a
+non-empty domain (at most 253 characters) that contains a dot and has no
+empty label and no label starting or ending with a hyphen. The
+normalization (trim, lower-case), the 3..=254 total-length rule the database
+CHECK mirrors, and the acceptance of `+` tags, subdomains, punycode labels
+and one-character TLDs are unchanged. The rule lives in
+[`../../src/users/service.rs`](../../src/users/service.rs) (`validate_email`,
+with the part-length constants `MAX_EMAIL_LOCAL_LENGTH` and
+`MAX_EMAIL_DOMAIN_LENGTH`); the published contract is restated in
+[`../features/authentication/api.md`](../features/authentication/api.md) and
+[`../features/authentication/specification.md`](../features/authentication/specification.md).
+Previously accepted shapes such as `a@b@c.com`, `a..b@example.com` and
+`a@-example.com` now return `422 validation_failed` naming `email`. The
+behaviour is covered by the unit cases `every_tightened_email_rule_is_enforced`
+and `email_part_lengths_are_bounded`, and by the HTTP cases
+`a_malformed_email_is_rejected_with_a_field_violation` and
+`legitimate_email_shapes_still_register` in
+[`../../tests/auth_api.rs`](../../tests/auth_api.rs).
+
+**Context.** `validate_email` normalised case/whitespace, enforced length,
+and required one `@` with a dotted domain; it accepted forms such as
 `a@b@c.com` (audit P-4). The DB CHECK enforces lower-case and length only.
-Nothing today consumes email beyond login, so the risk is data quality.
+Nothing today consumes email beyond login, so the risk was data quality; a
+future password-reset or notification flow would have inherited it.
 
 **Options.**
 
@@ -513,7 +535,21 @@ Nothing today consumes email beyond login, so the risk is data quality.
 
 ### Q-19 - Should refresh-token rotation become a single transaction?
 
-**State:** Open · **Blocks:** nothing; the recorded ADR-0003 ordering stands until decided
+**State:** Answered · **Blocks:** nothing any more
+
+**Answer (2026-10-31, owner decision).** Yes. The rotation's two statements
+— the replacement insert and the claim of the presented session — run in one
+transaction (`RefreshSessionRepository::rotate`, called from
+`src/auth/service.rs`). The transaction is at least as fail-safe as the
+ordering it supersedes: an interruption leaves the presented session
+unclaimed and valid, so the caller retries, and a lost race rolls the
+loser's replacement insert back before the reuse-detection path revokes
+every session.
+[`../decisions/ADR-0003-auth-token-design.md`](../decisions/ADR-0003-auth-token-design.md)
+carries the dated amendment;
+[`../architecture/data-architecture.md`](../architecture/data-architecture.md)
+§7 and [`../project-truth.md`](../project-truth.md) §12 describe the
+boundary as it now stands.
 
 **Context.** Rotation (insert replacement, then atomically claim the old
 session) is the one multi-statement mutation outside a transaction
@@ -556,5 +592,5 @@ compensated by reuse-detection mass revocation.
 | `Q-15` | Should password hashing carry a server-side pepper? | Open | Nothing today |
 | `Q-16` | Should access tokens be revocable before expiry? | Open | Nothing today |
 | `Q-17` | Should registration equalise its response the way login does? | Open | Nothing today |
-| `Q-18` | Should the email grammar be tightened? | Open | A future password-reset or notification flow |
-| `Q-19` | Should refresh-token rotation become a single transaction? | Open | Nothing today; `ADR-0003` stands |
+| `Q-18` | Should the email grammar be tightened? | **Answered** — tightened, owner decision 2026-10-31 | Nothing any more |
+| `Q-19` | Should refresh-token rotation become a single transaction? | **Answered** — the rotation is one transaction; `ADR-0003` amended (2026-10-31) | Nothing any more |

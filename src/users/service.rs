@@ -29,6 +29,18 @@ use crate::utils::text::{char_len, is_blank};
 /// delivered, whatever the local part would allow.
 pub const MAX_EMAIL_LENGTH: usize = 254;
 
+/// The maximum length of the local part of an email address, in characters.
+///
+/// RFC 5321 §4.5.3.1.1 caps the local part at 64 octets. Like every length
+/// rule in this API, the check counts characters rather than bytes.
+pub const MAX_EMAIL_LOCAL_LENGTH: usize = 64;
+
+/// The maximum length of the domain part of an email address, in characters.
+///
+/// The textual form of a fully qualified domain name is at most 253
+/// characters (RFC 1035 §2.3.4, carried into RFC 5321 §4.5.3.1.2).
+pub const MAX_EMAIL_DOMAIN_LENGTH: usize = 253;
+
 /// The minimum accepted length of a display name.
 pub const MIN_DISPLAY_NAME_LENGTH: usize = 1;
 
@@ -43,35 +55,75 @@ pub fn normalize_email(raw: &str) -> String {
     raw.trim().to_lowercase()
 }
 
+/// Decides whether an already normalized address is well formed.
+///
+/// The grammar is deliberately small — it is not an RFC 5322 parser, because
+/// the only authoritative test of an address is whether mail can be
+/// delivered to it. It is, however, stricter than it once was: since the
+/// owner answered Q-18 (2026-10-31), it refuses the shapes no mailbox can
+/// have. The rules:
+///
+/// * exactly one `@`, with a non-empty local part and a non-empty domain;
+/// * the local part has no empty dot-separated segment, so it has no
+///   leading, trailing or consecutive dots;
+/// * the domain carries at least one dot, and every label is non-empty and
+///   neither starts nor ends with a hyphen;
+/// * the local part is at most [`MAX_EMAIL_LOCAL_LENGTH`] and the domain at
+///   most [`MAX_EMAIL_DOMAIN_LENGTH`] characters.
+///
+/// Everything else stays permissive on purpose: `+` tags, subdomains,
+/// punycode labels and one-character TLDs are accepted, because refusing a
+/// real mailbox is worse than accepting an unusual shape.
+fn is_well_formed_email(address: &str) -> bool {
+    let Some((local, domain)) = address.split_once('@') else {
+        return false;
+    };
+
+    // A second `@` cannot belong to an address: `a@b@c.com` is refused.
+    if domain.contains('@') {
+        return false;
+    }
+
+    if local.is_empty() || domain.is_empty() {
+        return false;
+    }
+
+    if char_len(local) > MAX_EMAIL_LOCAL_LENGTH || char_len(domain) > MAX_EMAIL_DOMAIN_LENGTH {
+        return false;
+    }
+
+    // An empty segment is a leading, a trailing or two consecutive dots.
+    if local.split('.').any(|segment| segment.is_empty()) {
+        return false;
+    }
+
+    // The domain needs at least one dot, and every label must be a non-empty
+    // piece that neither starts nor ends with a hyphen.
+    domain.contains('.')
+        && domain
+            .split('.')
+            .all(|label| !label.is_empty() && !label.starts_with('-') && !label.ends_with('-'))
+}
+
 /// Validates an email address and returns its normalized form.
 ///
-/// The check is deliberately permissive: the only authoritative test of an
-/// address is whether mail can be delivered to it.
+/// The address is trimmed and lower-cased, its total length is checked
+/// against [`MAX_EMAIL_LENGTH`], and its shape is checked against
+/// [`is_well_formed_email`]. The shape check is not a full RFC 5322 parser:
+/// the only authoritative test of an address is whether mail can be
+/// delivered to it.
 ///
 /// # Errors
 ///
-/// Returns [`AppError`] with a field violation when the address is not shaped
-/// like an address, or when it is longer than [`MAX_EMAIL_LENGTH`].
+/// Returns [`AppError`] with a field violation when the address is longer
+/// than [`MAX_EMAIL_LENGTH`] or is not shaped like an address. The total
+/// length is checked first, so an address that breaks both rules is reported
+/// as too long: the limit is the contract the database's
+/// `users_email_length_chk` constraint mirrors, and the shape rules would
+/// otherwise pre-empt it with a message about a part the caller cannot fix
+/// without shortening the address anyway.
 pub fn validate_email(email: &str, messages: &Messages) -> AppResult<String> {
     let normalized = normalize_email(email);
-
-    let well_formed = match normalized.split_once('@') {
-        Some((local, domain)) => {
-            !local.is_empty()
-                && !domain.is_empty()
-                && domain.contains('.')
-                && !domain.starts_with('.')
-        }
-        None => false,
-    };
-
-    if !well_formed {
-        return Err(field_error(
-            "email",
-            messages.validation.email_invalid.clone(),
-            messages,
-        ));
-    }
 
     if char_len(&normalized) > MAX_EMAIL_LENGTH {
         return Err(field_error(
@@ -80,6 +132,14 @@ pub fn validate_email(email: &str, messages: &Messages) -> AppResult<String> {
                 &messages.validation.email_too_long,
                 &[MAX_EMAIL_LENGTH.to_string()],
             ),
+            messages,
+        ));
+    }
+
+    if !is_well_formed_email(&normalized) {
+        return Err(field_error(
+            "email",
+            messages.validation.email_invalid.clone(),
             messages,
         ));
     }
@@ -284,10 +344,28 @@ mod tests {
 
     #[test]
     fn valid_emails_are_accepted() {
+        let messages = test_messages();
+
         assert_eq!(
-            validate_email("Ada@Example.com", &test_messages()).unwrap(),
+            validate_email("Ada@Example.com", &messages).unwrap(),
             "ada@example.com"
         );
+
+        // Shapes the tightened grammar must keep accepting: a `+` tag, a dot
+        // in the local part, a subdomain, a punycode label and a
+        // one-character TLD.
+        for accepted in [
+            "ada+q3@example.com",
+            "ada.lovelace@example.com",
+            "ada@mail.example.com",
+            "ada@xn--exmple-cua.com",
+            "ada@example.x",
+        ] {
+            assert!(
+                validate_email(accepted, &messages).is_ok(),
+                "{accepted} is a legitimate address and must be accepted"
+            );
+        }
     }
 
     #[test]
@@ -300,6 +378,81 @@ mod tests {
                 "{candidate} should be rejected"
             );
         }
+    }
+
+    /// Each address below breaks one named rule of the tightened grammar
+    /// (Q-18, answered 2026-10-31). The rule is named in the assertion
+    /// message, so a failure points at the rule that stopped holding.
+    #[test]
+    fn every_tightened_email_rule_is_enforced() {
+        let messages = test_messages();
+
+        for (candidate, rule) in [
+            ("a@b@c.com", "the address carries exactly one @"),
+            ("a..b@example.com", "the local part has no consecutive dots"),
+            (".a@example.com", "the local part does not start with a dot"),
+            ("a.@example.com", "the local part does not end with a dot"),
+            ("a@ex..ample.com", "the domain has no empty label"),
+            ("a@.example.com", "the domain has no empty label"),
+            ("a@example.com.", "the domain has no empty label"),
+            ("a@-example.com", "no domain label starts with a hyphen"),
+            ("a@example-.com", "no domain label ends with a hyphen"),
+        ] {
+            let error = validate_email(candidate, &messages)
+                .expect_err("a malformed address must be rejected");
+            let body = error.body();
+
+            assert_eq!(body.error.details[0].field, "email", "{candidate}");
+            assert_eq!(
+                body.error.details[0].message, messages.validation.email_invalid,
+                "{candidate} must be refused by the rule: {rule}"
+            );
+        }
+    }
+
+    /// The part-length rules of the tightened grammar: the local part is at
+    /// most 64 and the domain at most 253 characters. The total limit stays
+    /// the binding contract with the database, so the longest well-formed
+    /// address is exactly [`MAX_EMAIL_LENGTH`] characters.
+    #[test]
+    fn email_part_lengths_are_bounded() {
+        let messages = test_messages();
+
+        // A local part of exactly 64 characters is the RFC 5321 limit.
+        let local_at_limit = format!("{}@example.com", "a".repeat(MAX_EMAIL_LOCAL_LENGTH));
+        assert!(
+            validate_email(&local_at_limit, &messages).is_ok(),
+            "a 64-character local part must be accepted"
+        );
+
+        let local_over_limit = format!("{}@example.com", "a".repeat(MAX_EMAIL_LOCAL_LENGTH + 1));
+        let error = validate_email(&local_over_limit, &messages)
+            .expect_err("a 65-character local part must be rejected");
+        assert_eq!(
+            error.body().error.details[0].message,
+            messages.validation.email_invalid,
+            "an over-long local part is a shape failure, not a total-length failure"
+        );
+
+        // A domain of exactly 253 characters is the textual DNS limit. With
+        // any non-empty local part it would pass the 254-character total, so
+        // the shape predicate is asserted directly.
+        let domain_at_limit = format!("{}.com", "a".repeat(MAX_EMAIL_DOMAIN_LENGTH - 4));
+        assert_eq!(char_len(&domain_at_limit), MAX_EMAIL_DOMAIN_LENGTH);
+        assert!(
+            is_well_formed_email(&format!("a@{domain_at_limit}")),
+            "a 253-character domain is well formed"
+        );
+        assert!(
+            !is_well_formed_email(&format!("a@{domain_at_limit}x")),
+            "a 254-character domain must be rejected by the domain-length rule"
+        );
+
+        // The total limit binds first: 1 + 1 + 252 = 254 is the longest
+        // address that both the shape rules and the database CHECK accept.
+        let longest = format!("a@{}.com", "a".repeat(MAX_EMAIL_DOMAIN_LENGTH - 5));
+        assert_eq!(char_len(&longest), MAX_EMAIL_LENGTH);
+        assert!(validate_email(&longest, &messages).is_ok());
     }
 
     #[test]

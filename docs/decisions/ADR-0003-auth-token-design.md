@@ -3,6 +3,8 @@
 > **Status:** Accepted
 > **Date:** 2026-10-21
 > **Owner:** architect
+> **Amended:** 2026-10-31 — the refresh-token rotation is one transaction
+> (owner decision `Q-19`); see the amendment section below.
 
 ## Context
 
@@ -209,10 +211,49 @@ This decision does not bind the future clients, but it constrains them:
   hash appears in a log line or in an error message.
 - **Rotation depends on the database.** The revocation link is a column in
   `refresh_sessions`, so the reuse detection needs the write to have
-  succeeded. The rotation is not wrapped in a transaction; the failure mode
-  is analysed in
+  succeeded. Since the amendment of 2026-10-31 the rotation runs inside a
+  single transaction; the boundary is analysed in
   [`../architecture/data-architecture.md`](../architecture/data-architecture.md)
   §7.
+
+## Amendment — 2026-10-31: the rotation is one transaction (Q-19)
+
+> **Owner decision (`Q-19`).** The non-transactional ordering recorded above
+> — insert the replacement session, then claim the presented session as two
+> independent statements — is superseded: the rotation's two statements run
+> in **one transaction** (`RefreshSessionRepository::rotate`, called from
+> `auth::service::refresh`).
+
+**Why the transaction is at least as fail-safe.** The original ordering was
+chosen because a process death between the two statements left the presented
+session valid and usable: the caller retries, and the rotation is attempted
+again — at the cost of one unclaimed replacement row that only the hourly
+prune removed. The transaction keeps exactly that recovery story and removes
+the orphan row:
+
+- **Interruption.** If the process dies mid-rotation, the database rolls the
+  transaction back: the presented session is left unclaimed and still valid,
+  and no replacement row exists. The caller retries with the same token and
+  the rotation succeeds.
+- **The lost race.** Two concurrent presenters are still arbitrated by the
+  guarded `UPDATE` (`revoked_at IS NULL`), now inside the transaction. The
+  loser sees zero affected rows, its transaction rolls the replacement
+  insert back, and the loser then follows the existing reuse path — mass
+  revocation and the generic reuse error — exactly as before. Exactly one
+  replacement session can exist.
+- **The security properties are unchanged.** Reuse/replay detection, the
+  mass revocation, the inherited absolute lifetime (the replacement's
+  `expires_at` is the presented session's, never recomputed), the
+  owner-scoped predicates and the generic error messages are all preserved.
+
+The regression tests live in
+[`../../tests/auth_api.rs`](../../tests/auth_api.rs): a concurrent rotation
+still admits exactly one winner and leaves no orphan replacement row
+(`a_lost_rotation_race_leaves_no_orphan_replacement_session`), a rejected
+rotation writes no new session row
+(`a_rejected_rotation_writes_no_new_session_row`), and an expired token
+rotates nothing
+(`an_expired_refresh_token_rotation_writes_no_new_session_row`).
 
 ## Related requirements and changes
 

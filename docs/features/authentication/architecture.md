@@ -289,13 +289,14 @@ The wider system context is in
   fails, which can only happen when the configured Argon2 parameters are
   rejected — and `Config` already refuses to start with invalid parameters,
   so the fallback is a belt-and-braces guard rather than a reachable state.
-- **Rotation is not atomic across two statements.** The replacement session
-  is inserted and the old session is claimed by two separate statements. A
-  crash between them leaves the old session valid, so the next refresh with
-  it succeeds and the rotation is retried; it does not create a reusable
-  token, because the claim refuses to match a session that is already
-  revoked. The ordering fails safe by design, which is why it is not wrapped
-  in a transaction; see
+- **Rotation is atomic across two statements.** The replacement session is
+  inserted and the old session is claimed inside one transaction
+  (`RefreshSessionRepository::rotate`; owner decision `Q-19` of 2026-10-31).
+  A rotation that does not complete — a lost race, a failed statement, a
+  crash — is rolled back: the old session stays unclaimed and valid, so the
+  next refresh with it succeeds and the rotation is retried, and no
+  replacement row survives. The claim still refuses to match a session that
+  is already revoked, so the race cannot create a reusable token; see
   [`../../architecture/data-architecture.md`](../../architecture/data-architecture.md)
   §7.
 - **The rate limiter fails open on a poisoned lock.** `RateLimiter::check`

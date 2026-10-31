@@ -99,10 +99,18 @@ where the requirement is implemented and where it is covered.
 
 - The email address is trimmed and lower-cased before it is stored or
   compared. `Ada@Example.COM` and `ada@example.com` are the same account.
-- The email must contain an `@`, a non-empty local part, and a domain that
-  contains a `.` and does not start with one. The check is deliberately
-  permissive: only delivery can authoritatively validate an address.
-- The email is at most 254 characters.
+- The email must carry exactly one `@`, with a non-empty local part and a
+  non-empty domain. The local part is at most 64 characters and has no
+  leading, trailing or consecutive dots. The domain is at most 253
+  characters, contains a dot, and has no empty label and no label that
+  starts or ends with a hyphen. The grammar is deliberately small rather
+  than a full RFC 5322 parser — `+` tags, subdomains, punycode labels and
+  one-character TLDs stay accepted — but the shapes no mailbox can have
+  (`a@b@c.com`, `a..b@example.com`, `a@-example.com`) are refused
+  (Q-18, answered 2026-10-31).
+- The email is at most 254 characters in total. The total length is checked
+  first, so an address that is both over-long and malformed is reported as
+  too long.
 - The password must be between 12 and 256 characters and must contain at
   least one uppercase letter, one lowercase letter and one digit. Every
   unmet rule is reported, so a client can show all of them at once.
