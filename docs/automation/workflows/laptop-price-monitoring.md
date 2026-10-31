@@ -43,6 +43,7 @@ first so every observation it writes carries the run's id.
 | Normalize and validate price | `n8n-nodes-base.code` | Transport hygiene: validate the price string, build the idempotency fingerprint, mark suspicious or missing prices as failures, and assemble the observation body (with the run id from *Start run*). | The parsing, per source. **Why Code:** item-level price-string validation and fingerprint construction are parsing no core node expresses; the alert rules themselves stay in ATOM. |
 | Post observation (idempotent) | `n8n-nodes-base.httpRequest` | `POST /api/v1/listings/{listing_id}/observations` — `201` new, `200` absorbed, same body. `fullResponse` keeps the status code; `neverError` hands the `4xx` classification to the next node instead of failing the node. | Retry options per the contract §5 (the skeleton ships 3 tries). |
 | Verify absorption | `n8n-nodes-base.code` | The contract §4 rule: a `200`/`201` is success **only when the returned row is the tuple that was sent** — `amount`, `observed_at`, `listing_id`, `fingerprint` compared; a mismatch is a fingerprint-construction failure, not a success. `401` stops the run; other `4xx` are item failures. | **Why Code:** the row-vs-sent tuple comparison across the three status classes is item-level verification no core node expresses. |
+| Count run alerts | `n8n-nodes-base.httpRequest` | `GET /api/v1/alerts` — aggregates what the rules raised, so the finish body's `alerts` count reflects this run (the alerts whose `triggered_at` is at or after the run's `started_at`). | The page size, if the alert volume could exceed one page. |
 | Patch run finish | `n8n-nodes-base.httpRequest` | `PATCH /api/v1/automation/runs/{run_id}` — closes the run opened by *Start run*: outcome, counts, error summary. | The outcome mapping (`ok` / `partial` / `failed`) and the counts. |
 | Any failures? | `n8n-nodes-base.if` | True when the finished run reports failures. | The condition against the run summary. |
 | Error path (notify owner) | `n8n-nodes-base.noOp` | Placeholder for the notification channel. It carries **no ATOM credential**. | The channel — a per-deployment decision. |
@@ -59,10 +60,15 @@ success.
 
 Import via n8n (*Import from File/Clipboard*). The node `id`s are stable
 placeholders; n8n regenerates what it needs on import. Structural
-validation of this skeleton with an n8n workflow validator recorded
+validation of the 15-node design with an n8n workflow validator recorded
 **15 nodes, 15 connections, 0 errors, 1 warning** (2026-10-31); the one
 warning is the intentional connection into the disabled fetch node, and
-the parameter-level placeholders are listed in §3. The `splitInBatches`
+the parameter-level placeholders are listed in §3. The node *Count run
+alerts* was added during the local integration
+([`../local-setup.md`](../local-setup.md) §6), giving **16 nodes and 17
+connection targets**, verified by a structural check (the JSON parses,
+every connection endpoint resolves to a node, `id`s and names are
+unique). The `splitInBatches`
 outputs are the node's own convention: **output 0 is the *done* branch,
 output 1 is the *loop* branch.**
 
@@ -234,6 +240,21 @@ output 1 is the *loop* branch.**
       "notes": "Why Code: comparing the returned row against the tuple that was sent, across the 200/201/4xx cases, is item-level verification no core node expresses (contract §4)."
     },
     {
+      "id": "00000000-0000-0000-0000-000000000016",
+      "name": "Count run alerts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 40],
+      "parameters": {
+        "url": "={{ $env.ATOM_API_URL }}/api/v1/alerts",
+        "sendQuery": true,
+        "queryParameters": { "parameters": [ { "name": "limit", "value": "250" } ] },
+        "options": { "authentication": "genericCredentialType", "genericAuthType": "httpHeaderAuth" }
+      },
+      "credentials": { "httpHeaderAuth": { "id": "PLACEHOLDER-credential-id", "name": "ATOM API key" } },
+      "notes": "Aggregates what the rules raised: the finish body's alerts count is the alerts whose triggered_at is at or after the run's started_at. ATOM evaluates the rules; the workflow only reads alerts (contract section 6)."
+    },
+    {
       "id": "00000000-0000-0000-0000-000000000013",
       "name": "Patch run finish",
       "type": "n8n-nodes-base.httpRequest",
@@ -280,9 +301,10 @@ output 1 is the *loop* branch.**
     "Get active products": { "main": [ [ { "node": "Split out products", "type": "main", "index": 0 } ] ] },
     "Split out products": { "main": [ [ { "node": "Loop over products", "type": "main", "index": 0 } ] ] },
     "Loop over products": { "main": [
-      [ { "node": "Patch run finish", "type": "main", "index": 0 } ],
+      [ { "node": "Count run alerts", "type": "main", "index": 0 } ],
       [ { "node": "Get product listings", "type": "main", "index": 0 } ]
     ] },
+    "Count run alerts": { "main": [ [ { "node": "Patch run finish", "type": "main", "index": 0 } ] ] },
     "Get product listings": { "main": [ [ { "node": "Split out listings", "type": "main", "index": 0 } ] ] },
     "Split out listings": { "main": [ [ { "node": "Loop over listings", "type": "main", "index": 0 } ] ] },
     "Loop over listings": { "main": [
@@ -312,7 +334,9 @@ Everything that must be filled before a first manual run:
 4. **Price parsing** — the *Normalize and validate price* code node's
    validation and fingerprint construction, per source format.
 5. **The finish body** — the outcome mapping (`ok` / `partial` / `failed`)
-   and the three counts, computed from what the chain recorded.
+   and the counts: `observations` and `failures` come from the chain,
+   `alerts` from *Count run alerts* (`GET /api/v1/alerts`), and
+   `error_summary` from the failures.
 6. **The IF condition** — against the run summary shape.
 7. **The notification channel** — owner decision; no ATOM credential in it.
 8. **The credential reference** — the n8n Header Auth credential holding
